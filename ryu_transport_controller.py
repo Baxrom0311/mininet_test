@@ -14,6 +14,8 @@ try:
     from ryu.lib import hub
     from ryu.lib.packet import arp, ethernet, ether_types, icmp, ipv4, packet, tcp, udp
     from ryu.ofproto import ofproto_v1_3
+
+    BaseControllerApp = app_manager.RyuApp
 except ImportError:
     from os_ken.base import app_manager
     from os_ken.controller import ofp_event
@@ -22,12 +24,14 @@ except ImportError:
     from os_ken.lib.packet import arp, ethernet, ether_types, icmp, ipv4, packet, tcp, udp
     from os_ken.ofproto import ofproto_v1_3
 
+    BaseControllerApp = app_manager.OSKenApp
+
 
 EVENT_LOG = Path("/tmp/ryu_transport_events.jsonl")
 FLOW_LOG = Path("/tmp/ryu_flow_stats.jsonl")
 
 
-class TransportMonitor(app_manager.RyuApp):
+class TransportMonitor(BaseControllerApp):
     """OpenFlow 1.3 learning switch with lightweight L4 observability."""
 
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]

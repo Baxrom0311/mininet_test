@@ -115,7 +115,19 @@ def start_controller(args: argparse.Namespace) -> subprocess.Popen[str]:
         stderr=subprocess.STDOUT,
         text=True,
     )
-    wait_for_port(args.controller_ip, args.controller_port)
+    try:
+        wait_for_port(args.controller_ip, args.controller_port)
+    except RuntimeError:
+        output = ""
+        if process.poll() is not None:
+            output = process.stdout.read() if process.stdout else ""
+        else:
+            process.terminate()
+            output, _ = process.communicate(timeout=5)
+        if output:
+            info("\n*** Controller start xatosi\n")
+            info(output[-4000:])
+        raise
     return process
 
 
