@@ -41,8 +41,8 @@ class LearningTopo(Topo):
     """
 
     def build(self, link_config: LinkConfig = LinkConfig()) -> None:
-        s1 = self.addSwitch("s1")
-        s2 = self.addSwitch("s2")
+        s1 = self.addSwitch("s1", failMode="standalone")
+        s2 = self.addSwitch("s2", failMode="standalone")
 
         hosts = {
             "h1": self.addHost("h1", ip="10.0.0.1/24"),
@@ -90,6 +90,7 @@ def create_network(args: argparse.Namespace) -> Mininet:
     )
     return Mininet(
         topo=topo,
+        controller=None,
         link=TCLink,
         switch=OVSSwitch,
         autoSetMacs=True,
