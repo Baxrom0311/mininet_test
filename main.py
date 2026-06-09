@@ -29,7 +29,7 @@ FLOW_LOG = Path("/tmp/ryu_flow_stats.jsonl")
 class NineSwitchLanTopo(Topo):
     """Nine OpenFlow switches with a small LAN hanging from every switch."""
 
-    def build(self, hosts_per_switch: int = 2, bandwidth: int = 20, delay: str = "2ms") -> None:
+    def build(self, hosts_per_switch: int = 2, bandwidth: int = 10, delay: str = "2ms") -> None:
         switches = {
             index: self.addSwitch(f"s{index}", protocols="OpenFlow13")
             for index in range(1, 10)
@@ -259,7 +259,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="9 switchli Ryu/os-ken Mininet lab.")
     parser.add_argument("--mode", choices=("test", "cli"), default="test")
     parser.add_argument("--hosts-per-switch", type=int, default=2)
-    parser.add_argument("--bandwidth", type=int, default=20)
+    parser.add_argument("--bandwidth", type=int, default=10)
     parser.add_argument("--delay", default="2ms")
     parser.add_argument("--controller-ip", default="127.0.0.1")
     parser.add_argument("--controller-port", type=int, default=6633)
