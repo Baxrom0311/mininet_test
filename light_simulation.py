@@ -1774,7 +1774,9 @@ def visualize_topology(topo, topo_name, routing):
     ax.axis("off")
     plt.tight_layout()
 
-    out_path = f"{topo_name}_topology.png"
+    # Docker ichida /data ga, aks holda joriy papkaga saqlash
+    out_dir = DATA_DIR if os.path.isdir(DATA_DIR) else "."
+    out_path = f"{out_dir}/{topo_name}_topology.png"
     plt.savefig(out_path, dpi=150, bbox_inches="tight",
                 facecolor=fig.get_facecolor())
     plt.close()
