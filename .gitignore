@@ -1,0 +1,18 @@
+# Datasets (too large for git)
+datasets/
+datasets_*/
+
+# Generated images
+*_topology.png
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Data
+*.pcap
+*.jsonl
+
+# OS
+.DS_Store

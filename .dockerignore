@@ -1,0 +1,11 @@
+datasets/
+datasets_*/
+*.png
+*.csv
+*.parquet
+*.jsonl
+*.pcap
+__pycache__/
+*.pyc
+.git/
+.claude/

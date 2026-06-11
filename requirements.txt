@@ -1,0 +1,19 @@
+# Core - Mininet SDN simulation
+os-ken>=2.7.0
+eventlet>=0.36.0
+msgpack>=1.0.0
+ovs>=3.3.0
+
+# Traffic & packet tools
+scapy>=2.5.0
+requests>=2.31.0
+
+# Dataset builder
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=14.0.0
+
+# Topology visualization
+matplotlib>=3.7.0
+networkx>=3.1
+scipy>=1.11.0
