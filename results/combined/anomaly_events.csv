@@ -1,0 +1,630 @@
+routing,ts,type,attacker,attacker_ip,target,target_ip,proto,duration_sec,details,severity,is_anomaly,sim_hour
+l2_learn,1785385466.1387691,port_scan,home2,10.9.0.2,root1,10.1.0.1,tcp,8,ports=326-343,medium,True,1.4
+l2_learn,1785385472.16253,udp_flood,corp2,10.7.0.2,cdn1,10.4.0.1,udp,9,port=123 count=138,critical,True,1.5
+l2_learn,1785385502.1630814,udp_flood,corp2,10.7.0.2,cdn1,10.4.0.1,udp,2,port=53 count=158,critical,True,2.0
+l2_learn,1785385541.275257,udp_flood,home1,10.9.0.1,cdn1,10.4.0.1,udp,14,port=1900 count=138,critical,True,2.7
+l2_learn,1785385553.1301582,ping_sweep,mob1,10.8.0.1,origin,10.5.0.1,icmp,6,subnet=10.5.0.0/24,low,True,2.9
+l2_learn,1785385566.6917212,slowloris,home1,10.9.0.1,root1,10.1.0.1,tcp,11,slowloris_connections,high,True,3.1
+l2_learn,1785385578.1792903,slowloris,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,5,slowloris_connections,high,True,3.3
+l2_learn,1785385583.181318,port_scan,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,2,ports=842-862,medium,True,3.4
+l2_learn,1785385588.1815426,udp_flood,home2,10.9.0.2,root1,10.1.0.1,udp,8,port=123 count=115,critical,True,3.5
+l2_learn,1785385598.1835573,ping_sweep,home1,10.9.0.1,isp_gw,10.2.0.1,icmp,11,subnet=10.2.0.0/24,low,True,3.6
+l2_learn,1785385606.1881306,ping_sweep,corp2,10.7.0.2,cdn1,10.4.0.1,icmp,9,subnet=10.4.0.0/24,low,True,3.8
+l2_learn,1785385621.2225704,dns_amplify,mob2,10.8.0.2,cdn2,10.4.0.2,udp,8,dns_amplification,high,True,4.0
+l2_learn,1785385659.0786164,brute_force,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,3,http_brute_force,high,True,4.7
+l2_learn,1785385707.4701169,ping_sweep,corp1,10.7.0.1,origin,10.5.0.1,icmp,13,subnet=10.5.0.0/24,low,True,5.5
+l2_learn,1785385740.5181203,data_exfil,corp2,10.7.0.2,origin,10.5.0.1,tcp,7,exfil_rate=554K,critical,True,6.0
+l2_learn,1785385749.7228518,dns_amplify,home1,10.9.0.1,cdn1,10.4.0.1,udp,14,dns_amplification,high,True,6.2
+l2_learn,1785385764.8939586,syn_flood,home2,10.9.0.2,cdn2,10.4.0.2,tcp,13,port=8080 count=150,critical,True,6.4
+l2_learn,1785385787.9193597,dns_amplify,home1,10.9.0.1,cdn1,10.4.0.1,udp,7,dns_amplification,high,True,6.8
+l2_learn,1785385801.9208782,slowloris,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,2,slowloris_connections,high,True,7.0
+l2_learn,1785385819.9218123,syn_flood,home2,10.9.0.2,cdn2,10.4.0.2,tcp,6,port=80 count=85,critical,True,7.3
+l2_learn,1785385860.4024236,syn_flood,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,6,port=22 count=77,critical,True,8.0
+l2_learn,1785385893.4637015,dns_amplify,mob1,10.8.0.1,root1,10.1.0.1,udp,15,dns_amplification,high,True,8.6
+l2_learn,1785385913.4643128,ping_sweep,home2,10.9.0.2,isp_gw,10.2.0.1,icmp,12,subnet=10.2.0.0/24,low,True,8.9
+l2_learn,1785385954.4650433,udp_flood,corp2,10.7.0.2,origin,10.5.0.1,udp,2,port=123 count=189,critical,True,9.6
+l2_learn,1785385961.630153,syn_flood,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,7,port=443 count=97,critical,True,9.7
+l2_learn,1785386001.7391195,port_scan,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,4,ports=73-88,medium,True,10.4
+l2_learn,1785386012.7440093,port_scan,home1,10.9.0.1,root1,10.1.0.1,tcp,14,ports=135-140,medium,True,10.5
+l2_learn,1785386060.6585305,port_scan,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,9,ports=343-363,medium,True,11.3
+l2_learn,1785386099.6671133,brute_force,home2,10.9.0.2,root1,10.1.0.1,tcp,8,http_brute_force,high,True,12.0
+l2_learn,1785386165.6817334,port_scan,home2,10.9.0.2,cdn2,10.4.0.2,tcp,3,ports=734-742,medium,True,13.1
+l2_learn,1785386213.6821818,syn_flood,home2,10.9.0.2,origin,10.5.0.1,tcp,12,port=22 count=137,critical,True,13.9
+l2_learn,1785386227.6846092,brute_force,corp2,10.7.0.2,root1,10.1.0.1,tcp,2,http_brute_force,high,True,14.1
+l2_learn,1785386261.197787,dns_amplify,corp2,10.7.0.2,root1,10.1.0.1,udp,6,dns_amplification,high,True,14.7
+l2_learn,1785386330.3342776,slowloris,corp2,10.7.0.2,root1,10.1.0.1,tcp,15,slowloris_connections,high,True,15.8
+l2_learn,1785386337.346136,ping_sweep,home2,10.9.0.2,root1,10.1.0.1,icmp,7,subnet=10.1.0.0/24,low,True,16.0
+l2_learn,1785386351.3470871,slowloris,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,5,slowloris_connections,high,True,16.2
+l2_learn,1785386392.49815,brute_force,home1,10.9.0.1,origin,10.5.0.1,tcp,9,http_brute_force,high,True,16.9
+l2_learn,1785386413.6100526,slowloris,mob1,10.8.0.1,root1,10.1.0.1,tcp,13,slowloris_connections,high,True,17.2
+l2_learn,1785386457.6546853,syn_flood,home2,10.9.0.2,cdn1,10.4.0.1,tcp,12,port=8080 count=127,critical,True,18.0
+l2_learn,1785386509.7474737,slowloris,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,5,slowloris_connections,high,True,18.8
+l2_learn,1785386594.883428,ping_sweep,mob1,10.8.0.1,cdn2,10.4.0.2,icmp,12,subnet=10.4.0.0/24,low,True,20.2
+l2_learn,1785386633.9724712,syn_flood,home1,10.9.0.1,cdn2,10.4.0.2,tcp,4,port=80 count=123,critical,True,20.9
+l2_learn,1785386662.198362,dns_amplify,home2,10.9.0.2,isp_gw,10.2.0.1,udp,5,dns_amplification,high,True,21.4
+rip,1785385425.779094,dns_amplify,mob1,10.8.0.1,origin,10.5.0.1,udp,2,dns_amplification,high,True,0.4
+rip,1785385433.7795954,port_scan,home2,10.9.0.2,origin,10.5.0.1,tcp,9,ports=806-821,medium,True,0.6
+rip,1785385443.0366457,brute_force,mob1,10.8.0.1,root1,10.1.0.1,tcp,15,http_brute_force,high,True,0.7
+rip,1785385508.0424073,brute_force,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,2,http_brute_force,high,True,1.8
+rip,1785385514.0427787,dns_amplify,mob1,10.8.0.1,root1,10.1.0.1,udp,4,dns_amplification,high,True,1.9
+rip,1785385556.1225624,syn_flood,mob2,10.8.0.2,isp_gw,10.2.0.1,tcp,2,port=22 count=80,critical,True,2.6
+rip,1785385590.139827,brute_force,mob2,10.8.0.2,root1,10.1.0.1,tcp,15,http_brute_force,high,True,3.2
+rip,1785385595.1468482,slowloris,home1,10.9.0.1,isp_gw,10.2.0.1,tcp,11,slowloris_connections,high,True,3.3
+rip,1785385615.1485903,ping_sweep,mob1,10.8.0.1,root1,10.1.0.1,icmp,12,subnet=10.1.0.0/24,low,True,3.6
+rip,1785385620.150988,brute_force,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,12,http_brute_force,high,True,3.7
+rip,1785385646.151781,udp_flood,mob2,10.8.0.2,origin,10.5.0.1,udp,7,port=1900 count=152,critical,True,4.1
+rip,1785385673.1576352,port_scan,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,11,ports=687-697,medium,True,4.6
+rip,1785385704.1626246,data_exfil,home2,10.9.0.2,cdn1,10.4.0.1,tcp,10,exfil_rate=586K,critical,True,5.1
+rip,1785385748.6637387,dns_amplify,mob1,10.8.0.1,root1,10.1.0.1,udp,3,dns_amplification,high,True,5.8
+rip,1785385781.7907217,data_exfil,home1,10.9.0.1,root1,10.1.0.1,tcp,13,exfil_rate=958K,critical,True,6.4
+rip,1785385800.890432,dns_amplify,corp1,10.7.0.1,root1,10.1.0.1,udp,6,dns_amplification,high,True,6.7
+rip,1785385808.896309,brute_force,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,2,http_brute_force,high,True,6.8
+rip,1785385814.8969924,dns_amplify,mob2,10.8.0.2,cdn1,10.4.0.1,udp,6,dns_amplification,high,True,6.9
+rip,1785385833.9705534,slowloris,corp1,10.7.0.1,origin,10.5.0.1,tcp,2,slowloris_connections,high,True,7.2
+rip,1785385841.971061,port_scan,home2,10.9.0.2,cdn1,10.4.0.1,tcp,10,ports=668-679,medium,True,7.4
+rip,1785386003.9181468,data_exfil,home2,10.9.0.2,root1,10.1.0.1,tcp,13,exfil_rate=331K,critical,True,10.1
+rip,1785386071.9839091,slowloris,home1,10.9.0.1,root1,10.1.0.1,tcp,6,slowloris_connections,high,True,11.2
+rip,1785386090.9901404,ping_sweep,home2,10.9.0.2,cdn2,10.4.0.2,icmp,3,subnet=10.4.0.0/24,low,True,11.5
+rip,1785386099.9911294,udp_flood,home2,10.9.0.2,isp_gw,10.2.0.1,udp,6,port=123 count=53,critical,True,11.7
+rip,1785386112.1993434,dns_amplify,mob1,10.8.0.1,cdn1,10.4.0.1,udp,14,dns_amplification,high,True,11.9
+rip,1785386128.206376,port_scan,mob1,10.8.0.1,origin,10.5.0.1,tcp,3,ports=818-834,medium,True,12.1
+rip,1785386139.2065382,udp_flood,mob2,10.8.0.2,cdn2,10.4.0.2,udp,4,port=161 count=57,critical,True,12.3
+rip,1785386155.2068105,syn_flood,corp2,10.7.0.2,root1,10.1.0.1,tcp,2,port=443 count=66,critical,True,12.6
+rip,1785386169.2079272,slowloris,home1,10.9.0.1,root1,10.1.0.1,tcp,14,slowloris_connections,high,True,12.8
+rip,1785386217.9876862,dns_amplify,mob2,10.8.0.2,cdn1,10.4.0.1,udp,2,dns_amplification,high,True,13.6
+rip,1785386307.222919,brute_force,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,6,http_brute_force,high,True,15.1
+rip,1785386465.3365493,slowloris,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,4,slowloris_connections,high,True,17.8
+rip,1785386505.337489,syn_flood,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,14,port=80 count=130,critical,True,18.4
+rip,1785386523.4789,port_scan,mob2,10.8.0.2,isp_gw,10.2.0.1,tcp,15,ports=836-847,medium,True,18.7
+rip,1785386535.4805377,ping_sweep,corp1,10.7.0.1,cdn1,10.4.0.1,icmp,13,subnet=10.4.0.0/24,low,True,18.9
+rip,1785386555.507905,ping_sweep,home1,10.9.0.1,cdn1,10.4.0.1,icmp,6,subnet=10.4.0.0/24,low,True,19.3
+rip,1785386624.971182,udp_flood,corp1,10.7.0.1,origin,10.5.0.1,udp,2,port=1900 count=52,critical,True,20.4
+rip,1785386630.986599,port_scan,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,8,ports=851-866,medium,True,20.5
+rip,1785388699.3833194,port_scan,home1,10.9.0.1,cdn2,10.4.0.2,tcp,4,ports=754-765,medium,True,7.0
+ospf,1785385430.9146874,syn_flood,corp1,10.7.0.1,origin,10.5.0.1,tcp,8,port=443 count=79,critical,True,0.6
+ospf,1785385458.089532,udp_flood,mob1,10.8.0.1,origin,10.5.0.1,udp,9,port=53 count=160,critical,True,1.1
+ospf,1785385467.0897708,port_scan,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,14,ports=498-512,medium,True,1.2
+ospf,1785385477.1782544,udp_flood,home2,10.9.0.2,root1,10.1.0.1,udp,9,port=161 count=127,critical,True,1.4
+ospf,1785385500.2063568,dns_amplify,mob2,10.8.0.2,isp_gw,10.2.0.1,udp,15,dns_amplification,high,True,1.8
+ospf,1785385506.2074242,udp_flood,home1,10.9.0.1,origin,10.5.0.1,udp,7,port=123 count=105,critical,True,1.9
+ospf,1785385512.208134,data_exfil,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,7,exfil_rate=245K,critical,True,2.0
+ospf,1785385568.4991047,brute_force,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,7,http_brute_force,high,True,2.9
+ospf,1785385608.5057788,port_scan,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,9,ports=374-382,medium,True,3.6
+ospf,1785385613.5062778,port_scan,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,11,ports=3-23,medium,True,3.6
+ospf,1785385622.508366,dns_amplify,corp1,10.7.0.1,cdn1,10.4.0.1,udp,3,dns_amplification,high,True,3.8
+ospf,1785385630.5090384,syn_flood,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,3,port=22 count=196,critical,True,3.9
+ospf,1785385648.7544982,port_scan,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,5,ports=823-837,medium,True,4.2
+ospf,1785385671.6273377,slowloris,home1,10.9.0.1,root1,10.1.0.1,tcp,5,slowloris_connections,high,True,4.6
+ospf,1785385699.7985506,syn_flood,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,7,port=443 count=177,critical,True,5.1
+ospf,1785385722.8016565,brute_force,home1,10.9.0.1,isp_gw,10.2.0.1,tcp,5,http_brute_force,high,True,5.5
+ospf,1785385740.8024302,data_exfil,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,10,exfil_rate=716K,critical,True,5.8
+ospf,1785385761.8556015,syn_flood,corp1,10.7.0.1,origin,10.5.0.1,tcp,10,port=443 count=136,critical,True,6.1
+ospf,1785385781.9077468,slowloris,mob2,10.8.0.2,root1,10.1.0.1,tcp,13,slowloris_connections,high,True,6.5
+ospf,1785385790.9082975,port_scan,mob2,10.8.0.2,isp_gw,10.2.0.1,tcp,10,ports=445-461,medium,True,6.6
+ospf,1785385808.911173,brute_force,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,7,http_brute_force,high,True,6.9
+ospf,1785385821.918713,brute_force,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,6,http_brute_force,high,True,7.1
+ospf,1785385828.9262986,dns_amplify,home1,10.9.0.1,cdn1,10.4.0.1,udp,9,dns_amplification,high,True,7.2
+ospf,1785385876.6864376,port_scan,mob1,10.8.0.1,origin,10.5.0.1,tcp,5,ports=92-109,medium,True,8.0
+ospf,1785385986.7384176,udp_flood,mob1,10.8.0.1,cdn1,10.4.0.1,udp,12,port=123 count=149,critical,True,9.9
+ospf,1785386096.1478426,port_scan,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,10,ports=875-881,medium,True,11.7
+ospf,1785386116.1512525,brute_force,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,6,http_brute_force,high,True,12.0
+ospf,1785386133.1541166,port_scan,home1,10.9.0.1,root1,10.1.0.1,tcp,14,ports=327-340,medium,True,12.3
+ospf,1785386148.1584215,port_scan,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,11,ports=482-500,medium,True,12.6
+ospf,1785386170.159237,port_scan,home2,10.9.0.2,cdn2,10.4.0.2,tcp,11,ports=36-51,medium,True,12.9
+ospf,1785386215.922147,port_scan,home2,10.9.0.2,cdn2,10.4.0.2,tcp,9,ports=76-83,medium,True,13.7
+ospf,1785386224.9245484,syn_flood,mob2,10.8.0.2,root1,10.1.0.1,tcp,15,port=80 count=178,critical,True,13.8
+ospf,1785386247.9475267,dns_amplify,corp1,10.7.0.1,cdn2,10.4.0.2,udp,13,dns_amplification,high,True,14.2
+ospf,1785386262.0145214,brute_force,home2,10.9.0.2,root1,10.1.0.1,tcp,14,http_brute_force,high,True,14.5
+ospf,1785386274.027115,ping_sweep,home1,10.9.0.1,isp_gw,10.2.0.1,icmp,8,subnet=10.2.0.0/24,low,True,14.7
+ospf,1785386291.6029863,dns_amplify,mob2,10.8.0.2,root1,10.1.0.1,udp,9,dns_amplification,high,True,14.9
+ospf,1785386308.6051812,brute_force,home1,10.9.0.1,cdn2,10.4.0.2,tcp,13,http_brute_force,high,True,15.2
+ospf,1785386329.6066475,udp_flood,mob2,10.8.0.2,isp_gw,10.2.0.1,udp,6,port=1900 count=62,critical,True,15.6
+ospf,1785386337.7526278,port_scan,corp2,10.7.0.2,root1,10.1.0.1,tcp,2,ports=819-827,medium,True,15.7
+ospf,1785386425.8022437,syn_flood,mob1,10.8.0.1,root1,10.1.0.1,tcp,12,port=22 count=200,critical,True,17.2
+ospf,1785386451.8074875,syn_flood,mob1,10.8.0.1,origin,10.5.0.1,tcp,14,port=22 count=69,critical,True,17.6
+ospf,1785386470.808188,syn_flood,mob2,10.8.0.2,isp_gw,10.2.0.1,tcp,7,port=443 count=99,critical,True,17.9
+ospf,1785386488.513744,brute_force,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,14,http_brute_force,high,True,18.2
+ospf,1785386496.515227,udp_flood,home2,10.9.0.2,origin,10.5.0.1,udp,5,port=123 count=176,critical,True,18.4
+ospf,1785386504.516215,port_scan,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,3,ports=312-327,medium,True,18.5
+ospf,1785386586.7145178,dns_amplify,home1,10.9.0.1,cdn2,10.4.0.2,udp,4,dns_amplification,high,True,19.9
+ospf,1785386607.4556596,syn_flood,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,7,port=443 count=195,critical,True,20.2
+ospf,1785386623.7421098,udp_flood,home2,10.9.0.2,isp_gw,10.2.0.1,udp,9,port=53 count=181,critical,True,20.5
+ospf,1785386664.805298,syn_flood,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,4,port=22 count=194,critical,True,21.2
+isis,1785385418.0230312,port_scan,home1,10.9.0.1,root1,10.1.0.1,tcp,13,ports=528-535,medium,True,0.3
+isis,1785385427.562423,port_scan,corp1,10.7.0.1,origin,10.5.0.1,tcp,8,ports=723-733,medium,True,0.5
+isis,1785385433.564512,ping_sweep,home1,10.9.0.1,cdn2,10.4.0.2,icmp,4,subnet=10.4.0.0/24,low,True,0.6
+isis,1785385456.7426171,port_scan,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,12,ports=728-733,medium,True,1.0
+isis,1785385475.08611,brute_force,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,6,http_brute_force,high,True,1.3
+isis,1785385493.0867603,port_scan,corp2,10.7.0.2,root1,10.1.0.1,tcp,4,ports=506-520,medium,True,1.6
+isis,1785385513.3348377,brute_force,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,5,http_brute_force,high,True,1.9
+isis,1785385531.4305985,dns_amplify,corp1,10.7.0.1,root1,10.1.0.1,udp,14,dns_amplification,high,True,2.2
+isis,1785385543.431219,port_scan,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,4,ports=830-838,medium,True,2.4
+isis,1785385552.5823112,dns_amplify,corp1,10.7.0.1,cdn1,10.4.0.1,udp,12,dns_amplification,high,True,2.6
+isis,1785385558.5824664,brute_force,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,4,http_brute_force,high,True,2.7
+isis,1785385570.7185516,udp_flood,corp1,10.7.0.1,cdn1,10.4.0.1,udp,2,port=1900 count=82,critical,True,2.9
+isis,1785385576.7190835,port_scan,home2,10.9.0.2,cdn1,10.4.0.1,tcp,6,ports=43-58,medium,True,3.0
+isis,1785385608.7223632,ping_sweep,home1,10.9.0.1,cdn1,10.4.0.1,icmp,9,subnet=10.4.0.0/24,low,True,3.5
+isis,1785385615.7250042,brute_force,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,14,http_brute_force,high,True,3.6
+isis,1785385635.7252748,dns_amplify,home2,10.9.0.2,isp_gw,10.2.0.1,udp,9,dns_amplification,high,True,4.0
+isis,1785385642.7258654,port_scan,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,4,ports=238-247,medium,True,4.1
+isis,1785385662.8019717,ping_sweep,corp2,10.7.0.2,isp_gw,10.2.0.1,icmp,8,subnet=10.2.0.0/24,low,True,4.4
+isis,1785385690.8061266,port_scan,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,14,ports=314-324,medium,True,4.9
+isis,1785385705.8076117,ping_sweep,mob2,10.8.0.2,isp_gw,10.2.0.1,icmp,14,subnet=10.2.0.0/24,low,True,5.1
+isis,1785385725.034748,syn_flood,home1,10.9.0.1,cdn2,10.4.0.2,tcp,7,port=8080 count=69,critical,True,5.5
+isis,1785385747.035438,udp_flood,home2,10.9.0.2,origin,10.5.0.1,udp,11,port=53 count=197,critical,True,5.8
+isis,1785385760.035626,port_scan,home2,10.9.0.2,cdn2,10.4.0.2,tcp,8,ports=97-117,medium,True,6.0
+isis,1785385796.3631597,syn_flood,corp1,10.7.0.1,root1,10.1.0.1,tcp,4,port=22 count=78,critical,True,6.7
+isis,1785385824.5423815,dns_amplify,corp1,10.7.0.1,isp_gw,10.2.0.1,udp,5,dns_amplification,high,True,7.1
+isis,1785385869.388888,udp_flood,mob1,10.8.0.1,root1,10.1.0.1,udp,6,port=1900 count=151,critical,True,7.9
+isis,1785385949.670653,port_scan,corp1,10.7.0.1,root1,10.1.0.1,tcp,8,ports=134-141,medium,True,9.2
+isis,1785385960.6727452,slowloris,corp2,10.7.0.2,origin,10.5.0.1,tcp,11,slowloris_connections,high,True,9.4
+isis,1785386044.1063266,syn_flood,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,11,port=443 count=94,critical,True,10.8
+isis,1785386055.1134224,slowloris,home2,10.9.0.2,cdn1,10.4.0.1,tcp,14,slowloris_connections,high,True,11.0
+isis,1785386074.137769,brute_force,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,15,http_brute_force,high,True,11.3
+isis,1785386151.5948544,slowloris,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,12,slowloris_connections,high,True,12.6
+isis,1785386165.596492,slowloris,mob1,10.8.0.1,origin,10.5.0.1,tcp,15,slowloris_connections,high,True,12.8
+isis,1785386191.5986598,udp_flood,home2,10.9.0.2,origin,10.5.0.1,udp,15,port=123 count=142,critical,True,13.2
+isis,1785386218.6005948,slowloris,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,13,slowloris_connections,high,True,13.7
+isis,1785386228.6030023,brute_force,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,11,http_brute_force,high,True,13.9
+isis,1785386248.6058717,syn_flood,home2,10.9.0.2,root1,10.1.0.1,tcp,8,port=80 count=54,critical,True,14.2
+isis,1785386289.8021069,port_scan,home1,10.9.0.1,cdn2,10.4.0.2,tcp,12,ports=146-152,medium,True,14.9
+isis,1785386344.1465485,port_scan,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,3,ports=395-405,medium,True,15.8
+isis,1785386370.1472683,dns_amplify,corp1,10.7.0.1,root1,10.1.0.1,udp,11,dns_amplification,high,True,16.2
+isis,1785386400.2641358,dns_amplify,mob2,10.8.0.2,cdn2,10.4.0.2,udp,6,dns_amplification,high,True,16.7
+isis,1785386408.265719,udp_flood,home2,10.9.0.2,cdn2,10.4.0.2,udp,10,port=1900 count=159,critical,True,16.9
+isis,1785386426.3066132,dns_amplify,home2,10.9.0.2,origin,10.5.0.1,udp,5,dns_amplification,high,True,17.2
+isis,1785386442.307359,dns_amplify,home2,10.9.0.2,cdn2,10.4.0.2,udp,3,dns_amplification,high,True,17.4
+isis,1785386473.1648796,syn_flood,home1,10.9.0.1,root1,10.1.0.1,tcp,2,port=8080 count=167,critical,True,17.9
+isis,1785386534.166042,port_scan,home2,10.9.0.2,root1,10.1.0.1,tcp,7,ports=374-392,medium,True,19.0
+isis,1785386561.1791277,slowloris,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,5,slowloris_connections,high,True,19.4
+isis,1785386582.1800296,syn_flood,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,14,port=22 count=127,critical,True,19.8
+isis,1785386595.2355704,port_scan,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,12,ports=400-408,medium,True,20.0
+eigrp,1785389532.54024,dns_amplify,corp2,10.7.0.2,cdn1,10.4.0.1,udp,9,dns_amplification,high,True,0.4
+eigrp,1785389552.582218,udp_flood,home2,10.9.0.2,cdn1,10.4.0.1,udp,4,port=123 count=153,critical,True,0.8
+eigrp,1785389603.7940347,syn_flood,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,9,port=22 count=129,critical,True,1.6
+eigrp,1785389657.8265886,slowloris,home2,10.9.0.2,cdn2,10.4.0.2,tcp,4,slowloris_connections,high,True,2.5
+eigrp,1785389665.8272862,data_exfil,home2,10.9.0.2,origin,10.5.0.1,tcp,2,exfil_rate=955K,critical,True,2.7
+eigrp,1785389683.8660333,dns_amplify,home2,10.9.0.2,isp_gw,10.2.0.1,udp,4,dns_amplification,high,True,3.0
+eigrp,1785389710.9087667,slowloris,home1,10.9.0.1,cdn1,10.4.0.1,tcp,12,slowloris_connections,high,True,3.4
+eigrp,1785389720.9099555,slowloris,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,14,slowloris_connections,high,True,3.6
+eigrp,1785389737.9111912,ping_sweep,home1,10.9.0.1,origin,10.5.0.1,icmp,13,subnet=10.5.0.0/24,low,True,3.9
+eigrp,1785389749.9123082,ping_sweep,corp2,10.7.0.2,root1,10.1.0.1,icmp,11,subnet=10.1.0.0/24,low,True,4.1
+eigrp,1785389770.9818616,udp_flood,home2,10.9.0.2,cdn2,10.4.0.2,udp,10,port=53 count=158,critical,True,4.4
+eigrp,1785389781.986117,udp_flood,mob2,10.8.0.2,cdn2,10.4.0.2,udp,5,port=53 count=125,critical,True,4.6
+eigrp,1785389795.9349833,udp_flood,corp2,10.7.0.2,isp_gw,10.2.0.1,udp,8,port=1900 count=113,critical,True,4.8
+eigrp,1785389809.9501762,port_scan,home2,10.9.0.2,origin,10.5.0.1,tcp,8,ports=751-757,medium,True,5.1
+eigrp,1785389835.6991527,ping_sweep,home1,10.9.0.1,root1,10.1.0.1,icmp,14,subnet=10.1.0.0/24,low,True,5.5
+eigrp,1785389854.6999793,syn_flood,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,7,port=80 count=118,critical,True,5.8
+eigrp,1785389908.8144083,syn_flood,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,12,port=8080 count=103,critical,True,6.7
+eigrp,1785389948.494072,dns_amplify,mob1,10.8.0.1,cdn1,10.4.0.1,udp,8,dns_amplification,high,True,7.4
+eigrp,1785389958.497394,ping_sweep,home1,10.9.0.1,cdn2,10.4.0.2,icmp,12,subnet=10.4.0.0/24,low,True,7.5
+eigrp,1785389998.6260877,port_scan,mob1,10.8.0.1,root1,10.1.0.1,tcp,10,ports=511-516,medium,True,8.2
+eigrp,1785390020.6268675,dns_amplify,mob1,10.8.0.1,root1,10.1.0.1,udp,7,dns_amplification,high,True,8.6
+eigrp,1785390029.6664317,brute_force,home1,10.9.0.1,origin,10.5.0.1,tcp,15,http_brute_force,high,True,8.7
+eigrp,1785390085.940463,port_scan,corp2,10.7.0.2,origin,10.5.0.1,tcp,10,ports=749-768,medium,True,9.7
+eigrp,1785390092.5682747,syn_flood,home2,10.9.0.2,cdn1,10.4.0.1,tcp,5,port=443 count=133,critical,True,9.8
+eigrp,1785390172.8372598,brute_force,home1,10.9.0.1,cdn1,10.4.0.1,tcp,8,http_brute_force,high,True,11.1
+eigrp,1785390214.8741558,port_scan,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,6,ports=203-209,medium,True,11.8
+eigrp,1785390340.435505,port_scan,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,14,ports=38-53,medium,True,13.9
+eigrp,1785390425.7662857,udp_flood,home2,10.9.0.2,cdn2,10.4.0.2,udp,5,port=53 count=139,critical,True,15.3
+eigrp,1785390511.0340457,port_scan,home1,10.9.0.1,cdn1,10.4.0.1,tcp,9,ports=814-833,medium,True,16.7
+eigrp,1785390537.0671268,dns_amplify,corp1,10.7.0.1,isp_gw,10.2.0.1,udp,12,dns_amplification,high,True,17.2
+eigrp,1785390601.4156787,port_scan,home1,10.9.0.1,isp_gw,10.2.0.1,tcp,4,ports=809-817,medium,True,18.2
+eigrp,1785390621.439256,brute_force,home1,10.9.0.1,root1,10.1.0.1,tcp,6,http_brute_force,high,True,18.6
+eigrp,1785390634.5987394,slowloris,corp2,10.7.0.2,root1,10.1.0.1,tcp,15,slowloris_connections,high,True,18.8
+eigrp,1785390681.732093,syn_flood,home1,10.9.0.1,cdn2,10.4.0.2,tcp,9,port=80 count=179,critical,True,19.6
+eigrp,1785390691.7328928,port_scan,home1,10.9.0.1,cdn2,10.4.0.2,tcp,9,ports=333-351,medium,True,19.8
+eigrp,1785390700.7347074,ping_sweep,home1,10.9.0.1,cdn2,10.4.0.2,icmp,13,subnet=10.4.0.0/24,low,True,19.9
+eigrp,1785390749.739734,slowloris,corp2,10.7.0.2,root1,10.1.0.1,tcp,12,slowloris_connections,high,True,20.7
+eigrp,1785390823.546436,brute_force,home2,10.9.0.2,root1,10.1.0.1,tcp,15,http_brute_force,high,True,22.0
+eigrp,1785390830.5551088,port_scan,home1,10.9.0.1,root1,10.1.0.1,tcp,14,ports=993-999,medium,True,22.1
+eigrp,1785390844.5817204,syn_flood,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,11,port=8080 count=147,critical,True,22.3
+eigrp,1785390895.667132,slowloris,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,3,slowloris_connections,high,True,23.2
+eigrp,1785390915.9730334,slowloris,home1,10.9.0.1,cdn2,10.4.0.2,tcp,10,slowloris_connections,high,True,23.5
+eigrp,1785390949.14791,syn_flood,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,11,port=22 count=51,critical,True,0.0
+eigrp,1785390969.3337214,udp_flood,mob1,10.8.0.1,cdn2,10.4.0.2,udp,3,port=161 count=199,critical,True,0.4
+eigrp,1785390989.3346033,syn_flood,home1,10.9.0.1,origin,10.5.0.1,tcp,6,port=8080 count=96,critical,True,0.7
+eigrp,1785390997.3374171,syn_flood,home1,10.9.0.1,root1,10.1.0.1,tcp,2,port=8080 count=69,critical,True,0.8
+eigrp,1785391007.872779,slowloris,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,8,slowloris_connections,high,True,1.0
+eigrp,1785391014.666441,port_scan,home1,10.9.0.1,origin,10.5.0.1,tcp,6,ports=283-291,medium,True,1.1
+eigrp,1785391048.11825,port_scan,mob1,10.8.0.1,origin,10.5.0.1,tcp,13,ports=144-158,medium,True,1.7
+eigrp,1785391058.1753557,slowloris,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,13,slowloris_connections,high,True,1.9
+eigrp,1785391080.1878843,slowloris,home2,10.9.0.2,origin,10.5.0.1,tcp,8,slowloris_connections,high,True,2.2
+eigrp,1785391113.9977496,port_scan,corp1,10.7.0.1,root1,10.1.0.1,tcp,12,ports=605-620,medium,True,2.8
+eigrp,1785391123.462118,port_scan,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,13,ports=53-59,medium,True,2.9
+eigrp,1785391166.5927627,slowloris,mob1,10.8.0.1,origin,10.5.0.1,tcp,15,slowloris_connections,high,True,3.7
+eigrp,1785391173.6064334,dns_amplify,mob1,10.8.0.1,root1,10.1.0.1,udp,14,dns_amplification,high,True,3.8
+eigrp,1785391207.621457,brute_force,home2,10.9.0.2,root1,10.1.0.1,tcp,9,http_brute_force,high,True,4.4
+eigrp,1785391222.626288,port_scan,mob1,10.8.0.1,origin,10.5.0.1,tcp,2,ports=721-734,medium,True,4.6
+eigrp,1785391239.6303654,udp_flood,corp1,10.7.0.1,cdn2,10.4.0.2,udp,8,port=53 count=200,critical,True,4.9
+eigrp,1785391287.8657124,ping_sweep,mob2,10.8.0.2,origin,10.5.0.1,icmp,6,subnet=10.5.0.0/24,low,True,5.7
+bgp,1785389555.6586964,udp_flood,corp1,10.7.0.1,cdn1,10.4.0.1,udp,6,port=161 count=126,critical,True,0.4
+bgp,1785389582.786015,udp_flood,mob2,10.8.0.2,isp_gw,10.2.0.1,udp,3,port=161 count=62,critical,True,0.9
+bgp,1785389594.8047452,port_scan,home1,10.9.0.1,cdn2,10.4.0.2,tcp,13,ports=28-37,medium,True,1.1
+bgp,1785389618.8385258,syn_flood,home2,10.9.0.2,cdn1,10.4.0.1,tcp,12,port=443 count=65,critical,True,1.5
+bgp,1785389644.8423674,port_scan,home1,10.9.0.1,cdn2,10.4.0.2,tcp,6,ports=438-445,medium,True,1.9
+bgp,1785389652.8436573,ping_sweep,corp1,10.7.0.1,isp_gw,10.2.0.1,icmp,4,subnet=10.2.0.0/24,low,True,2.0
+bgp,1785389664.8458116,port_scan,home1,10.9.0.1,origin,10.5.0.1,tcp,7,ports=315-332,medium,True,2.2
+bgp,1785389682.9385,port_scan,corp1,10.7.0.1,origin,10.5.0.1,tcp,4,ports=777-795,medium,True,2.5
+bgp,1785389714.939753,port_scan,home1,10.9.0.1,isp_gw,10.2.0.1,tcp,5,ports=527-534,medium,True,3.1
+bgp,1785389765.0825765,port_scan,home2,10.9.0.2,cdn2,10.4.0.2,tcp,5,ports=761-780,medium,True,3.9
+bgp,1785389779.0832405,dns_amplify,mob1,10.8.0.1,isp_gw,10.2.0.1,udp,13,dns_amplification,high,True,4.1
+bgp,1785389793.08381,udp_flood,mob2,10.8.0.2,root1,10.1.0.1,udp,2,port=53 count=99,critical,True,4.4
+bgp,1785389824.2417908,udp_flood,home2,10.9.0.2,origin,10.5.0.1,udp,11,port=161 count=150,critical,True,4.9
+bgp,1785389840.2424295,udp_flood,corp1,10.7.0.1,root1,10.1.0.1,udp,4,port=53 count=115,critical,True,5.1
+bgp,1785389868.25649,slowloris,mob1,10.8.0.1,root1,10.1.0.1,tcp,5,slowloris_connections,high,True,5.6
+bgp,1785389930.490144,syn_flood,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,5,port=443 count=188,critical,True,6.6
+bgp,1785389966.098791,syn_flood,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,10,port=22 count=154,critical,True,7.2
+bgp,1785389974.1460752,syn_flood,home1,10.9.0.1,root1,10.1.0.1,tcp,12,port=22 count=177,critical,True,7.4
+bgp,1785390010.1505368,slowloris,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,12,slowloris_connections,high,True,8.0
+bgp,1785390027.1522264,udp_flood,home1,10.9.0.1,cdn2,10.4.0.2,udp,14,port=1900 count=117,critical,True,8.3
+bgp,1785390098.326975,udp_flood,home1,10.9.0.1,origin,10.5.0.1,udp,5,port=123 count=105,critical,True,9.4
+bgp,1785390124.4097984,slowloris,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,10,slowloris_connections,high,True,9.9
+bgp,1785390173.420151,ping_sweep,home2,10.9.0.2,root1,10.1.0.1,icmp,12,subnet=10.1.0.0/24,low,True,10.7
+bgp,1785390224.4577842,udp_flood,corp1,10.7.0.1,cdn2,10.4.0.2,udp,4,port=53 count=53,critical,True,11.5
+bgp,1785390249.459275,ping_sweep,home1,10.9.0.1,isp_gw,10.2.0.1,icmp,7,subnet=10.2.0.0/24,low,True,12.0
+bgp,1785390275.5063396,syn_flood,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,3,port=443 count=126,critical,True,12.4
+bgp,1785390299.6712964,port_scan,corp2,10.7.0.2,root1,10.1.0.1,tcp,14,ports=104-119,medium,True,12.8
+bgp,1785390317.7538269,port_scan,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,12,ports=333-341,medium,True,13.1
+bgp,1785390382.7663188,dns_amplify,corp1,10.7.0.1,cdn2,10.4.0.2,udp,7,dns_amplification,high,True,14.2
+bgp,1785390390.7669935,dns_amplify,corp2,10.7.0.2,cdn1,10.4.0.1,udp,12,dns_amplification,high,True,14.3
+bgp,1785390452.7778623,udp_flood,corp2,10.7.0.2,cdn1,10.4.0.1,udp,5,port=53 count=98,critical,True,15.4
+bgp,1785390464.7793093,data_exfil,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,11,exfil_rate=820K,critical,True,15.6
+bgp,1785390505.075441,port_scan,corp2,10.7.0.2,root1,10.1.0.1,tcp,11,ports=797-809,medium,True,16.2
+bgp,1785390593.3152692,data_exfil,home1,10.9.0.1,cdn2,10.4.0.2,tcp,10,exfil_rate=984K,critical,True,17.7
+bgp,1785390599.3777032,slowloris,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,9,slowloris_connections,high,True,17.8
+bgp,1785390657.618309,slowloris,corp1,10.7.0.1,root1,10.1.0.1,tcp,14,slowloris_connections,high,True,18.8
+bgp,1785390664.6199155,data_exfil,home2,10.9.0.2,cdn1,10.4.0.1,tcp,13,exfil_rate=596K,critical,True,18.9
+bgp,1785390703.6220777,udp_flood,mob1,10.8.0.1,cdn2,10.4.0.2,udp,7,port=1900 count=112,critical,True,19.5
+bgp,1785390715.6286936,udp_flood,home2,10.9.0.2,isp_gw,10.2.0.1,udp,11,port=53 count=76,critical,True,19.7
+bgp,1785390753.709372,brute_force,mob1,10.8.0.1,cdn2,10.4.0.2,tcp,15,http_brute_force,high,True,20.4
+bgp,1785390771.7150102,syn_flood,home2,10.9.0.2,cdn2,10.4.0.2,tcp,10,port=80 count=69,critical,True,20.7
+bgp,1785390795.7213547,port_scan,mob1,10.8.0.1,cdn2,10.4.0.2,tcp,9,ports=338-351,medium,True,21.1
+bgp,1785390846.7898283,brute_force,home1,10.9.0.1,cdn1,10.4.0.1,tcp,11,http_brute_force,high,True,21.9
+bgp,1785390856.8305056,dns_amplify,mob2,10.8.0.2,isp_gw,10.2.0.1,udp,9,dns_amplification,high,True,22.1
+bgp,1785390885.8793523,slowloris,mob1,10.8.0.1,cdn2,10.4.0.2,tcp,12,slowloris_connections,high,True,22.6
+bgp,1785390909.883455,slowloris,home1,10.9.0.1,origin,10.5.0.1,tcp,12,slowloris_connections,high,True,23.0
+bgp,1785390928.8851156,ping_sweep,home1,10.9.0.1,isp_gw,10.2.0.1,icmp,13,subnet=10.2.0.0/24,low,True,23.3
+bgp,1785390949.8860035,dns_amplify,mob2,10.8.0.2,cdn2,10.4.0.2,udp,2,dns_amplification,high,True,23.6
+bgp,1785391017.0690863,brute_force,home2,10.9.0.2,root1,10.1.0.1,tcp,15,http_brute_force,high,True,0.8
+bgp,1785391026.0728416,brute_force,home1,10.9.0.1,origin,10.5.0.1,tcp,3,http_brute_force,high,True,0.9
+bgp,1785391044.1663115,dns_amplify,mob1,10.8.0.1,root1,10.1.0.1,udp,10,dns_amplification,high,True,1.2
+bgp,1785391068.1775174,slowloris,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,13,slowloris_connections,high,True,1.6
+bgp,1785391086.1826773,brute_force,mob1,10.8.0.1,origin,10.5.0.1,tcp,11,http_brute_force,high,True,1.9
+bgp,1785391125.2546406,port_scan,home1,10.9.0.1,isp_gw,10.2.0.1,tcp,9,ports=290-296,medium,True,2.6
+bgp,1785391149.2789066,brute_force,mob1,10.8.0.1,origin,10.5.0.1,tcp,15,http_brute_force,high,True,3.0
+bgp,1785391158.2791648,slowloris,mob1,10.8.0.1,origin,10.5.0.1,tcp,14,slowloris_connections,high,True,3.1
+bgp,1785391173.2802737,udp_flood,home1,10.9.0.1,cdn1,10.4.0.1,udp,13,port=1900 count=89,critical,True,3.4
+bgp,1785391182.281438,syn_flood,home1,10.9.0.1,cdn1,10.4.0.1,tcp,7,port=80 count=186,critical,True,3.5
+bgp,1785391227.4904697,udp_flood,corp2,10.7.0.2,origin,10.5.0.1,udp,11,port=123 count=112,critical,True,4.3
+bgp,1785391253.5219345,ping_sweep,home2,10.9.0.2,origin,10.5.0.1,icmp,11,subnet=10.5.0.0/24,low,True,4.7
+bgp,1785391287.6541018,udp_flood,mob1,10.8.0.1,origin,10.5.0.1,udp,11,port=1900 count=52,critical,True,5.3
+bgp,1785391292.718192,port_scan,mob2,10.8.0.2,isp_gw,10.2.0.1,tcp,6,ports=449-461,medium,True,5.4
+bgp,1785391307.8456511,slowloris,home1,10.9.0.1,cdn2,10.4.0.2,tcp,11,slowloris_connections,high,True,5.6
+bgp,1785391318.8460362,data_exfil,home2,10.9.0.2,cdn2,10.4.0.2,tcp,15,exfil_rate=832K,critical,True,5.8
+bgp,1785391329.8472085,syn_flood,corp2,10.7.0.2,root1,10.1.0.1,tcp,12,port=22 count=198,critical,True,6.0
+ecmp,1785389504.666314,slowloris,home1,10.9.0.1,cdn1,10.4.0.1,tcp,14,slowloris_connections,high,True,0.1
+ecmp,1785389516.6670072,port_scan,home1,10.9.0.1,isp_gw,10.2.0.1,tcp,13,ports=855-868,medium,True,0.3
+ecmp,1785389535.6700473,udp_flood,corp2,10.7.0.2,origin,10.5.0.1,udp,6,port=161 count=59,critical,True,0.6
+ecmp,1785389548.8780775,port_scan,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,14,ports=250-259,medium,True,0.8
+ecmp,1785389553.8782873,ping_sweep,corp2,10.7.0.2,cdn2,10.4.0.2,icmp,10,subnet=10.4.0.0/24,low,True,0.9
+ecmp,1785389568.879062,dns_amplify,home1,10.9.0.1,cdn1,10.4.0.1,udp,15,dns_amplification,high,True,1.2
+ecmp,1785389596.8805888,ping_sweep,home2,10.9.0.2,cdn1,10.4.0.1,icmp,8,subnet=10.4.0.0/24,low,True,1.6
+ecmp,1785389612.8861277,brute_force,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,11,http_brute_force,high,True,1.9
+ecmp,1785389682.9901505,port_scan,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,8,ports=628-638,medium,True,3.1
+ecmp,1785389688.9918127,port_scan,mob2,10.8.0.2,origin,10.5.0.1,tcp,15,ports=901-908,medium,True,3.2
+ecmp,1785389721.1621644,syn_flood,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,4,port=22 count=74,critical,True,3.7
+ecmp,1785389749.162448,ping_sweep,home2,10.9.0.2,origin,10.5.0.1,icmp,11,subnet=10.5.0.0/24,low,True,4.2
+ecmp,1785389788.1271012,brute_force,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,7,http_brute_force,high,True,4.8
+ecmp,1785389822.397993,syn_flood,home1,10.9.0.1,root1,10.1.0.1,tcp,13,port=80 count=99,critical,True,5.4
+ecmp,1785389831.4003906,udp_flood,home2,10.9.0.2,cdn2,10.4.0.2,udp,8,port=123 count=149,critical,True,5.5
+ecmp,1785389839.402214,brute_force,home2,10.9.0.2,root1,10.1.0.1,tcp,11,http_brute_force,high,True,5.7
+ecmp,1785389844.4024718,ping_sweep,corp2,10.7.0.2,cdn2,10.4.0.2,icmp,14,subnet=10.4.0.0/24,low,True,5.7
+ecmp,1785389856.4031758,udp_flood,corp2,10.7.0.2,cdn2,10.4.0.2,udp,2,port=1900 count=101,critical,True,5.9
+ecmp,1785389870.1564603,ping_sweep,home2,10.9.0.2,cdn1,10.4.0.1,icmp,5,subnet=10.4.0.0/24,low,True,6.2
+ecmp,1785389901.157851,port_scan,corp2,10.7.0.2,root1,10.1.0.1,tcp,6,ports=706-716,medium,True,6.7
+ecmp,1785389911.1585157,port_scan,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,3,ports=749-767,medium,True,6.9
+ecmp,1785389930.1607049,slowloris,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,7,slowloris_connections,high,True,7.2
+ecmp,1785389990.150735,ping_sweep,corp1,10.7.0.1,isp_gw,10.2.0.1,icmp,13,subnet=10.2.0.0/24,low,True,8.2
+ecmp,1785390016.1897254,dns_amplify,mob1,10.8.0.1,cdn1,10.4.0.1,udp,8,dns_amplification,high,True,8.6
+ecmp,1785390066.30583,brute_force,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,4,http_brute_force,high,True,9.4
+ecmp,1785390168.6503613,syn_flood,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,3,port=443 count=148,critical,True,11.2
+ecmp,1785390181.6821697,udp_flood,corp1,10.7.0.1,cdn1,10.4.0.1,udp,13,port=161 count=179,critical,True,11.4
+ecmp,1785390251.72505,data_exfil,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,7,exfil_rate=685K,critical,True,12.5
+ecmp,1785390260.725291,data_exfil,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,13,exfil_rate=858K,critical,True,12.7
+ecmp,1785390276.2968867,syn_flood,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,9,port=443 count=198,critical,True,12.9
+ecmp,1785390301.4021811,port_scan,home2,10.9.0.2,root1,10.1.0.1,tcp,5,ports=731-747,medium,True,13.4
+ecmp,1785390317.404122,port_scan,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,8,ports=18-32,medium,True,13.6
+ecmp,1785390372.4632957,data_exfil,home2,10.9.0.2,root1,10.1.0.1,tcp,10,exfil_rate=740K,critical,True,14.5
+ecmp,1785390423.558443,port_scan,corp2,10.7.0.2,origin,10.5.0.1,tcp,14,ports=124-137,medium,True,15.4
+ecmp,1785390499.2112446,syn_flood,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,14,port=8080 count=182,critical,True,16.7
+ecmp,1785390507.2119155,dns_amplify,corp1,10.7.0.1,isp_gw,10.2.0.1,udp,9,dns_amplification,high,True,16.8
+ecmp,1785390525.2777998,ping_sweep,mob2,10.8.0.2,isp_gw,10.2.0.1,icmp,6,subnet=10.2.0.0/24,low,True,17.1
+ecmp,1785390546.3063424,port_scan,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,12,ports=825-843,medium,True,17.4
+ecmp,1785390561.3100936,port_scan,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,5,ports=324-339,medium,True,17.7
+ecmp,1785390608.310777,syn_flood,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,6,port=80 count=111,critical,True,18.5
+ecmp,1785390614.3131442,port_scan,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,8,ports=405-411,medium,True,18.6
+ecmp,1785390625.314888,brute_force,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,3,http_brute_force,high,True,18.8
+ecmp,1785390674.346673,syn_flood,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,9,port=8080 count=113,critical,True,19.6
+ecmp,1785390684.3469355,syn_flood,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,5,port=22 count=135,critical,True,19.7
+ecmp,1785390699.446303,brute_force,home2,10.9.0.2,root1,10.1.0.1,tcp,15,http_brute_force,high,True,20.0
+ecmp,1785390787.4516816,syn_flood,home2,10.9.0.2,cdn1,10.4.0.1,tcp,5,port=80 count=54,critical,True,21.5
+ecmp,1785390853.5618775,port_scan,mob1,10.8.0.1,origin,10.5.0.1,tcp,4,ports=800-806,medium,True,22.6
+ecmp,1785390869.8076856,ping_sweep,corp2,10.7.0.2,cdn1,10.4.0.1,icmp,3,subnet=10.4.0.0/24,low,True,22.8
+ecmp,1785390875.8079844,syn_flood,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,15,port=8080 count=193,critical,True,22.9
+ecmp,1785390891.8334084,slowloris,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,10,slowloris_connections,high,True,23.2
+ecmp,1785390896.8344195,data_exfil,mob2,10.8.0.2,origin,10.5.0.1,tcp,9,exfil_rate=851K,critical,True,23.3
+ecmp,1785390918.8916385,syn_flood,home1,10.9.0.1,cdn2,10.4.0.2,tcp,10,port=80 count=178,critical,True,23.7
+ecmp,1785390949.892598,ping_sweep,mob1,10.8.0.1,isp_gw,10.2.0.1,icmp,13,subnet=10.2.0.0/24,low,True,0.2
+ecmp,1785390965.894425,port_scan,home2,10.9.0.2,cdn2,10.4.0.2,tcp,12,ports=800-815,medium,True,0.4
+ecmp,1785390993.9138148,udp_flood,mob1,10.8.0.1,cdn2,10.4.0.2,udp,15,port=1900 count=159,critical,True,0.9
+ecmp,1785391005.953746,slowloris,corp1,10.7.0.1,origin,10.5.0.1,tcp,14,slowloris_connections,high,True,1.1
+ecmp,1785391033.985849,port_scan,corp2,10.7.0.2,root1,10.1.0.1,tcp,10,ports=279-294,medium,True,1.6
+ecmp,1785391042.0470436,udp_flood,mob2,10.8.0.2,cdn1,10.4.0.1,udp,11,port=53 count=173,critical,True,1.7
+ecmp,1785391088.2823017,syn_flood,home2,10.9.0.2,cdn1,10.4.0.1,tcp,7,port=443 count=98,critical,True,2.5
+ecmp,1785391097.2857342,port_scan,mob1,10.8.0.1,root1,10.1.0.1,tcp,13,ports=75-84,medium,True,2.6
+ecmp,1785391111.2860632,slowloris,mob1,10.8.0.1,root1,10.1.0.1,tcp,10,slowloris_connections,high,True,2.9
+ecmp,1785391119.433739,brute_force,home2,10.9.0.2,cdn1,10.4.0.1,tcp,3,http_brute_force,high,True,3.0
+ecmp,1785391129.5274353,brute_force,corp1,10.7.0.1,origin,10.5.0.1,tcp,15,http_brute_force,high,True,3.2
+ecmp,1785391140.666976,dns_amplify,mob2,10.8.0.2,origin,10.5.0.1,udp,10,dns_amplification,high,True,3.4
+ecmp,1785391193.7742653,dns_amplify,corp1,10.7.0.1,isp_gw,10.2.0.1,udp,3,dns_amplification,high,True,4.2
+ecmp,1785391205.7765138,ping_sweep,home1,10.9.0.1,cdn1,10.4.0.1,icmp,3,subnet=10.4.0.0/24,low,True,4.4
+ecmp,1785391239.8898284,syn_flood,mob1,10.8.0.1,origin,10.5.0.1,tcp,9,port=80 count=70,critical,True,5.0
+ecmp,1785391269.8980956,brute_force,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,3,http_brute_force,high,True,5.5
+ecmp,1785391276.9313042,brute_force,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,8,http_brute_force,high,True,5.6
+ecmp,1785391294.96974,data_exfil,home1,10.9.0.1,cdn2,10.4.0.2,tcp,9,exfil_rate=667K,critical,True,5.9
+ecmp,1785391301.970003,udp_flood,mob1,10.8.0.1,isp_gw,10.2.0.1,udp,5,port=123 count=199,critical,True,6.0
+spf,1785389551.9218066,ping_sweep,corp2,10.7.0.2,cdn2,10.4.0.2,icmp,11,subnet=10.4.0.0/24,low,True,0.3
+spf,1785389556.922577,dns_amplify,mob2,10.8.0.2,origin,10.5.0.1,udp,4,dns_amplification,high,True,0.4
+spf,1785389564.9261322,syn_flood,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,8,port=22 count=138,critical,True,0.5
+spf,1785389593.9301562,port_scan,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,6,ports=522-535,medium,True,1.0
+spf,1785389621.9310253,port_scan,mob2,10.8.0.2,origin,10.5.0.1,tcp,14,ports=382-394,medium,True,1.5
+spf,1785389645.944461,syn_flood,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,7,port=22 count=138,critical,True,1.9
+spf,1785389657.210788,port_scan,home1,10.9.0.1,origin,10.5.0.1,tcp,11,ports=595-602,medium,True,2.0
+spf,1785389671.3220782,data_exfil,mob1,10.8.0.1,origin,10.5.0.1,tcp,10,exfil_rate=316K,critical,True,2.3
+spf,1785389698.326257,slowloris,mob2,10.8.0.2,isp_gw,10.2.0.1,tcp,9,slowloris_connections,high,True,2.7
+spf,1785389708.3269556,port_scan,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,5,ports=243-257,medium,True,2.9
+spf,1785389720.3349185,port_scan,home1,10.9.0.1,root1,10.1.0.1,tcp,7,ports=106-123,medium,True,3.1
+spf,1785389740.336601,brute_force,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,14,http_brute_force,high,True,3.4
+spf,1785389797.3931515,syn_flood,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,14,port=8080 count=98,critical,True,4.4
+spf,1785389829.4878726,dns_amplify,mob1,10.8.0.1,isp_gw,10.2.0.1,udp,12,dns_amplification,high,True,4.9
+spf,1785389839.48842,syn_flood,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,6,port=8080 count=156,critical,True,5.1
+spf,1785389850.4886458,udp_flood,corp1,10.7.0.1,origin,10.5.0.1,udp,6,port=53 count=189,critical,True,5.3
+spf,1785389894.4988933,data_exfil,home1,10.9.0.1,cdn2,10.4.0.2,tcp,11,exfil_rate=165K,critical,True,6.0
+spf,1785389936.500169,udp_flood,corp1,10.7.0.1,cdn2,10.4.0.2,udp,2,port=1900 count=136,critical,True,6.7
+spf,1785389976.1421256,brute_force,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,7,http_brute_force,high,True,7.4
+spf,1785389994.160501,slowloris,corp2,10.7.0.2,origin,10.5.0.1,tcp,12,slowloris_connections,high,True,7.7
+spf,1785390011.163278,brute_force,corp1,10.7.0.1,origin,10.5.0.1,tcp,11,http_brute_force,high,True,7.9
+spf,1785390017.163944,syn_flood,home1,10.9.0.1,cdn1,10.4.0.1,tcp,4,port=8080 count=155,critical,True,8.0
+spf,1785390038.1653235,syn_flood,mob1,10.8.0.1,origin,10.5.0.1,tcp,9,port=22 count=84,critical,True,8.4
+spf,1785390050.1662729,port_scan,home2,10.9.0.2,cdn2,10.4.0.2,tcp,15,ports=523-537,medium,True,8.6
+spf,1785390079.8631508,slowloris,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,5,slowloris_connections,high,True,9.1
+spf,1785390092.8649108,udp_flood,mob1,10.8.0.1,root1,10.1.0.1,udp,13,port=161 count=155,critical,True,9.3
+spf,1785390149.8680186,slowloris,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,11,slowloris_connections,high,True,10.3
+spf,1785390185.9277978,port_scan,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,8,ports=383-390,medium,True,10.9
+spf,1785390211.5627203,udp_flood,mob2,10.8.0.2,cdn1,10.4.0.1,udp,10,port=53 count=136,critical,True,11.3
+spf,1785390245.9940991,port_scan,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,4,ports=683-688,medium,True,11.9
+spf,1785390277.0898187,udp_flood,home2,10.9.0.2,cdn2,10.4.0.2,udp,6,port=161 count=187,critical,True,12.4
+spf,1785390310.0948749,ping_sweep,mob2,10.8.0.2,origin,10.5.0.1,icmp,3,subnet=10.5.0.0/24,low,True,12.9
+spf,1785390322.1542654,data_exfil,home1,10.9.0.1,origin,10.5.0.1,tcp,10,exfil_rate=373K,critical,True,13.1
+spf,1785390348.169683,brute_force,mob2,10.8.0.2,origin,10.5.0.1,tcp,11,http_brute_force,high,True,13.6
+spf,1785390360.1740105,dns_amplify,mob1,10.8.0.1,cdn2,10.4.0.2,udp,15,dns_amplification,high,True,13.8
+spf,1785390406.7672665,slowloris,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,9,slowloris_connections,high,True,14.5
+spf,1785390425.767998,udp_flood,corp1,10.7.0.1,origin,10.5.0.1,udp,10,port=1900 count=88,critical,True,14.9
+spf,1785390453.8164144,dns_amplify,home2,10.9.0.2,origin,10.5.0.1,udp,15,dns_amplification,high,True,15.3
+spf,1785390467.817163,udp_flood,corp1,10.7.0.1,origin,10.5.0.1,udp,6,port=1900 count=73,critical,True,15.6
+spf,1785390493.28622,syn_flood,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,3,port=8080 count=60,critical,True,16.0
+spf,1785390508.3105814,ping_sweep,corp2,10.7.0.2,origin,10.5.0.1,icmp,7,subnet=10.5.0.0/24,low,True,16.2
+spf,1785390561.3144238,data_exfil,home2,10.9.0.2,root1,10.1.0.1,tcp,13,exfil_rate=315K,critical,True,17.1
+spf,1785390632.9623244,port_scan,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,3,ports=321-332,medium,True,18.3
+spf,1785390683.0700166,port_scan,mob1,10.8.0.1,origin,10.5.0.1,tcp,2,ports=296-307,medium,True,19.1
+spf,1785390719.070871,syn_flood,corp1,10.7.0.1,root1,10.1.0.1,tcp,12,port=443 count=200,critical,True,19.7
+spf,1785390755.5180564,data_exfil,corp1,10.7.0.1,origin,10.5.0.1,tcp,6,exfil_rate=472K,critical,True,20.3
+spf,1785390802.5460136,slowloris,home1,10.9.0.1,isp_gw,10.2.0.1,tcp,10,slowloris_connections,high,True,21.1
+spf,1785390814.4000928,ping_sweep,home2,10.9.0.2,cdn1,10.4.0.1,icmp,4,subnet=10.4.0.0/24,low,True,21.3
+spf,1785390945.552266,port_scan,home2,10.9.0.2,cdn1,10.4.0.1,tcp,10,ports=955-972,medium,True,23.5
+spf,1785391038.6831057,port_scan,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,9,ports=634-654,medium,True,1.1
+spf,1785391131.0376,port_scan,home2,10.9.0.2,root1,10.1.0.1,tcp,3,ports=598-604,medium,True,2.6
+spf,1785391139.0553167,syn_flood,mob2,10.8.0.2,origin,10.5.0.1,tcp,3,port=443 count=152,critical,True,2.7
+spf,1785391165.0567214,udp_flood,corp1,10.7.0.1,root1,10.1.0.1,udp,7,port=161 count=115,critical,True,3.2
+spf,1785391186.063003,ping_sweep,home1,10.9.0.1,cdn2,10.4.0.2,icmp,13,subnet=10.4.0.0/24,low,True,3.5
+spf,1785391218.171969,port_scan,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,4,ports=951-963,medium,True,4.1
+spf,1785391227.1784904,data_exfil,home2,10.9.0.2,origin,10.5.0.1,tcp,7,exfil_rate=263K,critical,True,4.2
+spf,1785391244.179697,dns_amplify,mob2,10.8.0.2,cdn2,10.4.0.2,udp,12,dns_amplification,high,True,4.5
+spf,1785391287.431567,ping_sweep,home1,10.9.0.1,root1,10.1.0.1,icmp,15,subnet=10.1.0.0/24,low,True,5.2
+spf,1785391295.6627033,syn_flood,home2,10.9.0.2,cdn2,10.4.0.2,tcp,7,port=22 count=98,critical,True,5.3
+spf,1785391318.663218,slowloris,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,7,slowloris_connections,high,True,5.7
+spf,1785391336.6650648,slowloris,home2,10.9.0.2,cdn2,10.4.0.2,tcp,4,slowloris_connections,high,True,6.0
+policy,1785391980.1965697,udp_flood,home2,10.9.0.2,cdn2,10.4.0.2,udp,12,port=161 count=175,critical,True,1.0
+policy,1785392004.1970472,port_scan,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,14,ports=124-140,medium,True,1.4
+policy,1785392013.2001293,slowloris,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,15,slowloris_connections,high,True,1.5
+policy,1785392055.2006738,data_exfil,mob1,10.8.0.1,cdn2,10.4.0.2,tcp,10,exfil_rate=849K,critical,True,2.2
+policy,1785392107.2020023,port_scan,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,14,ports=929-941,medium,True,3.1
+policy,1785392115.2028878,udp_flood,mob1,10.8.0.1,isp_gw,10.2.0.1,udp,14,port=53 count=54,critical,True,3.2
+policy,1785392124.2031703,udp_flood,home1,10.9.0.1,isp_gw,10.2.0.1,udp,4,port=123 count=105,critical,True,3.4
+policy,1785392136.207334,ping_sweep,corp2,10.7.0.2,cdn2,10.4.0.2,icmp,14,subnet=10.4.0.0/24,low,True,3.6
+policy,1785392150.2081697,data_exfil,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,11,exfil_rate=735K,critical,True,3.8
+policy,1785392155.2091303,dns_amplify,corp1,10.7.0.1,origin,10.5.0.1,udp,4,dns_amplification,high,True,3.9
+policy,1785392172.2104502,port_scan,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,7,ports=696-706,medium,True,4.2
+policy,1785392180.211546,syn_flood,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,5,port=80 count=88,critical,True,4.3
+policy,1785392226.2189643,slowloris,corp2,10.7.0.2,origin,10.5.0.1,tcp,10,slowloris_connections,high,True,5.1
+policy,1785392239.2201211,port_scan,mob1,10.8.0.1,cdn2,10.4.0.2,tcp,2,ports=493-513,medium,True,5.3
+policy,1785392304.2219603,port_scan,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,8,ports=402-420,medium,True,6.4
+policy,1785392319.2235374,brute_force,home1,10.9.0.1,cdn2,10.4.0.2,tcp,9,http_brute_force,high,True,6.6
+policy,1785392336.2261257,slowloris,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,10,slowloris_connections,high,True,6.9
+policy,1785392354.2272766,syn_flood,home1,10.9.0.1,origin,10.5.0.1,tcp,11,port=8080 count=52,critical,True,7.2
+policy,1785392371.230889,udp_flood,corp2,10.7.0.2,origin,10.5.0.1,udp,9,port=53 count=95,critical,True,7.5
+policy,1785392460.2342472,brute_force,home2,10.9.0.2,cdn1,10.4.0.1,tcp,2,http_brute_force,high,True,9.0
+policy,1785392480.235294,dns_amplify,home1,10.9.0.1,root1,10.1.0.1,udp,14,dns_amplification,high,True,9.3
+policy,1785392501.240112,brute_force,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,11,http_brute_force,high,True,9.7
+policy,1785392556.2411516,udp_flood,mob2,10.8.0.2,isp_gw,10.2.0.1,udp,13,port=53 count=125,critical,True,10.6
+policy,1785392576.243283,brute_force,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,5,http_brute_force,high,True,10.9
+policy,1785392614.2439766,udp_flood,mob1,10.8.0.1,cdn1,10.4.0.1,udp,13,port=161 count=93,critical,True,11.5
+policy,1785392621.2447462,dns_amplify,mob1,10.8.0.1,cdn1,10.4.0.1,udp,6,dns_amplification,high,True,11.7
+policy,1785392661.245268,port_scan,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,11,ports=858-871,medium,True,12.3
+policy,1785392753.2485995,ping_sweep,home1,10.9.0.1,isp_gw,10.2.0.1,icmp,6,subnet=10.2.0.0/24,low,True,13.9
+policy,1785392785.2542486,slowloris,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,5,slowloris_connections,high,True,14.4
+policy,1785392791.2552223,port_scan,mob1,10.8.0.1,root1,10.1.0.1,tcp,7,ports=645-652,medium,True,14.5
+policy,1785392910.2574434,udp_flood,home2,10.9.0.2,origin,10.5.0.1,udp,10,port=53 count=78,critical,True,16.5
+policy,1785392936.2585962,udp_flood,mob1,10.8.0.1,cdn2,10.4.0.2,udp,14,port=123 count=139,critical,True,16.9
+policy,1785393013.260251,udp_flood,corp1,10.7.0.1,root1,10.1.0.1,udp,11,port=53 count=163,critical,True,18.2
+policy,1785393149.262694,dns_amplify,corp2,10.7.0.2,cdn2,10.4.0.2,udp,12,dns_amplification,high,True,20.5
+policy,1785393173.2669358,ping_sweep,home2,10.9.0.2,cdn2,10.4.0.2,icmp,4,subnet=10.4.0.0/24,low,True,20.9
+policy,1785393188.2696753,syn_flood,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,14,port=443 count=50,critical,True,21.1
+policy,1785393229.2708132,port_scan,corp1,10.7.0.1,origin,10.5.0.1,tcp,6,ports=118-131,medium,True,21.8
+policy,1785393263.2729752,ping_sweep,home1,10.9.0.1,cdn2,10.4.0.2,icmp,11,subnet=10.4.0.0/24,low,True,22.4
+policy,1785393430.2757137,port_scan,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,7,ports=81-96,medium,True,1.1
+policy,1785393443.2776108,ping_sweep,home1,10.9.0.1,cdn2,10.4.0.2,icmp,8,subnet=10.4.0.0/24,low,True,1.4
+policy,1785393451.278649,dns_amplify,home2,10.9.0.2,cdn1,10.4.0.1,udp,14,dns_amplification,high,True,1.5
+policy,1785393483.2792656,udp_flood,mob1,10.8.0.1,cdn2,10.4.0.2,udp,4,port=1900 count=108,critical,True,2.0
+policy,1785393505.2805698,port_scan,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,3,ports=771-781,medium,True,2.4
+policy,1785393516.2815337,data_exfil,corp1,10.7.0.1,origin,10.5.0.1,tcp,15,exfil_rate=639K,critical,True,2.6
+policy,1785393538.282797,udp_flood,home1,10.9.0.1,isp_gw,10.2.0.1,udp,15,port=161 count=127,critical,True,2.9
+policy,1785393549.2831445,data_exfil,home1,10.9.0.1,origin,10.5.0.1,tcp,5,exfil_rate=125K,critical,True,3.1
+policy,1785393557.2839603,syn_flood,home1,10.9.0.1,root1,10.1.0.1,tcp,8,port=80 count=99,critical,True,3.3
+policy,1785393588.2844222,port_scan,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,10,ports=561-579,medium,True,3.8
+policy,1785393625.2874053,brute_force,home2,10.9.0.2,root1,10.1.0.1,tcp,15,http_brute_force,high,True,4.4
+policy,1785393661.2887018,syn_flood,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,4,port=8080 count=89,critical,True,5.0
+policy,1785393671.2890608,syn_flood,corp1,10.7.0.1,root1,10.1.0.1,tcp,5,port=80 count=87,critical,True,5.2
+policy,1785393690.2901952,port_scan,corp2,10.7.0.2,cdn1,10.4.0.1,tcp,5,ports=412-417,medium,True,5.5
+static,1785391932.5508802,port_scan,home2,10.9.0.2,root1,10.1.0.1,tcp,14,ports=941-947,medium,True,0.3
+static,1785391939.5516453,port_scan,home1,10.9.0.1,root1,10.1.0.1,tcp,6,ports=154-173,medium,True,0.5
+static,1785391963.5526648,udp_flood,corp2,10.7.0.2,origin,10.5.0.1,udp,6,port=53 count=79,critical,True,0.9
+static,1785391984.5536516,dns_amplify,home1,10.9.0.1,origin,10.5.0.1,udp,7,dns_amplification,high,True,1.2
+static,1785391998.5545995,port_scan,home1,10.9.0.1,isp_gw,10.2.0.1,tcp,10,ports=964-981,medium,True,1.4
+static,1785392025.5556612,dns_amplify,home2,10.9.0.2,root1,10.1.0.1,udp,10,dns_amplification,high,True,1.9
+static,1785392039.555976,udp_flood,corp1,10.7.0.1,origin,10.5.0.1,udp,7,port=161 count=161,critical,True,2.1
+static,1785392067.5617838,port_scan,home1,10.9.0.1,origin,10.5.0.1,tcp,12,ports=286-304,medium,True,2.6
+static,1785392082.5627253,port_scan,mob1,10.8.0.1,origin,10.5.0.1,tcp,8,ports=947-967,medium,True,2.8
+static,1785392096.5630045,brute_force,mob1,10.8.0.1,cdn2,10.4.0.2,tcp,12,http_brute_force,high,True,3.1
+static,1785392115.5634391,data_exfil,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,10,exfil_rate=742K,critical,True,3.4
+static,1785392140.5669637,slowloris,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,7,slowloris_connections,high,True,3.8
+static,1785392160.5678768,dns_amplify,corp2,10.7.0.2,cdn2,10.4.0.2,udp,11,dns_amplification,high,True,4.1
+static,1785392227.5687013,syn_flood,mob2,10.8.0.2,root1,10.1.0.1,tcp,7,port=22 count=65,critical,True,5.3
+static,1785392240.5689647,udp_flood,mob1,10.8.0.1,cdn2,10.4.0.2,udp,15,port=1900 count=84,critical,True,5.5
+static,1785392272.570823,ping_sweep,home2,10.9.0.2,cdn2,10.4.0.2,icmp,10,subnet=10.4.0.0/24,low,True,6.0
+static,1785392278.5717304,syn_flood,home1,10.9.0.1,origin,10.5.0.1,tcp,10,port=80 count=63,critical,True,6.1
+static,1785392292.5720494,port_scan,home2,10.9.0.2,cdn1,10.4.0.1,tcp,7,ports=511-526,medium,True,6.3
+static,1785392316.572476,slowloris,corp2,10.7.0.2,root1,10.1.0.1,tcp,9,slowloris_connections,high,True,6.7
+static,1785392333.573562,udp_flood,corp1,10.7.0.1,origin,10.5.0.1,udp,15,port=123 count=142,critical,True,7.0
+static,1785392347.573854,dns_amplify,mob1,10.8.0.1,isp_gw,10.2.0.1,udp,4,dns_amplification,high,True,7.3
+static,1785392367.5747244,port_scan,home2,10.9.0.2,origin,10.5.0.1,tcp,3,ports=891-904,medium,True,7.6
+static,1785392398.5767205,data_exfil,mob2,10.8.0.2,origin,10.5.0.1,tcp,3,exfil_rate=920K,critical,True,8.1
+static,1785392420.5793014,slowloris,home1,10.9.0.1,cdn1,10.4.0.1,tcp,8,slowloris_connections,high,True,8.5
+static,1785392442.580587,port_scan,home1,10.9.0.1,root1,10.1.0.1,tcp,6,ports=263-277,medium,True,8.8
+static,1785392451.5865588,data_exfil,home2,10.9.0.2,cdn1,10.4.0.1,tcp,14,exfil_rate=600K,critical,True,9.0
+static,1785392507.588272,udp_flood,corp1,10.7.0.1,origin,10.5.0.1,udp,10,port=53 count=146,critical,True,9.9
+static,1785392543.5907593,ping_sweep,mob2,10.8.0.2,root1,10.1.0.1,icmp,14,subnet=10.1.0.0/24,low,True,10.5
+static,1785392557.591599,port_scan,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,5,ports=186-196,medium,True,10.8
+static,1785392594.5950708,brute_force,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,2,http_brute_force,high,True,11.4
+static,1785392608.5960467,udp_flood,home2,10.9.0.2,cdn1,10.4.0.1,udp,2,port=1900 count=130,critical,True,11.6
+static,1785392657.597221,port_scan,mob2,10.8.0.2,origin,10.5.0.1,tcp,6,ports=910-927,medium,True,12.4
+static,1785392675.5983086,udp_flood,home1,10.9.0.1,isp_gw,10.2.0.1,udp,9,port=123 count=120,critical,True,12.7
+static,1785392698.602505,dns_amplify,home1,10.9.0.1,cdn1,10.4.0.1,udp,4,dns_amplification,high,True,13.1
+static,1785392710.6044688,brute_force,home1,10.9.0.1,cdn2,10.4.0.2,tcp,7,http_brute_force,high,True,13.3
+static,1785392777.6055489,port_scan,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,13,ports=20-40,medium,True,14.4
+static,1785392798.6064696,udp_flood,home2,10.9.0.2,cdn1,10.4.0.1,udp,13,port=123 count=103,critical,True,14.8
+static,1785392817.607642,udp_flood,corp2,10.7.0.2,cdn1,10.4.0.1,udp,13,port=123 count=125,critical,True,15.1
+static,1785392871.6114478,ping_sweep,home2,10.9.0.2,root1,10.1.0.1,icmp,10,subnet=10.1.0.0/24,low,True,16.0
+static,1785392945.6128097,port_scan,corp2,10.7.0.2,isp_gw,10.2.0.1,tcp,4,ports=265-279,medium,True,17.2
+static,1785392973.6139567,port_scan,corp2,10.7.0.2,root1,10.1.0.1,tcp,10,ports=642-650,medium,True,17.7
+static,1785393031.6152265,data_exfil,mob2,10.8.0.2,root1,10.1.0.1,tcp,12,exfil_rate=853K,critical,True,18.7
+static,1785393136.616407,syn_flood,mob1,10.8.0.1,origin,10.5.0.1,tcp,4,port=8080 count=195,critical,True,20.4
+static,1785393160.6175833,dns_amplify,mob2,10.8.0.2,isp_gw,10.2.0.1,udp,8,dns_amplification,high,True,20.8
+static,1785393175.6187866,dns_amplify,home2,10.9.0.2,cdn1,10.4.0.1,udp,9,dns_amplification,high,True,21.1
+static,1785393188.6263049,brute_force,home1,10.9.0.1,cdn1,10.4.0.1,tcp,15,http_brute_force,high,True,21.3
+static,1785393218.6275218,port_scan,home2,10.9.0.2,root1,10.1.0.1,tcp,12,ports=695-703,medium,True,21.8
+static,1785393232.6278155,dns_amplify,home2,10.9.0.2,isp_gw,10.2.0.1,udp,5,dns_amplification,high,True,22.0
+static,1785393250.6287043,syn_flood,mob1,10.8.0.1,root1,10.1.0.1,tcp,14,port=8080 count=184,critical,True,22.3
+static,1785393266.630914,brute_force,home1,10.9.0.1,cdn1,10.4.0.1,tcp,4,http_brute_force,high,True,22.6
+static,1785393365.6320891,port_scan,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,2,ports=495-511,medium,True,0.2
+static,1785393379.633066,port_scan,corp1,10.7.0.1,origin,10.5.0.1,tcp,14,ports=104-124,medium,True,0.5
+static,1785393409.634192,dns_amplify,mob1,10.8.0.1,origin,10.5.0.1,udp,5,dns_amplification,high,True,1.0
+static,1785393422.6351705,udp_flood,corp1,10.7.0.1,cdn2,10.4.0.2,udp,14,port=161 count=120,critical,True,1.2
+static,1785393437.6385758,syn_flood,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,9,port=8080 count=160,critical,True,1.4
+static,1785393442.6396894,syn_flood,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,9,port=80 count=131,critical,True,1.5
+static,1785393454.6406405,dns_amplify,corp1,10.7.0.1,cdn2,10.4.0.2,udp,13,dns_amplification,high,True,1.7
+static,1785393471.6416984,port_scan,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,14,ports=972-983,medium,True,2.0
+static,1785393488.6450975,brute_force,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,8,http_brute_force,high,True,2.3
+static,1785393524.6455166,port_scan,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,13,ports=132-149,medium,True,2.9
+static,1785393542.6458995,slowloris,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,5,slowloris_connections,high,True,3.2
+static,1785393561.647351,udp_flood,mob2,10.8.0.2,cdn1,10.4.0.1,udp,8,port=53 count=58,critical,True,3.5
+static,1785393579.6483192,dns_amplify,corp1,10.7.0.1,root1,10.1.0.1,udp,6,dns_amplification,high,True,3.8
+static,1785393597.6491582,port_scan,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,2,ports=348-361,medium,True,4.1
+static,1785393606.6502397,port_scan,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,15,ports=440-445,medium,True,4.2
+static,1785393617.653335,brute_force,home2,10.9.0.2,cdn1,10.4.0.1,tcp,7,http_brute_force,high,True,4.4
+static,1785393638.6543558,udp_flood,home1,10.9.0.1,origin,10.5.0.1,udp,4,port=161 count=102,critical,True,4.8
+static,1785393650.6551957,udp_flood,corp1,10.7.0.1,origin,10.5.0.1,udp,13,port=161 count=198,critical,True,5.0
+static,1785393667.657131,ping_sweep,home1,10.9.0.1,cdn1,10.4.0.1,icmp,10,subnet=10.4.0.0/24,low,True,5.3
+static,1785393683.658162,port_scan,corp1,10.7.0.1,root1,10.1.0.1,tcp,8,ports=280-286,medium,True,5.5
+hybrid,1785405809.7764757,slowloris,home2,10.9.0.2,origin,10.5.0.1,tcp,15,slowloris_connections,high,True,0.1
+hybrid,1785405849.5868971,slowloris,home2,10.9.0.2,root1,10.1.0.1,tcp,4,slowloris_connections,high,True,0.8
+hybrid,1785405886.385254,syn_flood,corp1,10.7.0.1,origin,10.5.0.1,tcp,2,port=8080 count=188,critical,True,1.4
+hybrid,1785405894.178848,port_scan,home1,10.9.0.1,isp_gw,10.2.0.1,tcp,9,ports=919-937,medium,True,1.5
+hybrid,1785405919.1796274,port_scan,home1,10.9.0.1,root1,10.1.0.1,tcp,11,ports=284-302,medium,True,2.0
+hybrid,1785405945.9962575,slowloris,home1,10.9.0.1,root1,10.1.0.1,tcp,12,slowloris_connections,high,True,2.4
+hybrid,1785405963.813147,syn_flood,home1,10.9.0.1,origin,10.5.0.1,tcp,4,port=22 count=98,critical,True,2.7
+hybrid,1785405973.8137395,port_scan,home1,10.9.0.1,root1,10.1.0.1,tcp,15,ports=275-288,medium,True,2.9
+hybrid,1785405989.814345,port_scan,home1,10.9.0.1,origin,10.5.0.1,tcp,7,ports=860-880,medium,True,3.1
+hybrid,1785406008.6326218,slowloris,home2,10.9.0.2,root1,10.1.0.1,tcp,9,slowloris_connections,high,True,3.4
+hybrid,1785406021.6332731,udp_flood,corp2,10.7.0.2,origin,10.5.0.1,udp,5,port=123 count=158,critical,True,3.7
+hybrid,1785406059.238461,slowloris,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,7,slowloris_connections,high,True,4.3
+hybrid,1785406108.0317202,port_scan,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,4,ports=585-602,medium,True,5.1
+hybrid,1785406125.8336003,udp_flood,mob1,10.8.0.1,cdn1,10.4.0.1,udp,14,port=53 count=80,critical,True,5.4
+hybrid,1785406133.8342578,udp_flood,corp1,10.7.0.1,root1,10.1.0.1,udp,9,port=1900 count=147,critical,True,5.5
+hybrid,1785406166.6355286,dns_amplify,mob1,10.8.0.1,cdn1,10.4.0.1,udp,15,dns_amplification,high,True,6.1
+hybrid,1785406179.637092,brute_force,corp1,10.7.0.1,isp_gw,10.2.0.1,tcp,2,http_brute_force,high,True,6.3
+hybrid,1785406195.4444904,port_scan,mob2,10.8.0.2,cdn1,10.4.0.1,tcp,8,ports=635-651,medium,True,6.6
+hybrid,1785406212.4453998,syn_flood,home2,10.9.0.2,root1,10.1.0.1,tcp,5,port=8080 count=154,critical,True,6.8
+hybrid,1785406230.2534354,udp_flood,mob1,10.8.0.1,root1,10.1.0.1,udp,15,port=123 count=113,critical,True,7.1
+hybrid,1785406237.2540278,udp_flood,home1,10.9.0.1,cdn2,10.4.0.2,udp,3,port=1900 count=124,critical,True,7.3
+hybrid,1785406278.0510654,brute_force,home2,10.9.0.2,root1,10.1.0.1,tcp,2,http_brute_force,high,True,7.9
+hybrid,1785406283.0516682,dns_amplify,home1,10.9.0.1,isp_gw,10.2.0.1,udp,7,dns_amplification,high,True,8.0
+hybrid,1785406294.8298137,udp_flood,mob1,10.8.0.1,root1,10.1.0.1,udp,13,port=53 count=131,critical,True,8.2
+hybrid,1785406305.8303902,syn_flood,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,3,port=80 count=75,critical,True,8.4
+hybrid,1785406354.5908234,brute_force,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,7,http_brute_force,high,True,9.2
+hybrid,1785406370.33828,udp_flood,corp2,10.7.0.2,isp_gw,10.2.0.1,udp,15,port=53 count=129,critical,True,9.5
+hybrid,1785406409.0659502,port_scan,corp1,10.7.0.1,root1,10.1.0.1,tcp,12,ports=143-160,medium,True,10.1
+hybrid,1785406415.066478,port_scan,corp1,10.7.0.1,origin,10.5.0.1,tcp,14,ports=124-129,medium,True,10.2
+hybrid,1785406463.529041,ping_sweep,home2,10.9.0.2,cdn1,10.4.0.1,icmp,6,subnet=10.4.0.0/24,low,True,11.0
+hybrid,1785406494.4995098,port_scan,corp1,10.7.0.1,cdn2,10.4.0.2,tcp,5,ports=616-631,medium,True,11.5
+hybrid,1785406534.311323,dns_amplify,mob2,10.8.0.2,isp_gw,10.2.0.1,udp,12,dns_amplification,high,True,12.2
+hybrid,1785406544.311976,port_scan,mob1,10.8.0.1,cdn2,10.4.0.2,tcp,5,ports=860-869,medium,True,12.4
+hybrid,1785406599.2743351,dns_amplify,mob2,10.8.0.2,cdn2,10.4.0.2,udp,11,dns_amplification,high,True,13.3
+hybrid,1785406630.2809868,ping_sweep,mob1,10.8.0.1,root1,10.1.0.1,icmp,5,subnet=10.1.0.0/24,low,True,13.8
+hybrid,1785406663.9955602,port_scan,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,11,ports=847-867,medium,True,14.4
+hybrid,1785406669.996278,udp_flood,mob1,10.8.0.1,cdn2,10.4.0.2,udp,2,port=123 count=196,critical,True,14.5
+hybrid,1785406741.700805,syn_flood,mob1,10.8.0.1,root1,10.1.0.1,tcp,12,port=80 count=88,critical,True,15.7
+hybrid,1785406792.4214396,port_scan,home2,10.9.0.2,cdn1,10.4.0.1,tcp,9,ports=229-245,medium,True,16.5
+hybrid,1785406800.4220328,port_scan,home2,10.9.0.2,root1,10.1.0.1,tcp,13,ports=362-382,medium,True,16.6
+hybrid,1785406814.4221957,ping_sweep,home2,10.9.0.2,origin,10.5.0.1,icmp,4,subnet=10.5.0.0/24,low,True,16.9
+hybrid,1785406831.2843542,udp_flood,mob1,10.8.0.1,origin,10.5.0.1,udp,2,port=1900 count=174,critical,True,17.2
+hybrid,1785406848.2846725,syn_flood,mob2,10.8.0.2,root1,10.1.0.1,tcp,2,port=8080 count=79,critical,True,17.4
+hybrid,1785406899.012345,slowloris,mob1,10.8.0.1,cdn2,10.4.0.2,tcp,7,slowloris_connections,high,True,18.3
+hybrid,1785406937.8724723,port_scan,corp1,10.7.0.1,root1,10.1.0.1,tcp,11,ports=674-680,medium,True,18.9
+hybrid,1785406955.7351744,port_scan,home2,10.9.0.2,cdn1,10.4.0.1,tcp,12,ports=978-994,medium,True,19.2
+hybrid,1785406983.7361238,port_scan,corp2,10.7.0.2,origin,10.5.0.1,tcp,7,ports=446-459,medium,True,19.7
+hybrid,1785407027.4623082,slowloris,mob2,10.8.0.2,root1,10.1.0.1,tcp,13,slowloris_connections,high,True,20.4
+hybrid,1785407064.345477,syn_flood,corp2,10.7.0.2,root1,10.1.0.1,tcp,7,port=443 count=88,critical,True,21.0
+hybrid,1785407112.2082086,udp_flood,home1,10.9.0.1,isp_gw,10.2.0.1,udp,6,port=161 count=101,critical,True,21.8
+hybrid,1785407144.3048768,port_scan,mob2,10.8.0.2,root1,10.1.0.1,tcp,9,ports=274-288,medium,True,22.4
+hybrid,1785407175.0965216,syn_flood,mob2,10.8.0.2,cdn2,10.4.0.2,tcp,9,port=8080 count=79,critical,True,22.9
+hybrid,1785407232.9600854,dns_amplify,home2,10.9.0.2,isp_gw,10.2.0.1,udp,9,dns_amplification,high,True,23.9
+hybrid,1785407251.8759987,data_exfil,home2,10.9.0.2,origin,10.5.0.1,tcp,9,exfil_rate=840K,critical,True,0.2
+hybrid,1785407285.80261,data_exfil,home1,10.9.0.1,isp_gw,10.2.0.1,tcp,15,exfil_rate=171K,critical,True,0.7
+hybrid,1785407308.8039095,ping_sweep,home1,10.9.0.1,isp_gw,10.2.0.1,icmp,12,subnet=10.2.0.0/24,low,True,1.1
+hybrid,1785407335.849002,ping_sweep,mob2,10.8.0.2,root1,10.1.0.1,icmp,15,subnet=10.1.0.0/24,low,True,1.6
+hybrid,1785407371.785196,syn_flood,corp2,10.7.0.2,cdn2,10.4.0.2,tcp,12,port=443 count=112,critical,True,2.2
+hybrid,1785407396.866889,brute_force,mob1,10.8.0.1,isp_gw,10.2.0.1,tcp,4,http_brute_force,high,True,2.6
+hybrid,1785407405.8676035,port_scan,home2,10.9.0.2,isp_gw,10.2.0.1,tcp,6,ports=229-240,medium,True,2.7
+hybrid,1785407431.9241269,ping_sweep,home1,10.9.0.1,isp_gw,10.2.0.1,icmp,4,subnet=10.2.0.0/24,low,True,3.2
+hybrid,1785407443.9247012,port_scan,mob1,10.8.0.1,cdn1,10.4.0.1,tcp,7,ports=37-48,medium,True,3.4
+hybrid,1785407464.0153608,syn_flood,home1,10.9.0.1,cdn1,10.4.0.1,tcp,4,port=8080 count=55,critical,True,3.7
+hybrid,1785407492.1205018,syn_flood,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,5,port=8080 count=52,critical,True,4.2
+hybrid,1785407497.1211343,udp_flood,mob2,10.8.0.2,cdn1,10.4.0.1,udp,3,port=161 count=157,critical,True,4.3
+hybrid,1785407503.1228962,slowloris,corp1,10.7.0.1,cdn1,10.4.0.1,tcp,6,slowloris_connections,high,True,4.4
+hybrid,1785407513.123104,port_scan,home2,10.9.0.2,cdn2,10.4.0.2,tcp,3,ports=69-88,medium,True,4.5
+hybrid,1785407534.224678,slowloris,mob2,10.8.0.2,root1,10.1.0.1,tcp,4,slowloris_connections,high,True,4.9
+hybrid,1785407542.2258816,ping_sweep,home2,10.9.0.2,cdn1,10.4.0.1,icmp,10,subnet=10.4.0.0/24,low,True,5.0
+hybrid,1785407574.3355188,syn_flood,home2,10.9.0.2,root1,10.1.0.1,tcp,10,port=443 count=158,critical,True,5.5
+hybrid,1785407606.417804,dns_amplify,corp1,10.7.0.1,isp_gw,10.2.0.1,udp,4,dns_amplification,high,True,6.1

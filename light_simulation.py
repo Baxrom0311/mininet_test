@@ -581,6 +581,7 @@ def compute_paths(topo, routing_mode):
       spf      - Generic SPF (Dijkstra delay-weighted)
       policy   - Policy routing (AS preference)
       static   - Static routes (manually defined shortest)
+      hybrid   - Real internet: AS ichida OSPF (IGP), AS orasida BGP (EGP), ECMP
 
     Return: {(src_host, dst_host): [sw1, sw2, ...]}
     """
@@ -903,6 +904,72 @@ def compute_paths(topo, routing_mode):
             for dst_h, dst_sw in host_sw.items():
                 if src_h != dst_h and src_sw == dst_sw:
                     paths[(src_h, dst_h)] = [src_sw]
+
+    # ══════════════════════════════════════════════
+    #  Hybrid — Real internetga o'xshash: AS ichida OSPF (IGP),
+    #  AS'lar orasida BGP (EGP), teng narxli yo'llarda ECMP
+    # ══════════════════════════════════════════════
+    elif routing_mode == "hybrid":
+        as_of_switch = {sw: info.get("as", 0) for sw, info in topo["switches"].items()}
+
+        def _subgraph_for_as(as_id):
+            sg = {}
+            for u, neighbors in graph.items():
+                if as_of_switch.get(u) != as_id:
+                    continue
+                sg[u] = [(v, p) for v, p in neighbors if as_of_switch.get(v) == as_id]
+            return sg
+
+        as_subgraphs = {as_id: _subgraph_for_as(as_id) for as_id in set(as_of_switch.values())}
+
+        def _path_ospf_cost(path):
+            cost = 0
+            for i in range(len(path) - 1):
+                for v, params in graph.get(path[i], []):
+                    if v == path[i + 1]:
+                        cost += _compute_ospf_cost(params)
+                        break
+            return cost
+
+        for src_h, src_sw in host_sw.items():
+            src_as = as_of_switch.get(src_sw, 0)
+            for dst_h, dst_sw in host_sw.items():
+                if src_sw == dst_sw:
+                    paths[(src_h, dst_h)] = [src_sw]
+                    continue
+
+                dst_as = as_of_switch.get(dst_sw, 0)
+
+                if src_as == dst_as:
+                    # Intra-AS — IGP (OSPF-uslubidagi cost-weighted Dijkstra),
+                    # faqat shu AS switchlari orqali
+                    sg = as_subgraphs.get(src_as, {})
+                    _, prev = _dijkstra_weighted(sg, src_sw, _compute_ospf_cost)
+                    path = _reconstruct_path(prev, src_sw, dst_sw)
+                    if not path:
+                        # AS bo'lingan bo'lsa — to'liq grafga qaytish
+                        _, prev_full = _dijkstra_weighted(graph, src_sw, _compute_ospf_cost)
+                        path = _reconstruct_path(prev_full, src_sw, dst_sw)
+                    if path:
+                        # ECMP — teng narxli yo'llar orasida tanlash
+                        all_p = _bfs_all_paths(sg or graph, src_sw).get(dst_sw, [])
+                        if all_p:
+                            best_cost = _path_ospf_cost(path)
+                            tied = [p for p in all_p if _path_ospf_cost(p) == best_cost]
+                            if len(tied) > 1:
+                                path = random.choice(tied)
+                        paths[(src_h, dst_h)] = path
+                else:
+                    # Inter-AS — EGP (BGP-uslubidagi AS-PATH/local-pref tanlash)
+                    all_p = _bfs_all_paths(graph, src_sw).get(dst_sw, [])
+                    if not all_p:
+                        continue
+                    scored = [(_bgp_path_score(topo, p)[0], p) for p in all_p]
+                    scored.sort(key=lambda x: x[0])
+                    best_score = scored[0][0]
+                    # ECMP — teng BGP-skorli yo'llar orasida tanlash
+                    tied = [p for s, p in scored if s == best_score]
+                    paths[(src_h, dst_h)] = random.choice(tied) if len(tied) > 1 else scored[0][1]
 
     # ══════════════════════════════════════════════
     #  L2 Learn — Default BFS flooding
@@ -2327,7 +2394,7 @@ Topologiyalar:
   datacenter  Fat-tree DC, 6 switch     (datacenter)
   campus      Kampus, 7 switch          (enterprise)
 
-Routing (10 ta):
+Routing (11 ta):
   l2_learn    L2 MAC learning (default)
   rip         RIP v2 (hop count, max 15, split horizon)
   ospf        OSPF (link-state, Dijkstra, cost=ref_bw/bw, areas)
@@ -2338,6 +2405,7 @@ Routing (10 ta):
   spf         Shortest Path First (Dijkstra)
   policy      Policy-based routing (AS preference)
   static      Static routes (admin-defined)
+  hybrid      Real internet: AS ichida OSPF (IGP) + AS orasida BGP (EGP) + ECMP
 
 Misollar:
   sudo python3 light_simulation.py --topology five_as --routing ospf --duration 300
@@ -2348,7 +2416,7 @@ Misollar:
     parser.add_argument("--topology", choices=list(TOPOLOGIES.keys()), default="three_as")
     parser.add_argument("--routing", choices=[
         "l2_learn", "rip", "ospf", "isis", "eigrp", "bgp",
-        "ecmp", "spf", "policy", "static"
+        "ecmp", "spf", "policy", "static", "hybrid"
     ], default="l2_learn")
     parser.add_argument("--duration", type=int, default=180)
     parser.add_argument("--cli", action="store_true")
