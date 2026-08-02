@@ -119,10 +119,17 @@ TOPOLOGIES = {
             "origin": {"switch": "s5", "ip": "10.5.0.1/8",  "role": "server"},  # Origin server
             "corp1":  {"switch": "s7", "ip": "10.7.0.1/8",  "role": "client"},  # Enterprise
             "corp2":  {"switch": "s7", "ip": "10.7.0.2/8",  "role": "client"},
-            "home1":  {"switch": "s9", "ip": "10.9.0.1/8",  "role": "client"},  # Residential
-            "home2":  {"switch": "s9", "ip": "10.9.0.2/8",  "role": "client"},
-            "mob1":   {"switch": "s8", "ip": "10.8.0.1/8",  "role": "client"},  # Mobile
-            "mob2":   {"switch": "s8", "ip": "10.8.0.2/8",  "role": "client"},
+            # Residential/mobile — NAT orqasidagi xususiy (RFC1918) manzillar.
+            # Tashqariga chiqishda nat_gw ularni o'z ommaviy IP'siga tarjima qiladi.
+            "home1":  {"switch": "s9", "ip": "192.168.50.11/24", "role": "client"},
+            "home2":  {"switch": "s9", "ip": "192.168.50.12/24", "role": "client"},
+            "mob1":   {"switch": "s8", "ip": "192.168.50.21/24", "role": "client"},
+            "mob2":   {"switch": "s8", "ip": "192.168.50.22/24", "role": "client"},
+            # NAT gateway — bitta interfeys (s8), ustida ikkita manzil:
+            # ommaviy (bu "ip", 10.x.x.x) + xususiy (192.168.50.1, kod orqali
+            # setup_nat_gateway()da qo'shiladi). "gateway" roli — TrafficGen
+            # uni client/server sifatida tanlamaydi, faqat NAT/forward qiladi.
+            "nat_gw": {"switch": "s8", "ip": "10.8.0.9/8", "role": "gateway"},
         },
         "links": {
             # Tier-1 to Tier-2
@@ -158,6 +165,7 @@ TOPOLOGIES = {
             "home2":  {"bw": 6,  "delay": "20ms", "loss": 0.8},
             "mob1":   {"bw": 8,  "delay": "40ms", "loss": 2.0},
             "mob2":   {"bw": 5,  "delay": "55ms", "loss": 3.0},
+            "nat_gw": {"bw": 30, "delay": "1ms",  "loss": 0},
         },
     },
 
@@ -264,6 +272,25 @@ TRAFFIC_MIX = [
     ("p2p",     0.03, "tcp", (500, 6000)),    # Peer-to-peer trafik
     ("cloud",   0.04, "tcp", (200, 2500)),    # Cloud API / SaaS
 ]
+
+# QoS/DiffServ: trafik turi -> (DSCP nomi, TOS bayt qiymati, navbat bandi)
+# band 0 = eng yuqori ustuvorlik (EF, real-vaqt), 1 = o'rta (AF21), 2 = fon (CS1/BE)
+DSCP_MAP = {
+    "voip":      ("EF",   0xB8, 0),
+    "gaming":    ("EF",   0xB8, 0),
+    "video":     ("EF",   0xB8, 0),
+    "streaming": ("EF",   0xB8, 0),
+    "web":       ("AF21", 0x48, 1),
+    "https":     ("AF21", 0x48, 1),
+    "cloud":     ("AF21", 0x48, 1),
+    "ssh":       ("AF21", 0x48, 1),
+    "dns":       ("AF21", 0x48, 1),
+    "bulk":      ("CS1",  0x20, 2),
+    "p2p":       ("CS1",  0x20, 2),
+    "email":     ("CS1",  0x20, 2),
+    "iot":       ("CS1",  0x20, 2),
+}
+DEFAULT_DSCP = ("BE", 0x00, 2)
 
 # Anomal/xavfli trafik turlari (kam chastotada)
 ANOMALY_MIX = [
@@ -1173,6 +1200,51 @@ class TransportMonitor(BaseApp):
 #  TOPOLOGY BUILDER
 # ─────────────────────────────────────────────────────────
 
+def _parse_ms(val):
+    """'3ms' yoki 3 -> 3.0 (float, ms)."""
+    if isinstance(val, str):
+        return float(val.replace("ms", "").strip() or 0)
+    return float(val or 0)
+
+
+# QoS band -> (htb classid, netem handle, bandwidth ulushi)
+QOS_BANDS = [
+    (0x10, 0x10, 0.5),   # EF  — real-vaqt (voip/video/gaming)
+    (0x20, 0x20, 0.3),   # AF21 — interaktiv (web/https/dns/ssh)
+    (0x30, 0x30, 0.2),   # BE/CS1 — fon/bulk trafik
+]
+QOS_TOS_FILTERS = [(0xB8, 0x10), (0x48, 0x20), (0x20, 0x30)]  # (tos, classid)
+
+
+def _setup_qos_qdisc(intf, params):
+    """TCLink'ning yassi netem qdisc'ini 3-bandli DiffServ navbatiga
+    almashtiradi: EF (real-vaqt) / AF21 (interaktiv) / BE (fon), DSCP
+    (paket TOS bayti) bo'yicha yo'naltiriladi. Har band ichida asl
+    delay/loss/jitter/queue saqlanadi — faqat ustuvorlik farqlanadi."""
+    node, ifname = intf.node, intf.name
+    bw = max(float(params.get("bw", 10)), 1)
+    delay = _parse_ms(params.get("delay", "0ms"))
+    jitter = _parse_ms(params.get("jitter", "0ms"))
+    loss = params.get("loss", 0)
+    queue = params.get("queue", 100)
+
+    # Barcha tc buyruqlari BITTA .cmd() chaqiruviga birlashtiriladi — Mininet
+    # Node.cmd() ketma-ket ko'p marta chaqirilganda (100+ marta, startup
+    # paytida) ichki sendCmd/waitOutput mexanizmi qotib qolishi mumkin edi.
+    cmds = [f"tc qdisc del dev {ifname} root 2>/dev/null",
+            f"tc qdisc add dev {ifname} root handle 1: htb default 30"]
+    for classid, handle, share in QOS_BANDS:
+        rate = max(bw * share, 0.1)
+        cmds.append(f"tc class add dev {ifname} parent 1: classid 1:{classid:x} "
+                    f"htb rate {rate:.2f}mbit ceil {bw:.2f}mbit prio {handle // 0x10 - 1}")
+        cmds.append(f"tc qdisc add dev {ifname} parent 1:{classid:x} handle {handle:x}: "
+                    f"netem delay {delay}ms {jitter}ms loss {loss}% limit {queue}")
+    for prio, (tos, classid) in enumerate(QOS_TOS_FILTERS, start=1):
+        cmds.append(f"tc filter add dev {ifname} parent 1: protocol ip prio {prio} "
+                    f"u32 match ip tos {tos} 0xfc flowid 1:{classid:x}")
+    node.cmd(" ; ".join(cmds))
+
+
 def build_topology(topo):
     """Mininet topologiya yaratish."""
     from mininet.net import Mininet
@@ -1198,11 +1270,114 @@ def build_topology(topo):
         net.addLink(hosts[h_name], switches[h_info["switch"]],
                     cls=TCLink, bw=al["bw"], delay=al["delay"], loss=al["loss"])
 
+    net._qos_links = []  # (intf1, intf2, params) — net.start() dan keyin QoS qdisc o'rnatish uchun
     for (s1, s2), params in topo["links"].items():
-        net.addLink(switches[s1], switches[s2], cls=TCLink,
+        link = net.addLink(switches[s1], switches[s2], cls=TCLink,
                     bw=params["bw"], delay=params["delay"],
                     loss=params["loss"], max_queue_size=params["queue"])
+        net._qos_links.append((link.intf1, link.intf2, params))
+
     return net
+
+
+def apply_qos_qdiscs(net):
+    """net.start() dan KEYIN chaqirilishi shart — TCLink o'z qdisc'ini
+    o'rnatib bo'lgach, uni 3-bandli DiffServ navbatiga almashtiradi."""
+    for intf1, intf2, params in getattr(net, "_qos_links", []):
+        _setup_qos_qdisc(intf1, params)
+        _setup_qos_qdisc(intf2, params)
+
+
+# NAT orqasidagi (xususiy IP) hostlar -> gateway nomi. Faqat shu ro'yxatdagi
+# topologiyalarda (hozircha five_as, residential AS) ishlaydi; boshqa
+# topologiyalarda "nat_gw" hosti yo'q bo'lgani uchun avtomatik o'tkazib
+# yuboriladi.
+NAT_PRIVATE_SUBNET = "192.168.50.0/24"
+NAT_PRIVATE_HOSTS = ["home1", "home2", "mob1", "mob2"]
+
+
+def setup_nat_gateway(net, topo):
+    """net.start() dan KEYIN chaqiriladi. nat_gw — bitta interfeysli
+    "one-armed" NAT router: xususiy (192.168.50.0/24) va ommaviy (10.x.x.x)
+    manzil bir xil interfeysda birga yashaydi, SNAT orqali tarjima qilinadi.
+    compute_paths()/switch grafigi butunlay o'zgarishsiz qoladi — nat_gw
+    oddiy host sifatida mavjud switch fabrikiga ulanadi, yangi switch-link
+    qo'shilmaydi."""
+    if "nat_gw" not in topo["hosts"]:
+        return
+    gw = net.get("nat_gw")
+    ifname = gw.defaultIntf().name
+    gw.cmd(f"ip addr add 192.168.50.1/24 dev {ifname}")
+    gw.cmd("sysctl -w net.ipv4.ip_forward=1 2>/dev/null")
+    gw.cmd(f"iptables -t nat -A POSTROUTING -s {NAT_PRIVATE_SUBNET} -j SNAT --to-source {gw.IP()}")
+    for hname in NAT_PRIVATE_HOSTS:
+        if hname not in topo["hosts"]:
+            continue
+        h = net.get(hname)
+        h.cmd("ip route add default via 192.168.50.1")
+    print(f"[NAT] nat_gw tayyor: xususiy {NAT_PRIVATE_SUBNET} -> ommaviy {gw.IP()}")
+
+
+class NATMonitor:
+    """nat_gw'dagi conntrack jadvalini davriy o'qib, xususiy<->ommaviy
+    IP/port tarjimalarini stats/nat_translations.jsonl'ga yozadi."""
+
+    def __init__(self, net, topo, interval=5):
+        self.net = net
+        self.topo = topo
+        self.interval = interval
+        self._running = False
+        self._thread = None
+        self._log = os.path.join(DATA_DIR, "stats/nat_translations.jsonl")
+
+    def start(self):
+        if "nat_gw" not in self.topo["hosts"]:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._running = False
+        if self._thread:
+            self._thread.join(timeout=5)
+
+    def _loop(self):
+        gw = self.net.get("nat_gw")
+        while self._running:
+            time.sleep(self.interval)
+            if not self._running:
+                break
+            ts = time.time()
+            out = gw.cmd("cat /proc/net/nf_conntrack 2>/dev/null")
+            for line in out.splitlines():
+                if NAT_PRIVATE_SUBNET.split("/")[0].rsplit(".", 1)[0] not in line:
+                    continue
+                fields = line.split()
+                proto = fields[2] if len(fields) > 2 else ""
+                src = dst = sport = dport = None
+                for tok in fields:
+                    if tok.startswith("src=") and src is None:
+                        src = tok.split("=", 1)[1]
+                    elif tok.startswith("dst=") and dst is None:
+                        dst = tok.split("=", 1)[1]
+                    elif tok.startswith("sport=") and sport is None:
+                        sport = tok.split("=", 1)[1]
+                    elif tok.startswith("dport=") and dport is None:
+                        dport = tok.split("=", 1)[1]
+                if not src or not src.startswith("192.168.50."):
+                    continue
+                entry = {
+                    "ts": ts, "proto": proto,
+                    "private_ip": src, "private_port": sport,
+                    "public_ip": self.net.get("nat_gw").IP(),
+                    "dst_ip": dst, "dst_port": dport,
+                }
+                try:
+                    with open(self._log, "a") as f:
+                        f.write(json.dumps(entry) + "\n")
+                except OSError:
+                    pass
 
 
 # ─────────────────────────────────────────────────────────
@@ -1227,6 +1402,7 @@ class TrafficGen:
         self._active_connections = deque(maxlen=500)
         self._dns_cache = {}  # DNS cache simulyatsiyasi
         self._conn_counter = 0
+        self._host_cc = {}  # host_name -> TCP congestion control algoritmi
 
     def _safe_cmd(self, host, cmd_str):
         try:
@@ -1262,18 +1438,21 @@ class TrafficGen:
             self._safe_cmd(host, "echo '<html><body>Server " + name + "</body></html>' > /tmp/www/index.html")
             self._safe_cmd(host, "cd /tmp/www && python3 -m http.server 80 &")
 
-        # ── 2. TCP CC algoritmlarini aralash qo'yish ──
-        for name, client in self.clients.items():
+        # ── 2. TCP CC algoritmlarini aralash qo'yish (client + server) ──
+        # Server tomonining CC algoritmi ham muhim — server->client yuklab
+        # olishda oqim server tomonidagi algoritm bilan boshqariladi.
+        for name, host in list(self.clients.items()) + list(self.servers.items()):
             cc = random.choice(TCP_CC_ALGORITHMS)
-            self._safe_cmd(client, f"sysctl -w net.ipv4.tcp_congestion_control={cc} 2>/dev/null")
-            self._log_event("tcp_cc_set", name, "", "config", cc)
+            self._safe_cmd(host, f"sysctl -w net.ipv4.tcp_congestion_control={cc} 2>/dev/null")
+            self._host_cc[name] = cc
+            self._log_event("tcp_cc_set", name, "", "config", cc, tcp_cc=cc)
 
         # ── 3. Background traffic ──
         for name, client in self.clients.items():
             srv = random.choice(srv_list)
             bw = random.choice(["30K", "50K", "100K"])
             self._safe_cmd(client, f"iperf3 -c {srv.IP()} -p 5201 -t 86400 -b {bw} --logfile /dev/null &")
-            self._log_event("background", name, srv.name, "tcp", bw)
+            self._log_event("background", name, srv.name, "tcp", bw, tcp_cc=self._host_cc.get(name))
 
         # ── 4. Barcha loop'lar ──
         for target in [self._app_loop, self._burst_loop, self._congestion_loop,
@@ -1313,8 +1492,12 @@ class TrafficGen:
             server = random.choice(srv_list)
             port = 5201 if proto == "tcp" else 5202
             flag = "" if proto == "tcp" else "-u "
-            self._safe_cmd(client, f"iperf3 -c {server.IP()} -p {port} {flag}-t {duration} -b {rate}K --logfile /dev/null &")
-            self._log_event(name, client.name, server.name, proto, f"{rate}K", load_factor=round(load, 2))
+            dscp_name, tos, band = DSCP_MAP.get(name, DEFAULT_DSCP)
+            self._safe_cmd(client, f"iperf3 -c {server.IP()} -p {port} {flag}-t {duration} -b {rate}K "
+                                    f"-S {tos} --logfile /dev/null &")
+            self._log_event(name, client.name, server.name, proto, f"{rate}K",
+                           load_factor=round(load, 2), tcp_cc=self._host_cc.get(client.name),
+                           dscp=dscp_name, queue_band=band)
             time.sleep(random.uniform(0.3, 2.0))
 
     def _burst_loop(self):
@@ -1327,11 +1510,14 @@ class TrafficGen:
                 continue  # Kechasi burst kam
             srv = random.choice(list(self.servers.values()))
             clients = random.sample(list(self.clients.values()), min(3, len(self.clients)))
+            dscp_name, tos, band = DSCP_MAP["web"]  # burst = to'satdan interaktiv yuklanish
             for c in clients:
                 rate = random.randint(2000, 8000)
-                self._safe_cmd(c, f"iperf3 -c {srv.IP()} -p 5201 -t 3 -b {rate}K --logfile /dev/null &")
+                self._safe_cmd(c, f"iperf3 -c {srv.IP()} -p 5201 -t 3 -b {rate}K -S {tos} --logfile /dev/null &")
             self._log_event("burst", ",".join(c.name for c in clients), srv.name, "tcp", "high",
-                           load_factor=round(load, 2))
+                           load_factor=round(load, 2),
+                           tcp_cc=",".join(self._host_cc.get(c.name, "") for c in clients),
+                           dscp=dscp_name, queue_band=band)
 
     def _congestion_loop(self):
         """Maxsus congestion - bottleneck linkni to'ldirish."""
@@ -1347,11 +1533,13 @@ class TrafficGen:
             bw = min_bw_link[1]["bw"]
             # Bottleneck'ni to'ldiradigan trafik
             srv = random.choice(list(self.servers.values()))
+            dscp_name, tos, band = DSCP_MAP["bulk"]  # bottleneck to'ldirish = fon trafik
             for c in list(self.clients.values()):
                 rate = int(bw * 1000 * 0.3)  # Link kapasitetining 30%
-                self._safe_cmd(c, f"iperf3 -c {srv.IP()} -p 5201 -t 5 -b {rate}K --logfile /dev/null &")
+                self._safe_cmd(c, f"iperf3 -c {srv.IP()} -p 5201 -t 5 -b {rate}K -S {tos} --logfile /dev/null &")
             self._log_event("congestion_gen", "all_clients", srv.name, "tcp",
-                           f"{bw}Mbps_link", load_factor=round(load, 2))
+                           f"{bw}Mbps_link", load_factor=round(load, 2),
+                           dscp=dscp_name, queue_band=band)
 
     # ── Real HTTP trafik (wget/curl) ──
     def _http_loop(self):
@@ -1393,6 +1581,7 @@ class TrafficGen:
                 "keep_alive": random.random() > 0.3,
                 "user_agent": random.choice(["Mozilla/5.0", "Chrome/125", "curl/8.0", "python-requests/2.31"]),
                 "tls": target != "index.html" and random.random() > 0.4,
+                "tcp_cc": self._host_cc.get(client.name),
             }
             try:
                 with open(self._http_log, "a") as f:
@@ -1400,12 +1589,15 @@ class TrafficGen:
             except OSError:
                 pass
             self._log_event("http", client.name, server.name, "tcp", f"{method}:{target}",
-                           status=status, response_ms=round(elapsed_ms, 2))
+                           status=status, response_ms=round(elapsed_ms, 2),
+                           tcp_cc=self._host_cc.get(client.name))
             time.sleep(random.uniform(0.3, 1.5))
 
-    # ── DNS Resolution zanjiri ──
+    # ── DNS Resolution zanjiri (root -> TLD -> authoritative) ──
     def _dns_loop(self):
-        """DNS so'rovlarni simulyatsiya — caching, TTL, recursive lookup."""
+        """DNS so'rovlarni simulyatsiya — real ko'p bosqichli rekursiya:
+        resolver avval root'ga, keyin TLD'ga, oxirida authoritative serverga
+        murojaat qiladi (har biri o'z darajasida keshlanadi)."""
         cli_list = list(self.clients.values())
         dns_servers = [h for n, h in self.servers.items() if "dns" in n.lower()]
         if not dns_servers:
@@ -1420,52 +1612,103 @@ class TrafficGen:
             ("malware.bad.evil", "A", 0),  # Suspicious domain
             ("c2.hidden.onion", "A", 0),   # C2 callback attempt
         ]
+        # Har daraja uchun keshlash muddati: root/TLD kamdan-kam o'zgaradi,
+        # authoritative javob domenning o'z TTL'siga bog'liq.
+        ROOT_TTL = 21600   # ~6 soat — root NS ma'lumoti uzoq keshlanadi
+        TLD_TTL = 3600     # 1 soat — TLD NS ma'lumoti
+        STAGE_MULT = {"root": (0.8, 1.2), "tld": (1.0, 1.8), "authoritative": (1.0, 2.5)}
+        resolution_counter = 0
         while self._running:
             client = random.choice(cli_list)
             domain, qtype, ttl = random.choice(domains)
             dns_srv = random.choice(dns_servers)
-            cache_key = f"{client.name}:{domain}"
-            # DNS cache check
+            tld = domain.rsplit(".", 1)[-1]
             now = time.time()
-            cached = self._dns_cache.get(cache_key)
-            cache_hit = cached and (now - cached["ts"]) < cached["ttl"]
-            if cache_hit:
-                response_time = random.uniform(0.1, 0.5)  # Cache hit = tez
-                source = "cache"
-            else:
-                # Real ping to DNS server to measure latency
-                start_t = time.time()
-                self._safe_cmd(client, f"ping -c 1 -W 1 {dns_srv.IP()} > /dev/null 2>&1")
-                response_time = (time.time() - start_t) * 1000
-                # Recursive lookup adds more latency
-                if random.random() > 0.7:
-                    response_time *= random.uniform(1.5, 3.0)  # Recursive = sekin
-                    source = "recursive"
-                else:
-                    source = "authoritative"
-                self._dns_cache[cache_key] = {"ts": now, "ttl": ttl}
 
-            # DNS response codes
-            rcode = "NOERROR"
-            if "malware" in domain or "hidden" in domain:
-                rcode = random.choice(["NXDOMAIN", "NOERROR", "SERVFAIL"])
-            elif random.random() < 0.02:
-                rcode = random.choice(["NXDOMAIN", "SERVFAIL", "REFUSED"])
+            root_key = f"{client.name}:root:{tld}"
+            tld_key = f"{client.name}:tld:{tld}"
+            auth_key = f"{client.name}:auth:{domain}"
 
-            entry = {
-                "ts": now, "client": client.name, "client_ip": client.IP(),
-                "dns_server": dns_srv.name, "dns_server_ip": dns_srv.IP(),
-                "domain": domain, "query_type": qtype, "ttl": ttl,
-                "response_time_ms": round(response_time, 2),
-                "cache_hit": cache_hit, "source": source,
-                "rcode": rcode, "is_suspicious": "malware" in domain or "hidden" in domain,
-            }
-            try:
-                with open(self._dns_log, "a") as f:
-                    f.write(json.dumps(entry) + "\n")
-            except OSError:
-                pass
+            def _fresh(key, default_ttl):
+                c = self._dns_cache.get(key)
+                return bool(c and (now - c["ts"]) < c.get("ttl", default_ttl))
+
+            root_fresh = _fresh(root_key, ROOT_TTL)
+            tld_fresh = _fresh(tld_key, TLD_TTL)
+            auth_fresh = _fresh(auth_key, ttl)
+
+            resolution_counter += 1
+            resolution_id = f"{client.name}-{resolution_counter}-{int(now)}"
+
+            if auth_fresh:
+                # To'liq kesh urishi — hech qanday tarmoq so'rovi kerak emas
+                entry = {
+                    "ts": now, "resolution_id": resolution_id,
+                    "client": client.name, "client_ip": client.IP(),
+                    "dns_server": dns_srv.name, "dns_server_ip": dns_srv.IP(),
+                    "domain": domain, "query_type": qtype, "ttl": ttl,
+                    "stage": "cache", "referral_to": "",
+                    "response_time_ms": round(random.uniform(0.1, 0.5), 2),
+                    "cache_hit": True, "source": "cache",
+                    "rcode": "NOERROR", "is_suspicious": False,
+                }
+                self._append_dns(entry)
+                time.sleep(random.uniform(0.5, 4.0))
+                continue
+
+            # Bazaviy tarmoq kechikishini bitta real ping bilan o'lchaymiz,
+            # so'ng har bosqich shu asosda o'z ulushini qo'shadi (real
+            # zanjirda har bosqich alohida RTT sarflaydi).
+            start_t = time.time()
+            self._safe_cmd(client, f"ping -c 1 -W 1 {dns_srv.IP()} > /dev/null 2>&1")
+            base_rtt = max((time.time() - start_t) * 1000, 0.2)
+
+            stages = []
+            if not root_fresh:
+                stages.append(("root", f"tld-ns.{tld}"))
+                self._dns_cache[root_key] = {"ts": now, "ttl": ROOT_TTL}
+            if not tld_fresh:
+                stages.append(("tld", f"ns.{domain}"))
+                self._dns_cache[tld_key] = {"ts": now, "ttl": TLD_TTL}
+            stages.append(("authoritative", ""))
+            self._dns_cache[auth_key] = {"ts": now, "ttl": ttl}
+
+            total_time = 0.0
+            for stage_name, referral_to in stages:
+                lo, hi = STAGE_MULT[stage_name]
+                stage_time = base_rtt * random.uniform(lo, hi)
+                total_time += stage_time
+
+                is_final = stage_name == "authoritative"
+                rcode = "NOERROR"
+                is_suspicious = False
+                if is_final:
+                    is_suspicious = "malware" in domain or "hidden" in domain
+                    if is_suspicious:
+                        rcode = random.choice(["NXDOMAIN", "NOERROR", "SERVFAIL"])
+                    elif random.random() < 0.02:
+                        rcode = random.choice(["NXDOMAIN", "SERVFAIL", "REFUSED"])
+
+                entry = {
+                    "ts": now, "resolution_id": resolution_id,
+                    "client": client.name, "client_ip": client.IP(),
+                    "dns_server": dns_srv.name, "dns_server_ip": dns_srv.IP(),
+                    "domain": domain, "query_type": qtype, "ttl": ttl,
+                    "stage": stage_name, "referral_to": referral_to,
+                    "response_time_ms": round(stage_time, 2),
+                    "total_response_time_ms": round(total_time, 2) if is_final else None,
+                    "cache_hit": False, "source": "recursive" if len(stages) > 1 else "authoritative",
+                    "rcode": rcode, "is_suspicious": is_suspicious,
+                }
+                self._append_dns(entry)
             time.sleep(random.uniform(0.5, 4.0))
+
+    def _append_dns(self, entry):
+        try:
+            with open(self._dns_log, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except OSError:
+            pass
 
     # ── Anomal trafik (scan, DDoS, exfil) ──
     def _anomaly_loop(self):
@@ -1724,13 +1967,13 @@ class Impairments:
                 self._log_event("packet_reorder", src, dst, dur,
                                reorder_pct=reorder_pct, gap=gap)
                 try:
-                    node.cmd(f"tc qdisc change dev {intf.name} root netem "
+                    node.cmd(f"tc qdisc change dev {intf.name} parent 1:30 handle 30: netem "
                              f"delay 10ms reorder {reorder_pct}% gap {gap}")
                 except Exception:
                     continue
                 def restore_reorder(n=node, i=intf.name, d=dur, s=src, ds=dst):
                     time.sleep(d)
-                    try: n.cmd(f"tc qdisc change dev {i} root netem delay 0ms")
+                    try: n.cmd(f"tc qdisc change dev {i} parent 1:30 handle 30: netem delay 0ms")
                     except Exception: pass
                     self._log_event("packet_reorder_end", s, ds, 0)
                 threading.Thread(target=restore_reorder, daemon=True).start()
@@ -1740,13 +1983,13 @@ class Impairments:
                 delay_add = random.randint(event["delay"][0], event["delay"][1])
                 self._log_event("buffer_bloat", src, dst, dur, delay_add=delay_add)
                 try:
-                    node.cmd(f"tc qdisc change dev {intf.name} root netem "
+                    node.cmd(f"tc qdisc change dev {intf.name} parent 1:30 handle 30: netem "
                              f"delay {delay_add}ms {delay_add//4}ms distribution normal")
                 except Exception:
                     continue
                 def restore_bloat(n=node, i=intf.name, d=dur, s=src, ds=dst):
                     time.sleep(d)
-                    try: n.cmd(f"tc qdisc change dev {i} root netem delay 0ms")
+                    try: n.cmd(f"tc qdisc change dev {i} parent 1:30 handle 30: netem delay 0ms")
                     except Exception: pass
                     self._log_event("buffer_bloat_end", s, ds, 0)
                 threading.Thread(target=restore_bloat, daemon=True).start()
@@ -1770,13 +2013,13 @@ class Impairments:
                 dup_pct = random.randint(1, 10)
                 self._log_event("duplicate", src, dst, dur, duplicate_pct=dup_pct)
                 try:
-                    node.cmd(f"tc qdisc change dev {intf.name} root netem "
+                    node.cmd(f"tc qdisc change dev {intf.name} parent 1:30 handle 30: netem "
                              f"duplicate {dup_pct}%")
                 except Exception:
                     continue
                 def restore_dup(n=node, i=intf.name, d=dur, s=src, ds=dst):
                     time.sleep(d)
-                    try: n.cmd(f"tc qdisc change dev {i} root netem delay 0ms")
+                    try: n.cmd(f"tc qdisc change dev {i} parent 1:30 handle 30: netem delay 0ms")
                     except Exception: pass
                     self._log_event("duplicate_end", s, ds, 0)
                 threading.Thread(target=restore_dup, daemon=True).start()
@@ -1789,13 +2032,13 @@ class Impairments:
                 self._log_event("jitter_spike", src, dst, dur,
                                delay_add=delay_add, jitter=round(jitter, 1), correlation=corr)
                 try:
-                    node.cmd(f"tc qdisc change dev {intf.name} root netem "
+                    node.cmd(f"tc qdisc change dev {intf.name} parent 1:30 handle 30: netem "
                              f"delay {delay_add}ms {int(jitter)}ms {corr}%")
                 except Exception:
                     continue
                 def restore_jitter(n=node, i=intf.name, d=dur, s=src, ds=dst):
                     time.sleep(d)
-                    try: n.cmd(f"tc qdisc change dev {i} root netem delay 0ms")
+                    try: n.cmd(f"tc qdisc change dev {i} parent 1:30 handle 30: netem delay 0ms")
                     except Exception: pass
                     self._log_event("jitter_spike_end", s, ds, 0)
                 threading.Thread(target=restore_jitter, daemon=True).start()
@@ -1806,13 +2049,13 @@ class Impairments:
                 loss_add = random.uniform(event["loss"][0], event["loss"][1])
                 self._log_event(ename, src, dst, dur, delay_add=delay_add, loss_add=round(loss_add, 2))
                 try:
-                    node.cmd(f"tc qdisc change dev {intf.name} root netem "
+                    node.cmd(f"tc qdisc change dev {intf.name} parent 1:30 handle 30: netem "
                              f"delay {delay_add}ms {delay_add//3}ms 25% loss {loss_add}% 25%")
                 except Exception:
                     continue
                 def restore_netem(n=node, i=intf.name, d=dur, s=src, ds=dst, en=ename):
                     time.sleep(d)
-                    try: n.cmd(f"tc qdisc change dev {i} root netem delay 0ms loss 0%")
+                    try: n.cmd(f"tc qdisc change dev {i} parent 1:30 handle 30: netem delay 0ms loss 0%")
                     except Exception: pass
                     self._log_event(f"{en}_end", s, ds, 0)
                 threading.Thread(target=restore_netem, daemon=True).start()
@@ -2084,6 +2327,7 @@ def build_dataset(topo, routing_mode):
         ("http_transactions", "stats/http_transactions.jsonl"),
         ("anomaly_events", "stats/anomaly_events.jsonl"),
         ("connection_states", "stats/connection_states.jsonl"),
+        ("nat_translations", "stats/nat_translations.jsonl"),
     ]:
         path = f"{DATA_DIR}/{filename}"
         if not os.path.exists(path):
@@ -2501,6 +2745,12 @@ Misollar:
         else:
             time.sleep(3)
 
+        # Switchlar to'liq barqarorlashgach QoS/NAT sozlanadi — bu ko'plab
+        # ketma-ket .cmd() chaqiruvi, tayyor bo'lmagan tarmoqda ishonchsiz.
+        print("[Network] QoS navbatlari o'rnatilmoqda...")
+        apply_qos_qdiscs(net)
+        setup_nat_gateway(net, topo)
+
         print("\n[Test] pingAll (1)...")
         net.pingAll(timeout="5")
         time.sleep(2)
@@ -2528,6 +2778,8 @@ Misollar:
             if not args.no_impairments:
                 impairments = Impairments(net)
                 impairments.start()
+            nat_monitor = NATMonitor(net, topo)
+            nat_monitor.start()
 
             print(f"\n{'='*55}")
             print(f"  Simulyatsiya: {args.duration/60:.1f} min | {args.topology} | {args.routing}")
@@ -2546,6 +2798,7 @@ Misollar:
             print("\n\n[Stop]...")
             if traffic: traffic.stop()
             if impairments: impairments.stop()
+            nat_monitor.stop()
             path_tracer.stop()
             collector.stop()
 
