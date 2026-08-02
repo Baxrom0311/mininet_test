@@ -16,6 +16,3 @@ __pycache__/
 
 # OS
 .DS_Store
-results/combined/
-
-*.csv
