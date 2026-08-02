@@ -54,6 +54,7 @@ CONTROLLER_PORT = 6633
 TOPOLOGIES = {
     # ═══ 1. THREE AS - kichik, 3 AS ═══
     "three_as": {
+        "nat_private_subnet": "192.168.60.0/24",
         "switches": {
             "s1": {"as": 100, "role": "core"},
             "s2": {"as": 100, "role": "border"},
@@ -68,12 +69,14 @@ TOPOLOGIES = {
             "web2":   {"switch": "s4", "ip": "10.0.4.2/8", "role": "server"},
             "vid1":   {"switch": "s4", "ip": "10.0.4.3/8", "role": "server"},
             "api1":   {"switch": "s3", "ip": "10.0.3.1/8", "role": "server"},
-            "fib1":   {"switch": "s6", "ip": "10.0.6.1/8", "role": "client"},
-            "fib2":   {"switch": "s6", "ip": "10.0.6.2/8", "role": "client"},
-            "dsl1":   {"switch": "s6", "ip": "10.0.6.3/8", "role": "client"},
-            "lte1":   {"switch": "s5", "ip": "10.0.5.1/8", "role": "client"},
-            "lte2":   {"switch": "s5", "ip": "10.0.5.2/8", "role": "client"},
-            "cab1":   {"switch": "s5", "ip": "10.0.5.3/8", "role": "client"},
+            # Residential/mobile — NAT orqasidagi xususiy manzillar
+            "fib1":   {"switch": "s6", "ip": "192.168.60.11/24", "role": "client"},
+            "fib2":   {"switch": "s6", "ip": "192.168.60.12/24", "role": "client"},
+            "dsl1":   {"switch": "s6", "ip": "192.168.60.13/24", "role": "client"},
+            "lte1":   {"switch": "s5", "ip": "192.168.60.21/24", "role": "client"},
+            "lte2":   {"switch": "s5", "ip": "192.168.60.22/24", "role": "client"},
+            "cab1":   {"switch": "s5", "ip": "192.168.60.23/24", "role": "client"},
+            "nat_gw": {"switch": "s5", "ip": "10.0.5.9/8", "role": "gateway"},
         },
         "links": {
             ("s1","s2"): {"bw": 50,  "delay": "3ms",  "loss": 0.01, "jitter": "1ms",   "queue": 80},
@@ -95,11 +98,13 @@ TOPOLOGIES = {
             "lte1": {"bw": 10,  "delay": "35ms",  "loss": 1.5},
             "lte2": {"bw": 8,   "delay": "45ms",  "loss": 2.0},
             "cab1": {"bw": 15,  "delay": "12ms",  "loss": 0.3},
+            "nat_gw": {"bw": 20, "delay": "2ms",  "loss": 0},
         },
     },
 
     # ═══ 2. FIVE AS - realistik internet ═══
     "five_as": {
+        "nat_private_subnet": "192.168.50.0/24",  # nat_gw shu yerda joylashgan
         "switches": {
             "s1": {"as": 100, "role": "tier1_core"},      # Tier-1 ISP core
             "s2": {"as": 200, "role": "tier2_border"},     # Tier-2 ISP
@@ -211,6 +216,7 @@ TOPOLOGIES = {
 
     # ═══ 4. CAMPUS - Universitet/korxona ═══
     "campus": {
+        "nat_private_subnet": "192.168.70.0/24",
         "switches": {
             "s1": {"as": 100, "role": "core"},
             "s2": {"as": 100, "role": "distribution1"},
@@ -224,13 +230,15 @@ TOPOLOGIES = {
             "www":   {"switch": "s6", "ip": "10.0.6.1/8", "role": "server"},
             "mail":  {"switch": "s6", "ip": "10.0.6.2/8", "role": "server"},
             "db":    {"switch": "s1", "ip": "10.0.1.1/8", "role": "server"},
-            "pc1":   {"switch": "s4", "ip": "10.0.4.1/8", "role": "client"},
-            "pc2":   {"switch": "s4", "ip": "10.0.4.2/8", "role": "client"},
-            "pc3":   {"switch": "s5", "ip": "10.0.5.1/8", "role": "client"},
-            "pc4":   {"switch": "s5", "ip": "10.0.5.2/8", "role": "client"},
-            "wifi1": {"switch": "s4", "ip": "10.0.4.3/8", "role": "client"},
-            "wifi2": {"switch": "s5", "ip": "10.0.5.3/8", "role": "client"},
+            # Kampus klient qurilmalari — NAT orqasidagi xususiy manzillar
+            "pc1":   {"switch": "s4", "ip": "192.168.70.11/24", "role": "client"},
+            "pc2":   {"switch": "s4", "ip": "192.168.70.12/24", "role": "client"},
+            "pc3":   {"switch": "s5", "ip": "192.168.70.13/24", "role": "client"},
+            "pc4":   {"switch": "s5", "ip": "192.168.70.14/24", "role": "client"},
+            "wifi1": {"switch": "s4", "ip": "192.168.70.21/24", "role": "client"},
+            "wifi2": {"switch": "s5", "ip": "192.168.70.22/24", "role": "client"},
             "inet":  {"switch": "s7", "ip": "10.0.7.1/8", "role": "server"},
+            "nat_gw": {"switch": "s2", "ip": "10.0.2.9/8", "role": "gateway"},
         },
         "links": {
             ("s1","s2"): {"bw": 50, "delay": "0.5ms","loss": 0.005,"jitter": "0.1ms","queue": 100},
@@ -252,6 +260,7 @@ TOPOLOGIES = {
             "wifi1":{"bw": 5,  "delay": "5ms",  "loss": 1.0},
             "wifi2":{"bw": 5,  "delay": "8ms",  "loss": 1.5},
             "inet": {"bw": 15, "delay": "20ms", "loss": 0.1},
+            "nat_gw": {"bw": 20, "delay": "1ms", "loss": 0},
         },
     },
 }
@@ -1288,34 +1297,46 @@ def apply_qos_qdiscs(net):
         _setup_qos_qdisc(intf2, params)
 
 
-# NAT orqasidagi (xususiy IP) hostlar -> gateway nomi. Faqat shu ro'yxatdagi
-# topologiyalarda (hozircha five_as, residential AS) ishlaydi; boshqa
-# topologiyalarda "nat_gw" hosti yo'q bo'lgani uchun avtomatik o'tkazib
-# yuboriladi.
-NAT_PRIVATE_SUBNET = "192.168.50.0/24"
-NAT_PRIVATE_HOSTS = ["home1", "home2", "mob1", "mob2"]
+# NAT — topologiyaga bog'liq emas (generic). Bir topologiya NAT'ga ega
+# bo'lishi uchun ikki narsa kerak: (1) topo["nat_private_subnet"] — masalan
+# "192.168.50.0/24", (2) topo["hosts"] ichida role="gateway" bo'lgan bitta
+# host (uning "ip" maydoni — ommaviy tomon manzili). Shu ikkisi bo'lmasa,
+# setup_nat_gateway()/NATMonitor avtomatik hech narsa qilmaydi.
+
+def _nat_gateway_name(topo):
+    for name, info in topo["hosts"].items():
+        if info.get("role") == "gateway":
+            return name
+    return None
+
+
+def _nat_private_hosts(topo, subnet_prefix):
+    return [n for n, info in topo["hosts"].items()
+            if info.get("ip", "").split("/")[0].startswith(subnet_prefix)]
 
 
 def setup_nat_gateway(net, topo):
     """net.start() dan KEYIN chaqiriladi. nat_gw — bitta interfeysli
-    "one-armed" NAT router: xususiy (192.168.50.0/24) va ommaviy (10.x.x.x)
-    manzil bir xil interfeysda birga yashaydi, SNAT orqali tarjima qilinadi.
-    compute_paths()/switch grafigi butunlay o'zgarishsiz qoladi — nat_gw
-    oddiy host sifatida mavjud switch fabrikiga ulanadi, yangi switch-link
-    qo'shilmaydi."""
-    if "nat_gw" not in topo["hosts"]:
+    "one-armed" NAT router: xususiy va ommaviy (10.x.x.x) manzil bir xil
+    interfeysda birga yashaydi, SNAT orqali tarjima qilinadi. compute_paths()/
+    switch grafigi butunlay o'zgarishsiz qoladi — nat_gw oddiy host sifatida
+    mavjud switch fabrikiga ulanadi, yangi switch-link qo'shilmaydi."""
+    subnet = topo.get("nat_private_subnet")
+    gw_name = _nat_gateway_name(topo)
+    if not subnet or not gw_name:
         return
-    gw = net.get("nat_gw")
+    net_addr = subnet.split("/")[0]
+    prefix = net_addr.rsplit(".", 1)[0] + "."
+    gw_private_ip = f"{prefix}1/24"
+
+    gw = net.get(gw_name)
     ifname = gw.defaultIntf().name
-    gw.cmd(f"ip addr add 192.168.50.1/24 dev {ifname}")
+    gw.cmd(f"ip addr add {gw_private_ip} dev {ifname}")
     gw.cmd("sysctl -w net.ipv4.ip_forward=1 2>/dev/null")
-    gw.cmd(f"iptables -t nat -A POSTROUTING -s {NAT_PRIVATE_SUBNET} -j SNAT --to-source {gw.IP()}")
-    for hname in NAT_PRIVATE_HOSTS:
-        if hname not in topo["hosts"]:
-            continue
-        h = net.get(hname)
-        h.cmd("ip route add default via 192.168.50.1")
-    print(f"[NAT] nat_gw tayyor: xususiy {NAT_PRIVATE_SUBNET} -> ommaviy {gw.IP()}")
+    gw.cmd(f"iptables -t nat -A POSTROUTING -s {subnet} -j SNAT --to-source {gw.IP()}")
+    for hname in _nat_private_hosts(topo, prefix):
+        net.get(hname).cmd(f"ip route add default via {prefix}1")
+    print(f"[NAT] {gw_name} tayyor: xususiy {subnet} -> ommaviy {gw.IP()}")
 
 
 class NATMonitor:
@@ -1331,7 +1352,7 @@ class NATMonitor:
         self._log = os.path.join(DATA_DIR, "stats/nat_translations.jsonl")
 
     def start(self):
-        if "nat_gw" not in self.topo["hosts"]:
+        if not topo_has_nat(self.topo):
             return
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -1343,7 +1364,9 @@ class NATMonitor:
             self._thread.join(timeout=5)
 
     def _loop(self):
-        gw = self.net.get("nat_gw")
+        gw_name = _nat_gateway_name(self.topo)
+        subnet_prefix = self.topo["nat_private_subnet"].split("/")[0].rsplit(".", 1)[0] + "."
+        gw = self.net.get(gw_name)
         while self._running:
             time.sleep(self.interval)
             if not self._running:
@@ -1351,7 +1374,7 @@ class NATMonitor:
             ts = time.time()
             out = gw.cmd("cat /proc/net/nf_conntrack 2>/dev/null")
             for line in out.splitlines():
-                if NAT_PRIVATE_SUBNET.split("/")[0].rsplit(".", 1)[0] not in line:
+                if subnet_prefix not in line:
                     continue
                 fields = line.split()
                 proto = fields[2] if len(fields) > 2 else ""
@@ -1365,12 +1388,12 @@ class NATMonitor:
                         sport = tok.split("=", 1)[1]
                     elif tok.startswith("dport=") and dport is None:
                         dport = tok.split("=", 1)[1]
-                if not src or not src.startswith("192.168.50."):
+                if not src or not src.startswith(subnet_prefix):
                     continue
                 entry = {
                     "ts": ts, "proto": proto,
                     "private_ip": src, "private_port": sport,
-                    "public_ip": self.net.get("nat_gw").IP(),
+                    "public_ip": gw.IP(),
                     "dst_ip": dst, "dst_port": dport,
                 }
                 try:
@@ -1378,6 +1401,10 @@ class NATMonitor:
                         f.write(json.dumps(entry) + "\n")
                 except OSError:
                     pass
+
+
+def topo_has_nat(topo):
+    return bool(topo.get("nat_private_subnet") and _nat_gateway_name(topo))
 
 
 # ─────────────────────────────────────────────────────────
@@ -2734,14 +2761,19 @@ Misollar:
         time.sleep(3)
         net.waitConnected(timeout=30)
 
-        # STP (loop bo'lsa)
-        has_loop = len(topo["links"]) > len(topo["switches"]) - 1
+        # STP (loop bo'lsa) — necha marta ortiqcha link bo'lsa, shuncha
+        # mustaqil halqa bor deb hisoblanadi (masalan five_as'da 2 ta
+        # kesishgan halqa bor: s1-s2-s3-s8 va s1-s4-s6-s3 — yadro
+        # switchlarni bo'lishadi, shuning uchun standart 30s yetarli emas).
+        excess_links = len(topo["links"]) - (len(topo["switches"]) - 1)
+        has_loop = excess_links > 0
         if has_loop:
             print("[Network] STP yoqilmoqda...")
             for sw in net.switches:
                 sw.cmd(f"ovs-vsctl set bridge {sw.name} stp_enable=true")
-            print("[Network] STP convergence (30s)...")
-            time.sleep(30)
+            stp_wait = 30 + 15 * (excess_links - 1)
+            print(f"[Network] STP convergence ({stp_wait}s, {excess_links} ta halqa)...")
+            time.sleep(stp_wait)
         else:
             time.sleep(3)
 
