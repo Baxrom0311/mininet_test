@@ -50,7 +50,7 @@ sudo python3 run_simulation.py --duration 1800 --cli
 sudo python3 run_simulation.py --dataset-only         # build dataset from existing /data without touching the network
 
 # Docker (light_simulation.py packaged; needs --privileged for Mininet)
-docker build -t internet-sim .
+docker build -f docker/Dockerfile -t internet-sim .
 docker run --privileged --rm -v $(pwd)/output:/data internet-sim --topology five_as --routing spf --duration 300
 docker run --privileged --rm -it -v $(pwd)/output:/data internet-sim --topology campus --routing spf --cli
 ```
