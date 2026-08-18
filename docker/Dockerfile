@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ─── Python dependencies ───
-COPY requirements.txt /tmp/requirements.txt
+COPY docker/requirements.txt /tmp/requirements.txt
 RUN pip3 install --break-system-packages --no-cache-dir -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
@@ -39,7 +39,7 @@ COPY light_simulation.py config.py topologies.py routing.py network_build.py \
      dataset_builder.py controller.py visualize.py /app/
 
 # ─── Entrypoint ───
-COPY docker-entrypoint.sh /app/
+COPY docker/docker-entrypoint.sh /app/
 RUN chmod +x /app/docker-entrypoint.sh
 
 VOLUME ["/data"]

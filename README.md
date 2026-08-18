@@ -27,7 +27,7 @@ Mininet + SDN (os-ken/Ryu) yordamida real internet trafikini simulyatsiya qilish
 
 ```bash
 # Build
-docker build -t internet-sim .
+docker build -f docker/Dockerfile -t internet-sim .
 
 # Run (--privileged kerak Mininet uchun)
 docker run --privileged --rm -v $(pwd)/output:/data internet-sim \
