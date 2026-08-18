@@ -34,8 +34,9 @@ RUN echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.d/99-mininet.conf \
 
 # ─── Application ───
 WORKDIR /app
-COPY light_simulation.py /app/
-COPY ryu_transport_controller.py /app/
+COPY light_simulation.py config.py topologies.py routing.py network_build.py \
+     traffic_gen.py impairments.py collector.py path_tracer.py \
+     dataset_builder.py controller.py visualize.py /app/
 
 # ─── Entrypoint ───
 COPY docker-entrypoint.sh /app/
