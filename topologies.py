@@ -1,5 +1,8 @@
 """Simulyatsiya topologiyalari: switchlar, hostlar, linklar, access-linklar."""
 
+import json
+import os
+
 TOPOLOGIES = {
     # ═══ 1. THREE AS - kichik, 3 AS ═══
     "three_as": {
@@ -232,3 +235,28 @@ TOPOLOGIES = {
         },
     },
 }
+
+
+def _load_custom_topologies():
+    """`analytics/`dagi topologiya quruvchi bilan yaratilgan
+    custom_topologies/*.json fayllarini TOPOLOGIES'ga qo'shadi. Bitta
+    topologiya buzilgan bo'lsa ham qolganlari va tayyor 4 tasi ishlashda
+    davom etadi -- shu sabab har bir fayl alohida try/except ichida."""
+    custom_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "custom_topologies")
+    if not os.path.isdir(custom_dir):
+        return
+    for fname in sorted(os.listdir(custom_dir)):
+        if not fname.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(custom_dir, fname)) as f:
+                topo = json.load(f)
+            # JSON tuple key qo'llamaydi -- "s1-s2" matn ko'rinishida
+            # saqlanadi, shu yerda qayta tuple'ga aylantiriladi.
+            topo["links"] = {tuple(k.split("-", 1)): v for k, v in topo["links"].items()}
+            TOPOLOGIES[fname[:-5]] = topo
+        except Exception as e:
+            print(f"[topologies] custom_topologies/{fname} o'qilmadi: {e}")
+
+
+_load_custom_topologies()

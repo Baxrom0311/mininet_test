@@ -1,0 +1,6 @@
+# Desktop analitika ilovasi (analytics/app.py) uchun qo'shimcha bog'liqliklar.
+# tkinter alohida (Homebrew macOS'da: brew install python-tk@<versiya>).
+duckdb>=1.0.0
+matplotlib>=3.7.0
+networkx>=3.1
+pandas>=2.0.0
