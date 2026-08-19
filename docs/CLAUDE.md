@@ -4,96 +4,194 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-Mininet + SDN network simulation for generating ML/AI training datasets (flow records, DNS, HTTP, TCP states, anomalies/attacks). All code comments, CLI help text, and print output are in Uzbek.
+Mininet + SDN (os-ken/Ryu) network simulation for generating ML/AI training datasets (flow
+records, DNS, HTTP, TCP states, NAT translations, anomalies/attacks). Most code comments, CLI
+help text, and print output are in Uzbek.
 
-There are **three independent, non-interoperating generations** of the simulator living side by side. Know which one you're touching before editing:
+The **active simulator** is a set of task-based Python modules at the repo root, orchestrated
+by `light_simulation.py`. Two older, non-interoperating generations of the simulator have been
+moved to `legacy/` and are not part of the active code path — see "The `legacy/` archive"
+below. Know which generation you're touching before editing; if a request doesn't specify, the
+active modules at repo root are almost always what's meant.
 
-1. **`main.py` + `ryu_transport_controller.py`** — minimal 9-switch Mininet lab with a Ryu/os-ken remote controller. Self-contained smoke test (`--mode test`) that pings all hosts, sends a TCP + UDP sample, and asserts both protocols were logged by the controller.
-2. **`light_simulation.py`** (single ~2300-line file, current/active generation — see `TOPOLOGIES`/routing code) — the primary simulator. No ONOS, no Docker required for direct-server use; embeds its own os-ken/Ryu controller app (`TransportMonitor`) in-process via `start_controller()`. This is what `Dockerfile` / `docker-entrypoint.sh` run.
-3. **`run_simulation.py` + `realistic_internet/` package** — older v3 design built around an external **ONOS** controller running in Docker, with a fixed 5-AS/24-switch topology (`RealisticInternetTopo`), sFlow-RT collection, and pcap-based dataset building. Requires Docker + the `onosproject/onos:2.7.0` image; check `check_dependencies()` in `run_simulation.py` for the full prerequisite list.
+## Repo layout (root modules)
 
-`test_basic.py` is a fourth, throwaway 2-switch/2-host smoke test that writes a controller app to `/tmp` and runs it standalone — useful as a minimal reference for the os-ken controller API but not part of the main flow.
+`light_simulation.py` is a thin (~270-line) CLI/`main()` orchestrator; all actual logic lives
+in separate modules it imports. One-line responsibility of each:
 
-When asked to add a topology, routing algorithm, traffic type, or anomaly, first confirm whether the ask targets `light_simulation.py` (most likely, per recent commit history) or the `realistic_internet/` ONOS package — the two do not share code.
+| Module | Responsibility |
+|---|---|
+| `light_simulation.py` | CLI arg parsing + `main()` orchestration: builds the network, wires up traffic/impairments/collection, runs for `--duration`, tears down, builds the dataset. |
+| `config.py` | Shared constants (`DATA_DIR`, `CONTROLLER_PORT`) that every other module imports. |
+| `topologies.py` | `TOPOLOGIES` dict — declarative switch/host/link/AS definitions for the 4 topologies. |
+| `routing.py` | `compute_paths()` and per-protocol path/cost logic for the 11 routing modes (Dijkstra, BFS, OSPF/IS-IS/EIGRP/RIP metrics, BGP path scoring, ECMP). |
+| `network_build.py` | Builds the Mininet `Topo`/`Mininet` instance (`build_topology`), applies QoS/DiffServ `tc` qdiscs (`apply_qos_qdiscs`), and sets up/monitors the NAT gateway (`setup_nat_gateway`, `NATMonitor`). |
+| `controller.py` | Starts the os-ken/Ryu SDN controller (`TransportMonitor` app) as a subprocess (`start_controller`) and manages its lifecycle. |
+| `traffic_gen.py` | `TrafficGen` — diurnal-pattern traffic generation: HTTP, iperf3, DNS (multi-stage recursive resolution), anomalies/attacks, TCP congestion-control selection, QoS/DSCP marking, adaptive-bitrate video, connection-state tracking. |
+| `impairments.py` | `Impairments` — injects the 10 dynamic network impairment types (congestion, link flap, reorder, buffer bloat, MTU blackhole, duplicate, jitter spike, etc.) onto live links during a run. |
+| `collector.py` | `Collector` — runs `tcpdump` per switch interface and periodic ICMP RTT sampling between random host pairs. |
+| `path_tracer.py` | `PathTracer` — for each host pair, records the theoretical path (via `routing.compute_paths`) alongside measured ping RTT/loss. |
+| `dataset_builder.py` | `build_dataset()` — converts raw JSONL logs into the CSV/Parquet dataset files (see "Dataset output" below). |
+| `visualize.py` | `visualize_topology()` — matplotlib/networkx PNG rendering of a topology + routing choice, runnable without root via `--visualize`. |
+| `netutil.py` | Small shared utilities with no other-module dependency: `parse_ping()` (ping output → RTT/loss dict, used by both `collector.py` and `path_tracer.py`) and `graph_diameter()` (switch-graph BFS diameter, used by `light_simulation.py`'s STP-wait calculation). |
+
+**Critical convention: lazy Mininet/os-ken imports.** Every module that needs `mininet.*` or
+`os_ken`/`ryu` imports those packages *inside functions*, never at module top level (verified:
+no top-level `import mininet`/`from mininet`/`import os_ken` anywhere in these root modules —
+`controller.py`'s os-ken imports live inside a string template (`_CONTROLLER_APP_HEADER` +
+`_CONTROLLER_APP_PATHS` + `_CONTROLLER_APP_BODY`, assembled by `_render_controller_app()`) that
+is written out and run as a separate subprocess, not imported by the parent process). This lets every module be
+imported and unit-tested on a machine without Mininet/OVS installed — e.g. this repo's dev
+Mac. **Never move a Mininet/os-ken import to module top-level.** When adding code, follow the
+same pattern: `import` inside the function that actually touches the network.
+
+## The `legacy/` archive
+
+`legacy/` holds two older, fully independent simulator generations that predate the current
+module split. They are archived for reference only — **not run, not maintained, not part of
+the active code path**:
+
+- `legacy/main.py` + `legacy/ryu_transport_controller.py` — a minimal 9-switch Mininet lab with
+  a standalone Ryu/os-ken controller process, plus a `--mode test` smoke test.
+- `legacy/run_simulation.py` + `legacy/realistic_internet/` — an older v3 design built around an
+  external **ONOS** controller in Docker, a fixed 5-AS/24-switch topology, and sFlow-RT-based
+  collection. Requires Docker + the `onosproject/onos` image.
+- `legacy/test_basic.py` — a throwaway 2-switch/2-host smoke test.
+- `legacy/install.sh` — installer for the ONOS/v3 generation above.
+
+If asked to add a topology, routing mode, traffic type, or anomaly, that work belongs in the
+root modules (`topologies.py`, `routing.py`, `traffic_gen.py`, `impairments.py`) — not in
+`legacy/`. Only touch `legacy/` if explicitly asked to.
 
 ## Commands
 
-All simulation entry points require root (`sudo`) because Mininet manipulates network namespaces/OVS.
+Simulation entry points that build a real Mininet network require root (`sudo`) because Mininet
+manipulates network namespaces/OVS. `--dataset-only` and `--visualize` are pure-Python paths
+that don't touch the network and don't need root.
 
 ```bash
-# Install (bare Ubuntu 22.04+/24.04, no Docker) — light generation only
+# Install (bare Ubuntu 22.04+/24.04, no Docker)
 sudo bash install_light.sh
 
-# Install (full v3/ONOS generation, heavier)
-sudo bash install.sh
-
-# --- light_simulation.py (primary generation) ---
+# Run
 sudo python3 light_simulation.py                                          # default: three_as + l2_learn, 180s
 sudo python3 light_simulation.py --topology five_as --routing ospf --duration 300
 sudo python3 light_simulation.py --topology datacenter --routing ecmp
-sudo python3 light_simulation.py --topology campus --routing bgp --duration 300
+sudo python3 light_simulation.py --topology campus --routing hybrid --duration 300
 sudo python3 light_simulation.py --topology three_as --cli                # Mininet CLI, no auto traffic
-python3 light_simulation.py --dataset-only                                # rebuild CSVs from previous run's raw data, no root/network needed
+python3 light_simulation.py --dataset-only                                # rebuild CSVs from a previous run's raw JSONL, no root/network needed
 python3 light_simulation.py --topology five_as --routing spf --visualize  # PNG topology map, no root needed
 sudo python3 light_simulation.py --no-traffic --no-impairments            # topology + routing only
 
-# --- main.py (9-switch Ryu/os-ken smoke lab) ---
-sudo python3 main.py --mode test     # pingAll + TCP/UDP sample + controller log assertions, exit code signals pass/fail
-sudo python3 main.py --mode cli      # interactive Mininet CLI over the 9-switch lab
-
-# --- test_basic.py (throwaway 2-switch minimal check) ---
-sudo python3 test_basic.py
-
-# --- run_simulation.py (v3, ONOS + Docker) ---
-sudo python3 run_simulation.py                       # 5 min run
-sudo python3 run_simulation.py --duration 1800 --cli
-sudo python3 run_simulation.py --dataset-only         # build dataset from existing /data without touching the network
-
-# Docker (light_simulation.py packaged; needs --privileged for Mininet)
+# Docker
 docker build -f docker/Dockerfile -t internet-sim .
 docker run --privileged --rm -v $(pwd)/output:/data internet-sim --topology five_as --routing spf --duration 300
 docker run --privileged --rm -it -v $(pwd)/output:/data internet-sim --topology campus --routing spf --cli
 ```
 
-There is no pytest/unittest suite — "tests" are the runnable scripts above (`main.py --mode test`, `test_basic.py`) that assert behavior via exit codes and printed checks, run against a real (simulated) network.
+There is no pytest/unittest suite. On a machine without Mininet (e.g. this dev Mac), verify
+pure-Python logic directly — e.g. `python3 -c "from routing import compute_paths; from
+topologies import TOPOLOGIES; print(compute_paths(TOPOLOGIES['five_as'], 'ospf'))"` — and check
+syntax with `python3 -c "import ast; ast.parse(open('X.py').read())"`. Do not attempt to start
+Mininet/Docker on a machine that doesn't have them.
 
-Cleanup between runs matters: Mininet/OVS state from a crashed run will break the next one. `light_simulation.py` and `run_simulation.py` both call `mininet.clean.cleanup()` / `mn -c` at start; if a run is interrupted outside these scripts, run `sudo mn -c` manually before retrying.
+Cleanup between runs matters: Mininet/OVS state from a crashed run will break the next one.
+`light_simulation.py` calls `mininet.clean.cleanup()` at start and in its signal handler/finally
+block; if a run is interrupted outside the script (killed process, host reboot), run
+`sudo mn -c` manually before retrying.
 
-## Architecture (light_simulation.py — the file to know)
+## The `docker/` folder
 
-Single-file design; key sections in order of appearance:
+`docker/Dockerfile`, `docker/docker-entrypoint.sh`, and `docker/requirements.txt` live together
+under `docker/`, but **the build context is still the repo root** (the Dockerfile `COPY`s
+`light_simulation.py` and the other root modules directly, and `docker/requirements.txt` by
+path) — hence `docker build -f docker/Dockerfile -t internet-sim .` (note the trailing `.`).
+`.dockerignore` intentionally stays at the repo root for the same reason. The image is based on
+`ubuntu:24.04`, installs Mininet/OVS/iperf3/tcpdump/hping3 via apt, installs
+`docker/requirements.txt` via pip, and runs via `docker-entrypoint.sh` (starts OVS, cleans prior
+Mininet state, applies sysctls, then `exec python3 /app/light_simulation.py "$@"`). `--privileged`
+is required at `docker run` time for Mininet's namespace/OVS manipulation.
 
-- `TOPOLOGIES` dict — 4 topologies: `three_as` (3 AS, 6 switches), `five_as` (5 AS, 9 switches), `datacenter` (fat-tree, 6 switches), `campus` (7 switches). Each entry defines switches, hosts, links, and AS membership.
-- `TRAFFIC_MIX` / `ANOMALY_MIX` / `IMPAIRMENT_EVENTS` — declarative profiles for 13 traffic types, 8 attack types, 10 impairment types (packet loss, delay spikes, bandwidth limits, link flap, congestion, reorder, buffer bloat, MTU blackhole, duplicate, jitter spike).
-- **Routing engine** (`compute_paths()` dispatches by `--routing` mode) — 10 modes total: `l2_learn` (reactive MAC-learning flood, the switch-side default when no controller-side path precomputation applies), `rip`, `ospf`, `isis`, `eigrp`, `bgp`, `ecmp`, `spf`, `policy`, `static`. Path math lives in `compute_dijkstra()`, `_dijkstra_weighted()`, `_bfs_shortest()`/`_bfs_all_paths()`, plus protocol-specific cost functions (`_compute_ospf_cost`, `_compute_isis_metric`, `_compute_eigrp_metric`, `_compute_rip_metric`, `_bgp_path_score`, `_bgp_route_dampening`) and area/level assignment helpers (`_assign_ospf_areas`, `_assign_isis_levels`). Non-`l2_learn` modes precompute paths and push flow rules; `l2_learn` relies on the controller's reactive flooding/learning instead.
-- `TransportMonitor` (`class`, subclasses os-ken/Ryu `BaseApp`) — the in-process SDN controller app, structurally identical to the standalone `ryu_transport_controller.py` (L2 learning, per-flow OpenFlow rule install, periodic flow-stats polling). Started via `start_controller()`; controller and Mininet run in the same process rather than as separate manager subprocess like `main.py` does.
-- `build_topology()` — turns a `TOPOLOGIES` entry into a Mininet `Topo`/`Mininet` instance.
-- `TrafficGen` — one thread-loop method per traffic mechanism: `_iperf_loop`, `_ping_loop`, `_http_loop`, `_dns_loop` (with cache/TTL/recursive resolution), `_anomaly_loop` (attack traffic), `_connection_state_loop` (TCP state tracking), `_adaptive_bitrate_loop` (video ABR).
-- `Impairments` — applies/varies the 10 impairment types on live links during a run.
-- `Collector` / `PathTracer` — capture raw events (JSONL) and compute hop-by-hop paths (Dijkstra/BFS) for tracing.
-- `build_dataset()` — converts collected JSONL into the 12 CSV outputs under `/data/datasets/` (`flow_records.csv`, `flow_stats.csv`, `ping_results.csv`, `iperf_results.csv`, `traceroute_hops.csv`, `link_stats.csv`, `impairment_events.csv`, `topology_snapshot.csv`, `dns_queries.csv`, `http_transactions.csv`, `anomaly_events.csv`, `connection_states.csv`). Runnable standalone via `--dataset-only` against data left by a previous run.
-- `visualize_topology()` — matplotlib/networkx PNG rendering of a topology + routing choice, runnable without root via `--visualize`.
+## Topologies (4)
 
-Note: the README documents only 4 routing algorithms (l2_learn, SPF, ECMP, policy); the actual `--routing` choices list has grown to 10 (rip/ospf/isis/eigrp/bgp added) per the most recent commit — trust the code/`--help` epilog over the README table when they disagree.
+Defined in `topologies.py`'s `TOPOLOGIES` dict; verified counts (`switches`/`hosts` dict sizes):
 
-### Controller ↔ simulation IPC
+| Name | Switches | Hosts | AS numbers | NAT |
+|---|---|---|---|---|
+| `three_as` | 6 | 12 | 100, 200, 300 | yes (`192.168.60.0/24`) |
+| `five_as` | 9 | 12 | 100, 200, 300, 400, 500 | yes (`192.168.50.0/24`) |
+| `datacenter` | 6 | 8 | 100 (single AS, fat-tree) | no |
+| `campus` | 7 | 11 | 100, 200 | yes (`192.168.70.0/24`) |
 
-Both `light_simulation.py`'s embedded controller and the standalone `ryu_transport_controller.py` write append-only JSONL to fixed paths that the Mininet-side process later reads back:
-- `/tmp/ryu_transport_events.jsonl` — per-packet transport metadata (TCP/UDP/ICMP/ARP fields)
-- `/tmp/ryu_flow_stats.jsonl` — periodic OpenFlow flow-stats polls (every 5s via `hub.spawn`)
+## Routing (11 modes, not 10)
 
-`main.py` reads these same paths back after traffic generation to assert TCP/UDP events were captured — this file-based handoff is the integration point between controller and topology code, not a shared Python object.
+`hybrid` was added this session — `compute_paths()` in `routing.py` now dispatches 11 modes,
+not the 10 an older version of this doc described:
 
-The controller code itself tries `ryu` first and falls back to `os_ken` (`from ryu... except ImportError: from os_ken...`) — both are wire-compatible OpenFlow 1.3 controller frameworks; os-ken is Ryu's actively maintained fork, packaged as `python3-os-ken` on Ubuntu.
+`l2_learn` (reactive MAC-learning flood — no precomputed paths), `rip` (hop count, max 15,
+split horizon), `ospf` (link-state Dijkstra, area-based cost = ref_bw/interface_bw), `isis`
+(link-state, wide metric, L1/L2 hierarchy), `eigrp` (composite BW+delay metric, DUAL-style),
+`bgp` (AS-PATH, local-pref, MED, route dampening), `ecmp` (hash-based equal-cost multipath),
+`spf` (generic Dijkstra shortest path), `policy` (AS-preference policy routing), `static`
+(admin-defined routes), and `hybrid` (intra-AS OSPF as IGP + inter-AS BGP as EGP + ECMP within
+that — the closest analogue to how the real internet actually routes).
 
-## Architecture (realistic_internet/ — v3 ONOS generation)
+## Features added this session
 
-- `config.py` — all configuration in one place: ONOS/sFlow-RT container settings, `AS_DEFINITIONS` (5 AS: Tier-1 core, regional ISP, CDN, enterprise, residential), `INTER_AS_LINKS`, and `LINK_PROFILES` (named bandwidth/delay/jitter/loss presets like `tier1_core`, `tier1_border`, `isp_core`, mirroring real-world link classes).
-- `topology.py` — `RealisticInternetTopo` builds the fixed 5-AS/24-switch/~32-host topology from `config.py` definitions; writes topology metadata JSON to `/data/stats/topology_metadata.json` for later dataset joins.
-- `onos_manager.py` — manages the ONOS Docker container lifecycle (start, wait-ready, wait-for-discovered-topology, app activation).
-- `traffic_generator.py` — `TrafficOrchestrator`, analogous role to `light_simulation.py`'s `TrafficGen`.
-- `impairments.py` — `ImpairmentManager`, static + dynamic link impairment injection.
-- `data_collector.py` — `DataCollector` pulls from ONOS REST API, sFlow-RT, and tcpdump/pcap in parallel threads into `/data/{pcap,stats,flows,onos_logs,sflow_data}`.
-- `dataset_builder.py` — `DatasetBuilder.build_all()` turns collected pcap/ONOS/sFlow data into ML-ready CSV/Parquet under `/data/datasets/`.
+1. **TCP congestion control** (`traffic_gen.py`, `TCP_CC_ALGORITHMS = ["cubic", "reno", "bbr"]`)
+   — each simulated host is assigned a CC algorithm via
+   `sysctl -w net.ipv4.tcp_congestion_control=<cc>`; the choice is logged per flow (`tcp_cc`
+   field) so the dataset captures which algorithm produced which throughput/RTT/loss pattern.
+2. **DNS hierarchy** (`traffic_gen.py`, `TrafficGen._dns_loop`) — simulates real multi-stage
+   recursive resolution (resolver → root → TLD → authoritative), each stage independently
+   cached with its own TTL (root ~6h, TLD ~1h, authoritative per-domain TTL), logging
+   cache-hit vs. each resolution stage separately to `dns_queries.jsonl`.
+3. **QoS/DiffServ** (`network_build.py`, `_setup_qos_qdisc` + `traffic_gen.py`'s `DSCP_MAP`) —
+   traffic is tagged with a DSCP value per type (EF for real-time voip/video/gaming/streaming,
+   AF21 for interactive web/https/dns/ssh, CS1/BE for bulk/background); each link's flat TCLink
+   netem queue is replaced post-`net.start()` with a 3-band HTB+netem DiffServ hierarchy
+   (`apply_qos_qdiscs()`) that classifies by TOS byte, preserving each link's original
+   delay/loss/jitter/queue-depth per band.
+4. **NAT** (`network_build.py`, `setup_nat_gateway` + `NATMonitor`) — topologies that declare
+   `nat_private_subnet` and a host with `role: "gateway"` get a one-armed NAT router: private
+   hosts default-route through it, it SNATs via iptables to its own address. `NATMonitor` polls
+   `/proc/net/nf_conntrack` on the gateway host and logs translations to
+   `nat_translations.jsonl`. NAT is generic/topology-agnostic — any topology can opt in by
+   setting those two fields; `datacenter` currently does not.
 
-`run_simulation.py` is the orchestrator: checks Docker + ONOS image present, cleans previous Mininet/OVS state, starts ONOS, builds the network, waits for ONOS to discover the expected device/link count, then wires collector → traffic → impairments → timed run → teardown → dataset build, with a SIGINT/SIGTERM handler that tears everything down cleanly.
+## Dataset output
+
+`build_dataset()` (`dataset_builder.py`) reads raw JSONL from `$DATA_DIR/stats/*.jsonl` and
+writes `$DATA_DIR/datasets/<name>.csv` + `.parquet` for each of: `transport_events`,
+`flow_stats`, `port_stats`, `rtt`, `traffic_log`, `impairments`, `path_traces`, `dns_queries`,
+`http_transactions`, `anomaly_events`, `connection_states`, `nat_translations` — plus a derived
+`hop_details` table (one row per path-trace hop, exploded from `path_traces`) and a
+`metadata.json` (topology snapshot, routing mode, traffic mix, impairment config). Files are
+only written if their source JSONL has at least one row, so a topology without NAT (or a run
+where NAT translation logging didn't produce output — see limitations below) simply won't have
+a `nat_translations.csv`.
+
+## Known limitations
+
+- **NAT translations are unreliable inside Docker.** `NATMonitor` reads
+  `/proc/net/nf_conntrack` on the NAT gateway host to log translations. In at least one
+  Docker-based collection run in this repo (`results/combined/`, built from `five_as` runs),
+  `nat_translations.csv` never appears even though other topologies in the same batch do have
+  NAT hosts — likely because the container's netfilter/conntrack visibility differs from a bare
+  Ubuntu host even under `--privileged`. Don't assume `nat_translations.csv` exists for a given
+  run; check for it before depending on it.
+- **STP convergence on looped topologies.** Topologies with redundant switch links (e.g.
+  `five_as` has two independent loops) need OVS spanning-tree to converge before `pingAll`/QoS/
+  NAT setup are reliable, or you see transient connectivity loss. `light_simulation.py`'s
+  `main()` scales the STP wait by two independent factors: the number of excess links
+  (`excess_links = len(topo["links"]) - (len(topo["switches"]) - 1)`, contributing
+  `15 * (excess_links - 1)` seconds) **and** the switch-level graph diameter (via
+  `netutil.graph_diameter()`, contributing `4 * diameter` seconds) — combined as
+  `30 + 15*(excess_links-1) + 4*diameter` when `excess_links > 0`. The diameter term was added
+  this session specifically to address a reproducible bug where the host on the "core" switch
+  couldn't reach far-side hosts even after the loop-count-only wait — loop count alone doesn't
+  capture how far a BPDU has to propagate on a topology's longest path. Neither the original
+  loop-count fix nor this diameter addition has been re-verified against a live Mininet run
+  this session (no Mininet available on this dev machine) — treat it as "believed fixed,
+  unverified this session" rather than confirmed, and re-check pingAll loss output on the next
+  real run before relying on it.

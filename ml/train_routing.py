@@ -5,17 +5,33 @@ RTT/loss/hop xususiyatlaridan qaysi routing algoritm ishlatilganini
 
 import ast
 import os
+import random
+from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-DATA_DIR = os.environ.get("DATA_DIR", "/root/ml/combined")
-OUT_DIR = os.environ.get("OUT_DIR", "/root/ml/out")
+# Reproducibility: seed every source of randomness before any split/init happens.
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+
+# Defaults are repo-relative (resolved from this file's own location, not cwd)
+# so the script works whether it's invoked from repo root, ml/, or elsewhere.
+# The remote GPU server sets DATA_DIR/OUT_DIR explicitly, so this override
+# path is unaffected.
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _SCRIPT_DIR.parent
+DATA_DIR = os.environ.get("DATA_DIR", str(_REPO_ROOT / "results" / "combined"))
+OUT_DIR = os.environ.get("OUT_DIR", str(_SCRIPT_DIR / "out"))
 os.makedirs(OUT_DIR, exist_ok=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -37,13 +53,34 @@ def _parse_as_path_len(v):
 df["as_path_len"] = df["as_path"].apply(_parse_as_path_len)
 df["same_as"] = (df["src_as"] == df["dst_as"]).astype(float)
 
+# ─── hop_details.csv bilan bog'lash ───────────────────────
+# Har bir path_traces qatori (ts, src, dst, routing) bo'yicha bir nechta
+# hop_details qatoriga (hop_num=0..N) mos keladi -- ular xuddi shu trace
+# hodisasidan yozilgani uchun ts aniq mos keladi (asof/tolerance kerak emas).
+# Bu yerda hop-darajasidagi haqiqiy signal (jitter, queue) ni yo'l darajasiga
+# aggregatsiya qilib qo'shamiz -- path_traces o'zida jitter/queue umuman yo'q.
+print("\nhop_details.csv bilan bog'lanmoqda (ts+src+dst+routing bo'yicha aggregatsiya)...")
+hop_details = pd.read_csv(os.path.join(DATA_DIR, "hop_details.csv"))
+hop_agg_cols = ["hop_bw_mbps", "hop_delay_ms", "hop_loss_pct", "hop_jitter_ms", "hop_queue_size"]
+hop_agg = (
+    hop_details.groupby(["ts", "src", "dst", "routing"])[hop_agg_cols]
+    .mean()
+    .rename(columns={c: f"{c}_mean" for c in hop_agg_cols})
+    .reset_index()
+)
+hop_agg["hop_queue_size_max"] = (
+    hop_details.groupby(["ts", "src", "dst", "routing"])["hop_queue_size"].max().to_numpy()
+)
+df = df.merge(hop_agg, on=["ts", "src", "dst", "routing"], how="left")
+hop_feature_cols = [f"{c}_mean" for c in hop_agg_cols] + ["hop_queue_size_max"]
+
 feature_cols = [
     "num_switch_hops", "num_total_hops",
     "theoretical_delay_ms", "theoretical_rtt_ms", "theoretical_loss_pct",
     "bottleneck_bw_mbps",
     "real_rtt_ms", "real_rtt_min", "real_rtt_max", "real_loss_pct",
     "as_path_len", "same_as", "src_as", "dst_as",
-]
+] + hop_feature_cols
 df = df.dropna(subset=feature_cols + ["routing"])
 X = df[feature_cols].to_numpy(dtype=np.float32)
 
@@ -52,12 +89,24 @@ y = le.fit_transform(df["routing"])
 n_classes = len(le.classes_)
 print(f"\nSinflar ({n_classes}): {list(le.classes_)}")
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
+# Group key for the split: PathTracer polls every ~15s, so the same (src,dst)
+# host pair is re-traced many times -- a plain row-level split would let
+# near-duplicate traces of the same pair leak into both train and test,
+# inflating accuracy via memorization of that pair's fingerprint rather than
+# genuine generalization to unseen host pairs.
+groups = (df["src"].astype(str) + "|" + df["dst"].astype(str)).to_numpy()
+
+gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=SEED)
+train_idx, test_idx = next(gss.split(X, y, groups=groups))
+X_train, X_test = X[train_idx], X[test_idx]
+y_train, y_test = y[train_idx], y[test_idx]
+
 scaler = StandardScaler()
 X_train = scaler.fit_transform(X_train)
 X_test = scaler.transform(X_test)
+joblib.dump(scaler, os.path.join(OUT_DIR, "scaler.joblib"))
+joblib.dump(le, os.path.join(OUT_DIR, "label_encoder.joblib"))
+joblib.dump(feature_cols, os.path.join(OUT_DIR, "feature_cols.joblib"))
 
 X_train_t = torch.tensor(X_train, dtype=torch.float32, device=device)
 y_train_t = torch.tensor(y_train, dtype=torch.long, device=device)
@@ -114,3 +163,5 @@ print(confusion_matrix(y_test, preds))
 
 torch.save(model.state_dict(), os.path.join(OUT_DIR, "routing_model.pt"))
 print(f"\nModel saqlandi: {os.path.join(OUT_DIR, 'routing_model.pt')}")
+print(f"Scaler saqlandi: {os.path.join(OUT_DIR, 'scaler.joblib')}")
+print(f"Label encoder saqlandi: {os.path.join(OUT_DIR, 'label_encoder.joblib')}")

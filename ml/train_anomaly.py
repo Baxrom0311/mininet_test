@@ -4,17 +4,33 @@ anomaly_events.csv dagi vaqt oynasi + IP moslik orqali label qilib,
 PyTorch MLP klassifikator o'qitadi (GPU bo'lsa GPU'da)."""
 
 import os
+import random
+from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 from sklearn.preprocessing import StandardScaler
 
-DATA_DIR = os.environ.get("DATA_DIR", "/root/ml/combined")
-OUT_DIR = os.environ.get("OUT_DIR", "/root/ml/out")
+# Reproducibility: seed every source of randomness before any split/init happens.
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+
+# Defaults are repo-relative (resolved from this file's own location, not cwd)
+# so the script works whether it's invoked from repo root, ml/, or elsewhere.
+# The remote GPU server sets DATA_DIR/OUT_DIR explicitly, so this override
+# path is unaffected.
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = _SCRIPT_DIR.parent
+DATA_DIR = os.environ.get("DATA_DIR", str(_REPO_ROOT / "results" / "combined"))
+OUT_DIR = os.environ.get("OUT_DIR", str(_SCRIPT_DIR / "out"))
 os.makedirs(OUT_DIR, exist_ok=True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -35,10 +51,13 @@ for routing, grp in anomalies.groupby("routing"):
     mask_routing = events["routing"] == routing
     for _, ev in grp.iterrows():
         start, end = ev["ts"], ev["ts"] + max(float(ev["duration_sec"]), 1.0)
-        ip_match = (
-            (events["ip_src"] == ev["attacker_ip"]) | (events["ip_dst"] == ev["attacker_ip"])
-            | (events["ip_src"] == ev["target_ip"]) | (events["ip_dst"] == ev["target_ip"])
-        )
+        # Require the packet's {ip_src, ip_dst} pair to touch BOTH the
+        # attacker AND the target (not just either one) -- a row where only
+        # one endpoint matches is bystander traffic from/to that host that
+        # has nothing to do with this particular attacker->target flow.
+        touches_attacker = (events["ip_src"] == ev["attacker_ip"]) | (events["ip_dst"] == ev["attacker_ip"])
+        touches_target = (events["ip_src"] == ev["target_ip"]) | (events["ip_dst"] == ev["target_ip"])
+        ip_match = touches_attacker & touches_target
         time_match = events["ts"].between(start, end)
         events.loc[mask_routing & ip_match & time_match, "label"] = ev["type"]
 
@@ -122,23 +141,70 @@ for (routing, ip_src), sub in df.groupby(["routing", "ip_src"], sort=False, drop
 df = pd.concat(parts, ignore_index=True)
 print("Xususiyatlar tayyor.")
 
+# ─── port_stats.csv bilan bog'lash ────────────────────────
+# transport_events.dpid/in_port va port_stats.dpid/port bir xil switch-port
+# maydonini bildiradi, shuning uchun (routing, dpid, port) bo'yicha eng yaqin
+# vaqtli (nearest-ts) qo'shish real bytes/packets-per-sec va drop signalini
+# beradi -- dataset_builder.py buni allaqachon hisoblab qo'ygan, lekin
+# hech qaysi train skripti ulardan foydalanmagan edi.
+print("\nport_stats.csv bilan bog'lanmoqda (dpid+port bo'yicha eng yaqin vaqt)...")
+port_stats = pd.read_csv(os.path.join(DATA_DIR, "port_stats.csv"))
+port_stats["ts"] = port_stats["ts"].astype(float)
+port_rate_cols = ["bytes_per_sec", "packets_per_sec", "total_dropped"]
+ps = (
+    port_stats[["routing", "ts", "dpid", "port"] + port_rate_cols]
+    .rename(columns={"port": "in_port"})
+    .sort_values("ts")
+)
+df = df.sort_values("ts").reset_index(drop=True)
+df = pd.merge_asof(
+    df, ps,
+    on="ts", by=["routing", "dpid", "in_port"],
+    direction="nearest",
+)
+# NaN here means no port-stat poll was close in time for that dpid/port (e.g.
+# the very first poll of the run, before any rate delta can be computed) --
+# genuinely "no rate info available yet", not a join failure, so 0 is the
+# correct neutral fill rather than imputed noise.
+for c in port_rate_cols:
+    df[c] = df[c].fillna(0)
+
 feature_cols = [
     "ip_proto", "ip_len", "ip_ttl", "tcp_flags",
     "src_port", "dst_port", "is_icmp", "is_arp",
     "pkt_rate_1s", "uniq_dst_1s", "uniq_dport_1s", "syn_ratio_1s", "byte_rate_1s",
-]
+] + port_rate_cols
 X = df[feature_cols].to_numpy(dtype=np.float32)
 y_binary = (df["label"] != "normal").astype(int).to_numpy()
 
+# Group key for the split: anomaly_events.csv has no per-attack event id, but
+# rows from the same (routing, ip_src) host share the sliding-window features
+# above (pkt_rate_1s etc. are computed per that exact group) -- letting rows
+# from the same host land in both train and test would leak that host's
+# traffic pattern rather than testing generalization to unseen hosts.
+# fillna() BEFORE astype(str) is required: ip_src is missing for ~74% of rows
+# (ARP/L2-only packets with no IP layer) and on pandas's "str" extension
+# dtype, astype(str) is a no-op that leaves those as real NaN rather than the
+# text "nan" -- string-concatenating a NaN produces NaN, so without the
+# explicit fillna the resulting groups array is a NaN/str mix that crashes
+# GroupShuffleSplit's internal np.unique(groups) call.
+ip_src_key = df["ip_src"].fillna("__no_ip__").astype(str)
+routing_key = df["routing"].fillna("__unknown_routing__").astype(str)
+groups = (routing_key + "|" + ip_src_key).to_numpy()
+
 print(f"\nBinary label taqsimoti: normal={sum(y_binary == 0):,}, anomaliya={sum(y_binary == 1):,}")
 
-# ─── Train/test split + scaling ───────────────────────────
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y_binary, test_size=0.2, random_state=42, stratify=y_binary
-)
+# ─── Train/test split (group-aware) + scaling ─────────────
+gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=SEED)
+train_idx, test_idx = next(gss.split(X, y_binary, groups=groups))
+X_train, X_test = X[train_idx], X[test_idx]
+y_train, y_test = y_binary[train_idx], y_binary[test_idx]
+
 scaler = StandardScaler()
 X_train = scaler.fit_transform(X_train)
 X_test = scaler.transform(X_test)
+joblib.dump(scaler, os.path.join(OUT_DIR, "scaler.joblib"))
+joblib.dump(feature_cols, os.path.join(OUT_DIR, "feature_cols.joblib"))
 
 X_train_t = torch.tensor(X_train, dtype=torch.float32, device=device)
 y_train_t = torch.tensor(y_train, dtype=torch.float32, device=device).unsqueeze(1)
@@ -202,3 +268,4 @@ print(confusion_matrix(y_test, preds))
 
 torch.save(model.state_dict(), os.path.join(OUT_DIR, "anomaly_model.pt"))
 print(f"\nModel saqlandi: {os.path.join(OUT_DIR, 'anomaly_model.pt')}")
+print(f"Scaler saqlandi: {os.path.join(OUT_DIR, 'scaler.joblib')}")

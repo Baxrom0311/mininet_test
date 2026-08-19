@@ -1,13 +1,24 @@
 """SDN kontroller: os-ken/Ryu ilovasi (CONTROLLER_APP) alohida subprocess
 sifatida ishga tushiriladi va boshqariladi."""
 
+import collections
+import os
 import subprocess
 import sys
+import threading
 import time
 
-from config import CONTROLLER_PORT
+from config import CONTROLLER_PORT, DATA_DIR
 
-CONTROLLER_APP = r'''
+# CONTROLLER_APP uchta bo'lakka bo'lingan, chunki matn subprocess sifatida
+# ishga tushiriladigan alohida Python fayliga yoziladi:
+#   HEADER — importlar (raw, o'zgarmas)
+#   PATHS  — DATA_DIR'ga bog'liq log yo'llari (config.DATA_DIR interpolatsiya
+#            qilinadi — shu bo'lak {}'siz, shuning uchun .format() xavfsiz)
+#   BODY   — TransportMonitor klassi (raw; ko'p joyda dict literal {} bor,
+#            shuning uchun butun faylni bitta f-string qilish xato qilish
+#            xavfini oshiradi — shu sabab faqat kerakli qismini formatlaymiz)
+_CONTROLLER_APP_HEADER = r'''
 """Transport Monitor - L2 learning + stats collection."""
 try:
     from os_ken.base import app_manager
@@ -27,11 +38,15 @@ except ImportError:
     BaseApp = app_manager.RyuApp
 
 import json, time, os
+'''
 
-EVENTS_LOG = "/data/stats/transport_events.jsonl"
-FLOW_STATS_LOG = "/data/stats/flow_stats.jsonl"
-PORT_STATS_LOG = "/data/stats/port_stats.jsonl"
+_CONTROLLER_APP_PATHS = '''
+EVENTS_LOG = "{data_dir}/stats/transport_events.jsonl"
+FLOW_STATS_LOG = "{data_dir}/stats/flow_stats.jsonl"
+PORT_STATS_LOG = "{data_dir}/stats/port_stats.jsonl"
+'''
 
+_CONTROLLER_APP_BODY = r'''
 class TransportMonitor(BaseApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
@@ -102,8 +117,8 @@ class TransportMonitor(BaseApp):
         try:
             with open(EVENTS_LOG, "a") as f:
                 f.write(json.dumps(event) + "\n")
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.warning("EVENTS_LOG write failed: %s", e)
 
         out_port = self.mac_to_port[dpid].get(dst, ofp.OFPP_FLOOD)
         actions = [p.OFPActionOutput(out_port)]
@@ -127,8 +142,8 @@ class TransportMonitor(BaseApp):
                             "packets": stat.packet_count, "bytes": stat.byte_count,
                             "duration_sec": stat.duration_sec, "idle_timeout": stat.idle_timeout,
                             "hard_timeout": stat.hard_timeout, "match": str(stat.match)}) + "\n")
-            except Exception:
-                pass
+            except Exception as e:
+                self.logger.warning("FLOW_STATS_LOG write failed: %s", e)
 
     @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
     def port_stats_reply(self, ev):
@@ -141,15 +156,23 @@ class TransportMonitor(BaseApp):
                             "rx_bytes": stat.rx_bytes, "tx_bytes": stat.tx_bytes,
                             "rx_dropped": stat.rx_dropped, "tx_dropped": stat.tx_dropped,
                             "rx_errors": stat.rx_errors, "tx_errors": stat.tx_errors}) + "\n")
-            except Exception:
-                pass
+            except Exception as e:
+                self.logger.warning("PORT_STATS_LOG write failed: %s", e)
 '''
+
+
+def _render_controller_app():
+    """CONTROLLER_APP shablonini config.DATA_DIR bilan to'ldirib, yagona
+    Python manba matnini qaytaradi (subprocess shu matnni ishga tushiradi)."""
+    return (_CONTROLLER_APP_HEADER
+            + _CONTROLLER_APP_PATHS.format(data_dir=DATA_DIR)
+            + _CONTROLLER_APP_BODY)
 
 
 def start_controller():
     import socket
     with open("/tmp/transport_monitor.py", "w") as f:
-        f.write(CONTROLLER_APP)
+        f.write(_render_controller_app())
     with open("/tmp/run_controller.py", "w") as f:
         f.write(f'''#!/usr/bin/env python3
 import sys
@@ -167,6 +190,30 @@ hub.joinall(services)
     print("[Controller] os-ken ishga tushirilmoqda...")
     proc = subprocess.Popen(["python3", "/tmp/run_controller.py"],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    # stdout=PIPE bo'lsa-yu, hech kim uni o'qimasa, uzoq ishlaydigan
+    # controller yetarlicha log chiqarsa OS pipe bufferi to'lib qoladi va
+    # controller yozishda bloklanib qoladi (klassik pipe deadlock). Shu
+    # sababli doimiy "drain" thread ishga tushiriladi — chiqishni fon
+    # rejimida o'qib, diskka (DATA_DIR/stats/controller.log) yozadi va
+    # xatolik diagnostikasi uchun oxirgi qatorlarni xotirada saqlaydi.
+    log_path = os.path.join(DATA_DIR, "stats", "controller.log")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    tail = collections.deque(maxlen=200)
+
+    def _drain_stdout():
+        try:
+            with open(log_path, "wb") as logf:
+                for line in iter(proc.stdout.readline, b""):
+                    tail.append(line)
+                    logf.write(line)
+                    logf.flush()
+        except Exception:
+            pass
+
+    drain_thread = threading.Thread(target=_drain_stdout, daemon=True)
+    drain_thread.start()
+
     deadline = time.time() + 30
     while time.time() < deadline:
         try:
@@ -177,7 +224,7 @@ hub.joinall(services)
         except (ConnectionRefusedError, socket.timeout, OSError):
             time.sleep(1)
             if proc.poll() is not None:
-                out = proc.stdout.read().decode() if proc.stdout else ""
+                out = b"".join(tail).decode(errors="replace")
                 print(f"XATO: Controller o'chdi!\n{out[-500:]}")
                 sys.exit(1)
     print("XATO: Controller 30s ichida tayyor bo'lmadi")

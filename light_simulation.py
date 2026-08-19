@@ -46,6 +46,7 @@ from collector import Collector
 from controller import start_controller
 from dataset_builder import build_dataset
 from impairments import Impairments
+from netutil import graph_diameter
 from network_build import NATMonitor, apply_qos_qdiscs, build_topology, setup_nat_gateway
 from path_tracer import PathTracer
 from topologies import TOPOLOGIES
@@ -160,18 +161,35 @@ Misollar:
         time.sleep(3)
         net.waitConnected(timeout=30)
 
-        # STP (loop bo'lsa) — necha marta ortiqcha link bo'lsa, shuncha
-        # mustaqil halqa bor deb hisoblanadi (masalan five_as'da 2 ta
-        # kesishgan halqa bor: s1-s2-s3-s8 va s1-s4-s6-s3 — yadro
-        # switchlarni bo'lishadi, shuning uchun standart 30s yetarli emas).
+        # STP (loop bo'lsa) — ikkita mustaqil omil convergence vaqtiga
+        # ta'sir qiladi, va ikkalasi ham kerak:
+        #  1) excess_links — necha marta ortiqcha link bo'lsa, shuncha
+        #     mustaqil halqa bor deb hisoblanadi (masalan five_as'da 2 ta
+        #     kesishgan halqa bor: s1-s2-s3-s8 va s1-s4-s6-s3 — yadro
+        #     switchlarni bo'lishadi). Har qo'shimcha halqa root bridge
+        #     tomonidan qayta hisoblanishi/bloklanishi kerak bo'lgan
+        #     qo'shimcha portlar demakdir.
+        #  2) graf diametri (eng uzun eng-qisqa-yo'l, hop sonida) — BPDU
+        #     xabarlari topologiya bo'ylab bitta-bitta hop orqali
+        #     tarqaladi, shuning uchun "core" switchdan uzoqdagi
+        #     switch/host STP holatini diametr oshgani sayin kechroq
+        #     bilib oladi. Faqat halqa soniga qarab hisoblash bunga
+        #     e'tibor bermaydi — shu sabab core'ga ulangan host ba'zan
+        #     STP "tugagach" ham uzoq hostlarni pinglay olmasligi mumkin.
         excess_links = len(topo["links"]) - (len(topo["switches"]) - 1)
         has_loop = excess_links > 0
         if has_loop:
             print("[Network] STP yoqilmoqda...")
             for sw in net.switches:
                 sw.cmd(f"ovs-vsctl set bridge {sw.name} stp_enable=true")
-            stp_wait = 30 + 15 * (excess_links - 1)
-            print(f"[Network] STP convergence ({stp_wait}s, {excess_links} ta halqa)...")
+            diameter = graph_diameter(topo["switches"], topo["links"])
+            # 30s baza (IEEE 802.1D listening+learning, ~2 x forward_delay)
+            # + 15s har qo'shimcha mustaqil halqa uchun (qayta hisoblash)
+            # + 4s har diametr hop uchun (BPDU'ning core'dan chekka
+            #   switchgacha yetib borish + qayta yo'nalish vaqti).
+            stp_wait = 30 + 15 * (excess_links - 1) + 4 * diameter
+            print(f"[Network] STP convergence ({stp_wait}s, {excess_links} ta halqa, "
+                  f"diametr={diameter} hop)...")
             time.sleep(stp_wait)
         else:
             time.sleep(3)

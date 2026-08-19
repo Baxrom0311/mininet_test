@@ -153,6 +153,66 @@ def _compute_rip_metric(path):
     return len(path) - 1
 
 
+def _compute_static_weight(params):
+    """Static-route weight: pure inverse-bandwidth, delay ignored.
+
+    Models an admin who hard-codes routes once to favor the fattest pipe
+    ("bandwidth wins, latency doesn't matter") -- deliberately different
+    dimension from l2_learn's hop-count BFS, so the two modes genuinely
+    diverge on any topology with heterogeneous link bandwidth.
+    """
+    bw = params.get("bw", 10)
+    return 1.0 / max(bw, 0.001)
+
+
+def _ospf_staleness_prob():
+    """OSPF timer-driven stale-route probability.
+
+    Larger Hello/dead/SPF-delay windows mean SPF reconvergence lags a real
+    topology change for longer, so a small share of computed paths keep an
+    already-superseded (stale) extra hop -- same idea as the RIP poison-
+    reverse perturbation below, but keyed off OSPF's own configured timers
+    instead of a bare constant. Bounded to 5% to stay a subtle bias.
+    """
+    cfg = OSPF_CONFIG
+    raw = (cfg["hello_interval"] + cfg["spf_delay"]) / cfg["dead_interval"] * 0.05
+    return min(0.05, raw)
+
+
+def _isis_staleness_prob():
+    """IS-IS lsp_lifetime-driven stale-route probability.
+
+    A longer LSP lifetime means a stale LSP lingers in the link-state
+    database longer before refresh/flush, so occasionally a path is
+    computed from slightly outdated link-state info. Bounded to 5%.
+    """
+    lifetime = ISIS_CONFIG["lsp_lifetime"]
+    return min(0.05, lifetime / 1200 * 0.02)
+
+
+# Timer-derived, deterministic — computed once from the config dicts above.
+_OSPF_STALE_PROB = _ospf_staleness_prob()
+_ISIS_STALE_PROB = _isis_staleness_prob()
+
+# Static routes are admin-defined once and never recomputed per packet; cache
+# the per-source Dijkstra result per topology so repeated compute_paths()
+# calls on the same topology don't redo the O(V log V) work every time.
+_static_prev_cache = {}
+
+
+def _topology_signature(topo):
+    """Stable hashable signature of a topology's switch/link graph.
+
+    Used as a cache key for static routes -- safer than id(topo), which can
+    alias a freed-then-reallocated dict at the same address.
+    """
+    switches = tuple(sorted(topo["switches"].keys()))
+    links = tuple(sorted(
+        (s1, s2, params.get("bw", 10)) for (s1, s2), params in topo["links"].items()
+    ))
+    return (switches, links)
+
+
 def _dijkstra_weighted(graph, source, weight_fn):
     """Umumiy Dijkstra — ixtiyoriy weight funksiyasi bilan."""
     import heapq
@@ -189,9 +249,17 @@ def _reconstruct_path(prev, source, target):
 
 
 def _assign_ospf_areas(topo):
-    """Switchlarni OSPF arealarga tayinlash."""
+    """Switchlarni OSPF arealarga tayinlash.
+
+    Topology author bergan aniq "area" kalitiga ustunlik beriladi; u yo'q
+    bo'lsa (eski shakldagi topo dict) role substring evristikasiga qaytadi,
+    shuning uchun bu funksiya hech qachon eski topologiyalarda crash bo'lmaydi.
+    """
     areas = {}
     for sw, info in topo["switches"].items():
+        if "area" in info:
+            areas[sw] = info["area"]
+            continue
         role = info.get("role", "")
         if "core" in role or "tier1" in role:
             areas[sw] = 0   # Backbone
@@ -205,9 +273,16 @@ def _assign_ospf_areas(topo):
 
 
 def _assign_isis_levels(topo):
-    """Switchlarga IS-IS level tayinlash."""
+    """Switchlarga IS-IS level tayinlash.
+
+    Xuddi _assign_ospf_areas kabi — aniq "isis_level" kalitiga ustunlik,
+    bo'lmasa role substring evristikasiga fallback.
+    """
     levels = {}
     for sw, info in topo["switches"].items():
+        if "isis_level" in info:
+            levels[sw] = info["isis_level"]
+            continue
         role = info.get("role", "")
         if "core" in role or "tier1" in role:
             levels[sw] = "L2"     # Inter-area
@@ -377,6 +452,10 @@ def compute_paths(topo, routing_mode):
                         if areas.get(d_sw, 0) == 2:
                             pass  # Normal Dijkstra path ishlaydi
 
+                        # Timer-driven staleness: SPF hasn't reconverged yet
+                        if random.random() < _OSPF_STALE_PROB:
+                            path = path + [path[-1]]
+
                         paths[(src_h, dst_h)] = path
 
     # ══════════════════════════════════════════════
@@ -421,6 +500,10 @@ def compute_paths(topo, routing_mode):
                                     p2 = _reconstruct_path(prev2, best_rp, d_sw)
                                     if p1 and p2:
                                         path = p1 + p2[1:]
+
+                        # Timer-driven staleness: LSP hasn't been refreshed yet
+                        if random.random() < _ISIS_STALE_PROB:
+                            path = path + [path[-1]]
 
                         paths[(src_h, dst_h)] = path
 
@@ -545,6 +628,13 @@ def compute_paths(topo, routing_mode):
             for h_name, h_info in topo["hosts"].items():
                 target_sw = h_info["switch"]
                 if target_sw == sw:
+                    # Same-switch host pair: pre-existing gap left this pair
+                    # out entirely (compute_dijkstra has nothing to route to
+                    # itself). Mirror the [src_sw]-only path every other mode
+                    # uses for co-located hosts.
+                    for src_h, src_sw in host_sw.items():
+                        if src_sw == sw and src_h != h_name:
+                            paths[(src_h, h_name)] = [sw]
                     continue
                 path = _reconstruct_path(prev, sw, target_sw)
                 if path:
@@ -581,19 +671,32 @@ def compute_paths(topo, routing_mode):
     #  Static — Admin-defined shortest paths
     # ══════════════════════════════════════════════
     elif routing_mode == "static":
-        # Static routing: BFS shortest, hech qanday dinamik o'zgarish yo'q
-        # Admin qo'lda kiritadi, shuning uchun har doim bir xil
+        # Static routing: admin bir marta qo'lda yozgan, inverse-bandwidth
+        # bo'yicha og'irlashtirilgan Dijkstra (eng semiz linkni tanlaydi,
+        # kechikishga qaramaydi) -- l2_learn'ning hop-count BFS'idan tubdan
+        # farqli siyosat. Har bir topologiya uchun bir marta hisoblanadi va
+        # keshlanadi (haqiqiy admin ham har paketda qayta hisoblamaydi).
+        sig = _topology_signature(topo)
+        prev_by_src = _static_prev_cache.get(sig)
+        if prev_by_src is None:
+            prev_by_src = {}
+            for src_sw in topo["switches"]:
+                _, prev = _dijkstra_weighted(graph, src_sw, _compute_static_weight)
+                prev_by_src[src_sw] = prev
+            _static_prev_cache[sig] = prev_by_src
+
         for src_sw in topo["switches"]:
-            for dst_sw in topo["switches"]:
-                if src_sw == dst_sw:
+            prev = prev_by_src[src_sw]
+            for src_h, s_sw in host_sw.items():
+                if s_sw != src_sw:
                     continue
-                path = _bfs_shortest(graph, src_sw, dst_sw)
-                if path:
-                    for src_h, s_sw in host_sw.items():
-                        if s_sw == src_sw:
-                            for dst_h, d_sw in host_sw.items():
-                                if d_sw == dst_sw:
-                                    paths[(src_h, dst_h)] = path
+                for dst_h, d_sw in host_sw.items():
+                    if s_sw == d_sw:
+                        paths[(src_h, dst_h)] = [src_sw]
+                        continue
+                    path = _reconstruct_path(prev, src_sw, d_sw)
+                    if path:
+                        paths[(src_h, dst_h)] = path
         for src_h, src_sw in host_sw.items():
             for dst_h, dst_sw in host_sw.items():
                 if src_h != dst_h and src_sw == dst_sw:
@@ -668,7 +771,7 @@ def compute_paths(topo, routing_mode):
     # ══════════════════════════════════════════════
     #  L2 Learn — Default BFS flooding
     # ══════════════════════════════════════════════
-    else:  # l2_learn
+    elif routing_mode == "l2_learn":
         for src_sw in topo["switches"]:
             for dst_sw in topo["switches"]:
                 if src_sw == dst_sw:
@@ -684,6 +787,12 @@ def compute_paths(topo, routing_mode):
             for dst_h, dst_sw in host_sw.items():
                 if src_h != dst_h and src_sw == dst_sw:
                     paths[(src_h, dst_h)] = [src_sw]
+
+    else:
+        raise ValueError(
+            f"Noma'lum routing_mode: {routing_mode!r}. Valid modes: "
+            "l2_learn, rip, ospf, isis, eigrp, bgp, ecmp, spf, policy, static, hybrid"
+        )
 
     return paths
 

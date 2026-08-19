@@ -1,0 +1,7 @@
+# ML training dependencies (train_anomaly.py, train_routing.py).
+# Separate from docker/requirements.txt, which is scoped to the simulator itself.
+torch>=2.1.0
+pandas>=2.0.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+joblib>=1.3.0

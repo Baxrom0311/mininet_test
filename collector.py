@@ -9,6 +9,7 @@ import threading
 import time
 
 from config import DATA_DIR
+from netutil import parse_ping
 
 
 class Collector:
@@ -61,7 +62,7 @@ class Collector:
                 except Exception:
                     result = ""
                 if result:
-                    rtt = self._parse_ping(result)
+                    rtt = parse_ping(result)
                     if rtt:
                         try:
                             with open(path, "a") as f:
@@ -70,24 +71,3 @@ class Collector:
                         except OSError:
                             pass
             time.sleep(10)
-
-    @staticmethod
-    def _parse_ping(output):
-        result = {}
-        for line in output.split("\n"):
-            if "packet loss" in line:
-                for part in line.split(","):
-                    if "packet loss" in part:
-                        try: result["loss_pct"] = float(part.strip().split("%")[0])
-                        except ValueError: pass
-            if "min/avg/max" in line:
-                try:
-                    vals = line.split("=")[1].strip().split("/")
-                    result["rtt_min"] = float(vals[0])
-                    result["rtt_avg"] = float(vals[1])
-                    result["rtt_max"] = float(vals[2])
-                    if len(vals) > 3:
-                        result["rtt_mdev"] = float(vals[3].split()[0])
-                except (ValueError, IndexError):
-                    pass
-        return result

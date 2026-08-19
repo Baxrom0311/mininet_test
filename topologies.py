@@ -5,12 +5,12 @@ TOPOLOGIES = {
     "three_as": {
         "nat_private_subnet": "192.168.60.0/24",
         "switches": {
-            "s1": {"as": 100, "role": "core"},
-            "s2": {"as": 100, "role": "border"},
-            "s3": {"as": 200, "role": "border"},
-            "s4": {"as": 200, "role": "servers"},
-            "s5": {"as": 300, "role": "border"},
-            "s6": {"as": 300, "role": "access"},
+            "s1": {"as": 100, "role": "core",    "area": 0, "isis_level": "L2"},
+            "s2": {"as": 100, "role": "border",  "area": 1, "isis_level": "L1L2"},
+            "s3": {"as": 200, "role": "border",  "area": 1, "isis_level": "L1L2"},
+            "s4": {"as": 200, "role": "servers", "area": 2, "isis_level": "L1"},
+            "s5": {"as": 300, "role": "border",  "area": 1, "isis_level": "L1L2"},
+            "s6": {"as": 300, "role": "access",  "area": 2, "isis_level": "L1"},
         },
         "hosts": {
             "dns1":   {"switch": "s1", "ip": "10.0.1.1/8", "role": "server"},
@@ -33,7 +33,11 @@ TOPOLOGIES = {
             ("s5","s6"): {"bw": 20,  "delay": "2ms",  "loss": 0.05, "jitter": "1ms",   "queue": 40},
             ("s2","s3"): {"bw": 40,  "delay": "8ms",  "loss": 0.02, "jitter": "2ms",   "queue": 60},
             ("s2","s5"): {"bw": 30,  "delay": "12ms", "loss": 0.05, "jitter": "3ms",   "queue": 50},
-            ("s1","s3"): {"bw": 60,  "delay": "5ms",  "loss": 0.01, "jitter": "1ms",   "queue": 100},
+            # Short hop but bandwidth-starved (legacy/oversubscribed link) --
+            # deliberately makes the fewest-hop route NOT the fattest-pipe
+            # route, so 'static' (bw-weighted) genuinely diverges from
+            # 'l2_learn' (hop-count) on this topology. See routing.py fix #1.
+            ("s1","s3"): {"bw": 6,   "delay": "5ms",  "loss": 0.01, "jitter": "1ms",   "queue": 100},
         },
         "access_links": {
             "dns1": {"bw": 50,  "delay": "0.5ms", "loss": 0},
@@ -55,15 +59,15 @@ TOPOLOGIES = {
     "five_as": {
         "nat_private_subnet": "192.168.50.0/24",  # nat_gw shu yerda joylashgan
         "switches": {
-            "s1": {"as": 100, "role": "tier1_core"},      # Tier-1 ISP core
-            "s2": {"as": 200, "role": "tier2_border"},     # Tier-2 ISP
-            "s3": {"as": 200, "role": "tier2_access"},
-            "s4": {"as": 300, "role": "cdn_edge"},         # CDN
-            "s5": {"as": 300, "role": "cdn_origin"},
-            "s6": {"as": 400, "role": "enterprise_core"},  # Enterprise
-            "s7": {"as": 400, "role": "enterprise_access"},
-            "s8": {"as": 500, "role": "residential_agg"},  # Residential ISP
-            "s9": {"as": 500, "role": "residential_access"},
+            "s1": {"as": 100, "role": "tier1_core",         "area": 0, "isis_level": "L2"},    # Tier-1 ISP core
+            "s2": {"as": 200, "role": "tier2_border",       "area": 1, "isis_level": "L1L2"},  # Tier-2 ISP
+            "s3": {"as": 200, "role": "tier2_access",       "area": 2, "isis_level": "L1"},
+            "s4": {"as": 300, "role": "cdn_edge",           "area": 1, "isis_level": "L1L2"},  # CDN
+            "s5": {"as": 300, "role": "cdn_origin",         "area": 2, "isis_level": "L1"},
+            "s6": {"as": 400, "role": "enterprise_core",    "area": 1, "isis_level": "L1L2"},  # Enterprise
+            "s7": {"as": 400, "role": "enterprise_access",  "area": 2, "isis_level": "L1"},
+            "s8": {"as": 500, "role": "residential_agg",    "area": 1, "isis_level": "L1L2"},  # Residential ISP
+            "s9": {"as": 500, "role": "residential_access", "area": 2, "isis_level": "L1"},
         },
         "hosts": {
             "root1":  {"switch": "s1", "ip": "10.1.0.1/8",  "role": "server"},  # DNS root
@@ -106,6 +110,14 @@ TOPOLOGIES = {
             ("s6","s4"): {"bw": 20,  "delay": "15ms", "loss": 0.02,  "jitter": "2ms",   "queue": 35},
             # Backup: Tier-1 to Residential
             ("s1","s8"): {"bw": 20,  "delay": "20ms", "loss": 0.03,  "jitter": "4ms",   "queue": 30},
+            # Backup: Enterprise <-> CDN direct peering (private leased line, same
+            # city pair as the s6-s4 backup above). Deliberately high-bw/high-delay
+            # -- inverted vs. s6-s4's low-bw/high-delay and vs. this topology's
+            # general bw-delay correlation -- so bandwidth-optimizing protocols
+            # (OSPF/EIGRP/ISIS, which chase the fat single hop) and delay-optimizing
+            # ones (SPF, which chases the lower cumulative latency of the longer
+            # multi-hop routes) genuinely disagree on the best path. See fix #5.
+            ("s7","s5"): {"bw": 90,  "delay": "30ms", "loss": 0.01,  "jitter": "2ms",   "queue": 90},
         },
         "access_links": {
             "root1":  {"bw": 50, "delay": "0.5ms","loss": 0},
@@ -126,12 +138,12 @@ TOPOLOGIES = {
     # ═══ 3. DATACENTER - Fat-tree ═══
     "datacenter": {
         "switches": {
-            "s1": {"as": 100, "role": "core1"},
-            "s2": {"as": 100, "role": "core2"},
-            "s3": {"as": 100, "role": "agg1"},
-            "s4": {"as": 100, "role": "agg2"},
-            "s5": {"as": 100, "role": "tor1"},   # Top of Rack
-            "s6": {"as": 100, "role": "tor2"},
+            "s1": {"as": 100, "role": "core1", "area": 0, "isis_level": "L2"},
+            "s2": {"as": 100, "role": "core2", "area": 0, "isis_level": "L2"},
+            "s3": {"as": 100, "role": "agg1",  "area": 1, "isis_level": "L1L2"},
+            "s4": {"as": 100, "role": "agg2",  "area": 1, "isis_level": "L1L2"},
+            "s5": {"as": 100, "role": "tor1",  "area": 2, "isis_level": "L1"},   # Top of Rack
+            "s6": {"as": 100, "role": "tor2",  "area": 2, "isis_level": "L1"},
         },
         "hosts": {
             "srv1":  {"switch": "s5", "ip": "10.0.1.1/8", "role": "server"},
@@ -167,13 +179,16 @@ TOPOLOGIES = {
     "campus": {
         "nat_private_subnet": "192.168.70.0/24",
         "switches": {
-            "s1": {"as": 100, "role": "core"},
-            "s2": {"as": 100, "role": "distribution1"},
-            "s3": {"as": 100, "role": "distribution2"},
-            "s4": {"as": 100, "role": "access_bldg_a"},
-            "s5": {"as": 100, "role": "access_bldg_b"},
-            "s6": {"as": 100, "role": "dmz"},
-            "s7": {"as": 200, "role": "isp_gateway"},
+            "s1": {"as": 100, "role": "core",          "area": 0, "isis_level": "L2"},
+            "s2": {"as": 100, "role": "distribution1", "area": 1, "isis_level": "L1L2"},
+            "s3": {"as": 100, "role": "distribution2", "area": 1, "isis_level": "L1L2"},
+            "s4": {"as": 100, "role": "access_bldg_a", "area": 2, "isis_level": "L1"},
+            "s5": {"as": 100, "role": "access_bldg_b", "area": 2, "isis_level": "L1"},
+            # DMZ: externally-reachable servers, modeled as NSSA (external routes
+            # injected without full backbone LSA flooding).
+            "s6": {"as": 100, "role": "dmz",           "area": 3, "isis_level": "L1"},
+            # ISP gateway: boundary to the outside AS -- redistribution point.
+            "s7": {"as": 200, "role": "isp_gateway",   "area": 3, "isis_level": "L2"},
         },
         "hosts": {
             "www":   {"switch": "s6", "ip": "10.0.6.1/8", "role": "server"},
@@ -196,7 +211,11 @@ TOPOLOGIES = {
             ("s3","s5"): {"bw": 20, "delay": "1ms",  "loss": 0.01, "jitter": "0.3ms","queue": 50},
             ("s1","s6"): {"bw": 30, "delay": "0.2ms","loss": 0.002,"jitter": "0.05ms","queue":80},
             ("s1","s7"): {"bw": 15, "delay": "10ms", "loss": 0.05, "jitter": "3ms",  "queue": 30},
-            ("s2","s3"): {"bw": 30, "delay": "0.3ms","loss": 0.003,"jitter": "0.1ms","queue": 60},
+            # Short hop but bandwidth-starved (aging distribution cross-link)
+            # -- same rationale as three_as's s1-s3 retune: makes the
+            # fewest-hop route NOT the fattest-pipe route so 'static' and
+            # 'l2_learn' genuinely diverge here too. See routing.py fix #1.
+            ("s2","s3"): {"bw": 4,  "delay": "0.3ms","loss": 0.003,"jitter": "0.1ms","queue": 60},
         },
         "access_links": {
             "www":  {"bw": 30, "delay": "0.1ms","loss": 0},

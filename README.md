@@ -5,7 +5,7 @@ Mininet + SDN (os-ken/Ryu) yordamida real internet trafikini simulyatsiya qilish
 ## Xususiyatlari
 
 - **4 topologiya**: three_as (3 AS, 6 switch), five_as (5 AS, 9 switch), datacenter (Fat-tree, 6 switch), campus (7 switch)
-- **4 routing algoritm**: L2 MAC learning, SPF (Dijkstra), ECMP (load balancing), Policy (BGP-like)
+- **11 routing algoritm**: L2 MAC learning, RIP v2, OSPF, IS-IS, EIGRP, BGP, ECMP, SPF (Dijkstra), Policy (BGP-like), Static, Hybrid (intra-AS OSPF + inter-AS BGP + ECMP)
 - **13 trafik turi**: web, video, dns, bulk, voip, ssh, gaming, email, iot, https, streaming, p2p, cloud
 - **8 anomaliya turi**: port_scan, syn_flood, udp_flood, dns_amplify, slowloris, ping_sweep, brute_force, data_exfil
 - **Real protokollar**: DNS resolution (cache, TTL, recursive), HTTP GET/POST, TCP connection states, Adaptive Bitrate Streaming
@@ -50,7 +50,7 @@ sudo bash install_light.sh
 
 # yoki qo'lda
 sudo apt install -y mininet openvswitch-switch python3-os-ken iperf3 hping3 tcpdump
-pip install -r requirements.txt
+pip install -r docker/requirements.txt
 
 # Ishga tushirish
 sudo python3 light_simulation.py --topology five_as --routing spf --duration 300
@@ -137,44 +137,58 @@ AS 500: s8-s9 (Residential) ── home1, home2, mob1, mob2
 
 ## Dataset chiqishi
 
-Har bir run `/data/datasets/` da 12 ta CSV fayl yaratadi:
+Har bir run `/data/datasets/` da har biri uchun `.csv` va `.parquet` juftlik yaratadi
+(`dataset_builder.py`ning `build_dataset()` funksiyasi belgilaydi), plyus `metadata.json`.
+Fayl faqat mos JSONL manbasida qatordan bo'lsagina yoziladi — masalan NAT'siz topologiyada
+(`datacenter`) `nat_translations.csv` umuman paydo bo'lmaydi.
 
 | Fayl | Tarkib |
 |------|--------|
-| `flow_records.csv` | Asosiy trafik oqimlari (src/dst IP, port, bytes, RTT, path) |
-| `flow_stats.csv` | OpenFlow switch statistikasi |
-| `ping_results.csv` | ICMP ping natijalari |
-| `iperf_results.csv` | iperf3 throughput o'lchovlari |
-| `traceroute_hops.csv` | Hop-by-hop marshrut ma'lumotlari |
-| `link_stats.csv` | Link bandwidth, delay, loss, queue |
-| `impairment_events.csv` | Network impairment hodisalari |
-| `topology_snapshot.csv` | Topologiya tuzilishi |
-| `dns_queries.csv` | DNS so'rovlari (cache, TTL, recursive) |
+| `transport_events.csv` | Kontroller tomonidan qayd etilgan har paket (TCP/UDP/ICMP/ARP) metama'lumoti |
+| `flow_stats.csv` | OpenFlow oqim (flow) statistikasi, davriy so'ralgan |
+| `port_stats.csv` | Switch port statistikasi (rx/tx bayt/paket/drop, hisoblangan bytes_per_sec) |
+| `rtt.csv` | Tasodifiy host juftliklari orasidagi o'lchangan ICMP RTT |
+| `traffic_log.csv` | Generatsiya qilingan trafik (HTTP/iperf/DNS/anomaliya va h.k.) hodisa logi |
+| `impairments.csv` | Qo'llanilgan tarmoq nosozliklari (congestion, link flap, jitter spike, ...) |
+| `path_traces.csv` | Har host juftligi uchun nazariy (topologiya asosidagi) va real (ping) yo'l/RTT/loss |
+| `hop_details.csv` | `path_traces`dan chiqarilgan, har hop uchun bitta qator (link bw/delay/loss/jitter) |
+| `dns_queries.csv` | Ko'p bosqichli DNS so'rovlari (root/TLD/authoritative, cache hit/TTL) |
 | `http_transactions.csv` | HTTP GET/POST tranzaksiyalari |
-| `anomaly_events.csv` | Hujum trafik hodisalari |
+| `anomaly_events.csv` | Hujum trafik hodisalari (port_scan, syn_flood, ...) |
 | `connection_states.csv` | TCP holatlari (ESTABLISHED, TIME_WAIT, ...) |
+| `nat_translations.csv` | NAT gateway'dagi conntrack tarjimalari (faqat NAT'li topologiya + run muvaffaqiyatli conntrack o'qisa — pastdagi "Ma'lum cheklovlar"ga qarang) |
 
 ### Namuna ma'lumotlar
 
 ```python
 import pandas as pd
 
-flows = pd.read_csv("datasets/flow_records.csv")
-print(flows.columns.tolist())
-# ['timestamp', 'src', 'dst', 'src_ip', 'dst_ip', 'sport', 'dport',
-#  'proto', 'bytes_sent', 'bytes_recv', 'rtt_ms', 'jitter_ms',
-#  'retransmits', 'cwnd', 'path', 'hops', 'as_path', 'traffic_type',
-#  'loss_pct', 'bw_mbps', 'tcp_cc', 'topology', 'routing', ...]
+events = pd.read_csv("datasets/transport_events.csv")
+print(events.columns.tolist())
 
+paths = pd.read_csv("datasets/path_traces.csv")
 dns = pd.read_csv("datasets/dns_queries.csv")
 anomaly = pd.read_csv("datasets/anomaly_events.csv")
 ```
+
+## Ma'lum cheklovlar
+
+- **NAT tarjimalari Docker ichida ishonchsiz**: `NATMonitor` NAT gateway hostida
+  `/proc/net/nf_conntrack`ni o'qib `nat_translations.csv` yaratadi. Docker ichida
+  (`--privileged` bilan ham) bu fayl ba'zan umuman yaratilmaydi — repo'dagi
+  `results/combined/` (Docker orqali yig'ilgan) shunga misol. Har bir run uchun bu faylning
+  borligini alohida tekshiring, undan qat'iy tarzda tayanmang.
+- **STP convergence**: halqali topologiyalarda (masalan `five_as`) OVS spanning-tree
+  yaqinlashishi kerak, aks holda `pingAll`/QoS/NAT sozlash bosqichida vaqtinchalik yo'qotish
+  ko'rinishi mumkin. `light_simulation.py` kutish vaqtini halqalar soniga qarab
+  moslashtiradi (`docs/CLAUDE.md`dagi "Known limitations" bo'limiga qarang) — bu tuzatish
+  jonli Mininet muhitida qayta tasdiqlanmagan.
 
 ## Barcha kombinatsiyalarni ishga tushirish
 
 ```bash
 for topo in three_as five_as datacenter campus; do
-    for route in l2_learn spf ecmp policy; do
+    for route in l2_learn rip ospf isis eigrp bgp ecmp spf policy static hybrid; do
         echo "=== $topo + $route ==="
         sudo python3 light_simulation.py \
             --topology $topo --routing $route --duration 300
@@ -185,31 +199,34 @@ for topo in three_as five_as datacenter campus; do
 done
 ```
 
+`results/combine_datasets.py` shu tarzda yig'ilgan `results/five_as_<routing>/` papkalarini bitta
+`results/combined/*.csv` to'plamiga birlashtiradi (har bir qatorga `routing` ustuni qo'shib).
+
 ## Arxitektura
 
+`light_simulation.py` — CLI/`main()` orkestratori (~270 qator); haqiqiy mantiq repo ildizidagi
+alohida modullarga bo'lingan (barcha Mininet/os-ken importlari lazy — faqat funksiya ichida):
+
 ```
-light_simulation.py (yagona fayl)
-├── TOPOLOGIES dict          - 4 ta topologiya definitsiyasi
-├── TRAFFIC_MIX              - 13 trafik turi profillari
-├── ANOMALY_MIX              - 8 hujum turi profillari
-├── IMPAIRMENT_EVENTS        - 10 impairment turi
-├── SDNController class      - os-ken OpenFlow controller
-│   ├── L2 learning
-│   ├── SPF (Dijkstra)
-│   ├── ECMP (hash-based)
-│   └── Policy (BGP-like)
-├── TrafficGen class         - Trafik generatsiyasi
-│   ├── _iperf_loop()        - TCP/UDP throughput
-│   ├── _ping_loop()         - ICMP latency
-│   ├── _http_loop()         - Real HTTP traffic
-│   ├── _dns_loop()          - DNS resolution
-│   ├── _anomaly_loop()      - Attack traffic
-│   ├── _connection_state_loop() - TCP state tracking
-│   └── _adaptive_bitrate_loop() - Video ABR
-├── Impairments class        - Network impairment injection
-├── build_dataset()          - JSONL -> CSV/Parquet
-└── visualize_topology()     - PNG topology map
+light_simulation.py    - CLI + main() orkestratori
+├── config.py           - DATA_DIR, CONTROLLER_PORT
+├── topologies.py        - TOPOLOGIES: 4 ta topologiya definitsiyasi
+├── routing.py            - compute_paths(): 11 ta routing rejimi
+├── network_build.py       - Mininet topologiya, QoS/DiffServ qdisc, NAT gateway/monitor
+├── controller.py           - os-ken/Ryu SDN controller subprocess (start_controller)
+├── traffic_gen.py           - TrafficGen: HTTP/iperf/DNS/anomaliya/TCP CC/ABR
+├── impairments.py            - Impairments: 10 ta dinamik nosozlik turi
+├── collector.py                - Collector: tcpdump + RTT o'lchov
+├── path_tracer.py                - PathTracer: nazariy + real yo'l kuzatuvi
+├── dataset_builder.py             - build_dataset(): JSONL -> CSV/Parquet
+├── visualize.py                    - visualize_topology(): PNG topology map
+└── netutil.py                       - parse_ping(), graph_diameter() (umumiy yordamchilar)
 ```
+
+Eski (endi ishlatilmaydigan) simulyator avlodlari `legacy/`da arxivlangan — batafsil
+`docs/CLAUDE.md`ga qarang. Docker fayllari (`Dockerfile`, `docker-entrypoint.sh`,
+`requirements.txt`) `docker/` papkasida, lekin build konteksti hamon repo ildizi
+(`docker build -f docker/Dockerfile -t internet-sim .`).
 
 ## Litsenziya
 
