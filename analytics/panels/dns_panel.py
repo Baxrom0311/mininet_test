@@ -30,15 +30,25 @@ class DNSPanel(ttk.Frame):
 
     def refresh(self):
         self.figure.clear()
+        try:
+            self._draw()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.summary.config(text=f"Xato: {e}")
+            ax = self.figure.add_subplot(111)
+            ax.text(0.5, 0.5, f"Xato: {e}", ha="center", va="center", wrap=True, color="#c0392b")
+            ax.axis("off")
+        self.canvas.draw()
+
+    def _draw(self):
         if not self.store.has("dns_queries"):
             self.summary.config(text="dns_queries.csv topilmadi")
-            self.canvas.draw()
             return
 
         df = self.store.query_df("SELECT stage, response_time_ms, cache_hit FROM dns_queries")
         self.summary.config(text=f"Jami {len(df):,} so'rov bosqichi")
         if df.empty:
-            self.canvas.draw()
             return
 
         stages = [s for s in STAGE_ORDER if s in df["stage"].unique()]
@@ -56,4 +66,3 @@ class DNSPanel(ttk.Frame):
         ax2.set_title("Kesh nisbati")
 
         self.figure.tight_layout()
-        self.canvas.draw()

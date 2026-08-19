@@ -27,6 +27,18 @@ class QoSPanel(ttk.Frame):
 
     def refresh(self):
         self.figure.clear()
+        try:
+            self._draw()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.figure.clear()
+            ax = self.figure.add_subplot(111)
+            ax.text(0.5, 0.5, f"Xato: {e}", ha="center", va="center", wrap=True, color="#c0392b")
+            ax.axis("off")
+        self.canvas.draw()
+
+    def _draw(self):
         ax1 = self.figure.add_subplot(121)
         if self.store.has("traffic_log"):
             df = self.store.query_df(
@@ -56,4 +68,3 @@ class QoSPanel(ttk.Frame):
             ax2.text(0.5, 0.5, "impairments.csv topilmadi", ha="center", va="center")
 
         self.figure.tight_layout()
-        self.canvas.draw()

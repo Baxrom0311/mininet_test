@@ -25,10 +25,20 @@ class RoutingComparePanel(ttk.Frame):
 
     def refresh(self):
         self.figure.clear()
+        try:
+            self._draw()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            ax = self.figure.add_subplot(111)
+            ax.text(0.5, 0.5, f"Xato: {e}", ha="center", va="center", wrap=True, color="#c0392b")
+            ax.axis("off")
+        self.canvas.draw()
+
+    def _draw(self):
         if not self.store.has("path_traces"):
             ax = self.figure.add_subplot(111)
             ax.text(0.5, 0.5, "path_traces.csv topilmadi", ha="center", va="center")
-            self.canvas.draw()
             return
 
         df = self.store.query_df(
@@ -38,7 +48,6 @@ class RoutingComparePanel(ttk.Frame):
         if df.empty:
             ax = self.figure.add_subplot(111)
             ax.text(0.5, 0.5, "real_rtt_ms bo'lgan qator topilmadi", ha="center", va="center")
-            self.canvas.draw()
             return
 
         modes = sorted(df["routing"].unique())
@@ -56,4 +65,3 @@ class RoutingComparePanel(ttk.Frame):
         ax2.set_title("RTT tarqalishi (box-plot)")
 
         self.figure.tight_layout()
-        self.canvas.draw()

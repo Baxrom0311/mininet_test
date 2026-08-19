@@ -56,12 +56,23 @@ class TopologyPanel(ttk.Frame):
         self.draw()
 
     def draw(self):
+        self.ax.clear()
+        try:
+            self._draw_topo()
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.ax.clear()
+            self.ax.text(0.5, 0.5, f"Xato: {e}", ha="center", va="center", wrap=True, color="#c0392b")
+            self.ax.axis("off")
+        self.canvas.draw()
+
+    def _draw_topo(self):
         topo = topologies.TOPOLOGIES[self.topo_var.get()]
         G = _build_graph(topo)
         as_numbers = sorted(set(s["as"] for s in topo["switches"].values()))
         as_colors = {asn: COLOR_PALETTE[i % len(COLOR_PALETTE)] for i, asn in enumerate(as_numbers)}
 
-        self.ax.clear()
         pos = nx.kamada_kawai_layout(G, scale=2.0)
         switch_nodes = [n for n, d in G.nodes(data=True) if d.get("node_type") == "switch"]
         host_nodes = [n for n, d in G.nodes(data=True) if d.get("node_type") == "host"]
@@ -81,7 +92,6 @@ class TopologyPanel(ttk.Frame):
         self.ax.set_title(f"{self.topo_var.get()} -- {len(topo['switches'])} switch, "
                            f"{len(topo['hosts'])} host, {len(as_numbers)} AS")
         self.ax.axis("off")
-        self.canvas.draw()
 
     def refresh(self):
         pass  # topologiya papka tanlashga bog'liq emas

@@ -60,7 +60,19 @@ class SimpleForm(tk.Toplevel):
         ttk.Button(btn_row, text="OK", command=self._on_ok).pack(side="left", padx=4)
         ttk.Button(btn_row, text="Bekor qilish", command=self.destroy).pack(side="left", padx=4)
 
-        self.transient(parent)
+        # `parent` odatda ttk.Frame (panelning o'zi), lekin transient/grab
+        # o'zining haqiqiy oynasiga (Toplevel/Tk) qarab ishlashi kerak --
+        # aks holda macOS'da dialog asosiy oyna ortida yashiringan yoki
+        # fokus olmagan holda qolishi mumkin.
+        toplevel = parent.winfo_toplevel()
+        self.transient(toplevel)
+        self.update_idletasks()
+        # Ekran markazi atrofida, chaqiruvchi oynaga nisbatan joylashtirish.
+        self.geometry(f"+{toplevel.winfo_rootx() + 60}+{toplevel.winfo_rooty() + 60}")
+        self.lift()
+        self.attributes("-topmost", True)
+        self.after(10, lambda: self.attributes("-topmost", False))
+        self.focus_force()
         self.grab_set()
         self.wait_window(self)
 
@@ -135,7 +147,7 @@ class TopologyBuilderPanel(ttk.Frame):
 
     # ── Switch qo'shish/chizish ───────────────────────────────
     def _add_switch(self, x, y):
-        name = simpledialog.askstring("Switch nomi", "Switch nomi (masalan s1):", parent=self)
+        name = simpledialog.askstring("Switch nomi", "Switch nomi (masalan s1):", parent=self.winfo_toplevel())
         if not name:
             return
         if name in self.switches or name in self.hosts:
@@ -183,7 +195,7 @@ class TopologyBuilderPanel(ttk.Frame):
         if not self.switches:
             messagebox.showerror("Xato", "Avval kamida bitta switch qo'shing.")
             return
-        name = simpledialog.askstring("Host nomi", "Host nomi (masalan web1):", parent=self)
+        name = simpledialog.askstring("Host nomi", "Host nomi (masalan web1):", parent=self.winfo_toplevel())
         if not name:
             return
         if name in self.switches or name in self.hosts:
@@ -374,7 +386,7 @@ class TopologyBuilderPanel(ttk.Frame):
         topo = self.validate_topology()
         if topo is None:
             return
-        name = simpledialog.askstring("Saqlash", "Topologiya nomi (fayl nomi bo'ladi):", parent=self)
+        name = simpledialog.askstring("Saqlash", "Topologiya nomi (fayl nomi bo'ladi):", parent=self.winfo_toplevel())
         if not name:
             return
         safe_name = "".join(c for c in name if c.isalnum() or c in "_-")
@@ -400,7 +412,7 @@ class TopologyBuilderPanel(ttk.Frame):
             messagebox.showinfo("Ochish", "custom_topologies/ ichida hech narsa yo'q.")
             return
         name = simpledialog.askstring(
-            "Ochish", f"Qaysi topologiyani ochamiz?\n({', '.join(files)})", parent=self)
+            "Ochish", f"Qaysi topologiyani ochamiz?\n({', '.join(files)})", parent=self.winfo_toplevel())
         if not name or name not in files:
             return
         with open(os.path.join(CUSTOM_DIR, f"{name}.json")) as f:
