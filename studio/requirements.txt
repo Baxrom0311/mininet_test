@@ -1,0 +1,7 @@
+# Network Studio (pywebview desktop ilova) uchun bog'liqliklar.
+pywebview>=6.0
+paramiko>=3.0      # SSH orqali serverda simulyatsiya ishga tushirish
+duckdb>=1.0.0      # dataset so'rovlari
+pandas>=2.0.0
+# macOS'da pywebview pyobjc'ni avtomatik tortadi. Linux'da qo'shimcha:
+#   pip install pywebview[qt]   yoki   pywebview[gtk]

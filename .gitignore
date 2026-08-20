@@ -20,3 +20,6 @@ __pycache__/
 # Foydalanuvchi tomonidan analytics/ topologiya quruvchisida yaratilgan
 # custom topologiyalar -- lokal ijod, repo'ga shart emas
 custom_topologies/*.json
+
+# Studio ilova sozlamalari — SSH paroli bo'lishi mumkin, repo'ga YOZILMASIN
+studio/config.json

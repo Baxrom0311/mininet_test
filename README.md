@@ -2,6 +2,11 @@
 
 Mininet + SDN (os-ken/Ryu) yordamida real internet trafikini simulyatsiya qilish va ML/AI uchun dataset generatsiya qilish.
 
+> **Yangi: Network Studio** — vizual desktop boshqaruv ilovasi (topologiya qurish,
+> serverda simulyatsiya ishga tushirish, ma'lumot tahlili — glass/neon dizayn,
+> kun-tun mavzu). Batafsil: [`studio/README.md`](studio/README.md). Ishga tushirish:
+> `pip install -r studio/requirements.txt && python3 studio/studio.py`.
+
 ## Xususiyatlari
 
 - **4 topologiya**: three_as (3 AS, 6 switch), five_as (5 AS, 9 switch), datacenter (Fat-tree, 6 switch), campus (7 switch)

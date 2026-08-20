@@ -1,0 +1,235 @@
+/* ============================================================================
+   Network Studio — DIZAYN TIZIMI (tokenlar + baza + layout)
+   Glass / neon / liquid, kun-tun mavzu. Token NOMLARI kontrakt — ekranlar va
+   components.css shu o'zgaruvchilarga tayanadi, ularni o'zgartirmang.
+   Bezakli komponentlar (kartalar, tugmalar, jadvallar...) components.css da.
+   ========================================================================== */
+
+/* ---- Reset ---- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: none; }
+::selection { background: color-mix(in srgb, var(--accent) 40%, transparent); }
+
+/* ============================================================================
+   TOKENLAR — TUN (default)
+   ========================================================================== */
+:root, :root[data-theme="dark"] {
+  --bg:            #070A12;
+  --bg-2:          #0B1020;
+  --text:          #E8ECF6;
+  --text-dim:      #9AA6C0;
+  --text-faint:    #5D6788;
+
+  /* Glass yuzalar */
+  --glass-bg:      rgba(20, 27, 48, 0.55);
+  --glass-bg-2:    rgba(28, 37, 64, 0.66);
+  --glass-brd:     rgba(255, 255, 255, 0.10);
+  --glass-brd-2:   rgba(255, 255, 255, 0.16);
+  --glass-blur:    22px;
+  --glass-hi:      rgba(255, 255, 255, 0.06);   /* ustki yaltiroq chiziq */
+
+  /* Neon aksentlar */
+  --accent:        #35E0FF;   /* siyan */
+  --accent-2:      #9B7CFF;   /* binafsha */
+  --accent-3:      #FF5FD2;   /* pushti */
+  --accent-grad:   linear-gradient(135deg, #35E0FF 0%, #9B7CFF 55%, #FF5FD2 100%);
+  --accent-glow:   0 0 22px rgba(53, 224, 255, 0.45);
+  --accent-glow-2: 0 0 26px rgba(155, 124, 255, 0.40);
+
+  --success:       #37E39B;
+  --warn:          #FFC24B;
+  --danger:        #FF5A76;
+
+  /* Shakl / soya */
+  --radius:        20px;
+  --radius-sm:     13px;
+  --radius-lg:     28px;
+  --shadow:        0 18px 50px -12px rgba(0, 0, 0, 0.65);
+  --shadow-soft:   0 8px 26px -10px rgba(0, 0, 0, 0.5);
+  --ring:          0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent);
+
+  --sidebar-w:     266px;
+  --topbar-h:      82px;
+  --ease:          cubic-bezier(0.22, 1, 0.36, 1);
+
+  color-scheme: dark;
+}
+
+/* ============================================================================
+   TOKENLAR — KUN
+   ========================================================================== */
+:root[data-theme="light"] {
+  --bg:            #EEF2FB;
+  --bg-2:          #E4EAF6;
+  --text:          #16203A;
+  --text-dim:      #4B577A;
+  --text-faint:    #8B97B6;
+
+  --glass-bg:      rgba(255, 255, 255, 0.62);
+  --glass-bg-2:    rgba(255, 255, 255, 0.78);
+  --glass-brd:     rgba(20, 32, 66, 0.10);
+  --glass-brd-2:   rgba(20, 32, 66, 0.16);
+  --glass-blur:    20px;
+  --glass-hi:      rgba(255, 255, 255, 0.55);
+
+  --accent:        #0AA5C4;
+  --accent-2:      #6E4CF0;
+  --accent-3:      #E24DB4;
+  --accent-grad:   linear-gradient(135deg, #12B5D6 0%, #6E4CF0 55%, #E24DB4 100%);
+  --accent-glow:   0 0 20px rgba(10, 165, 196, 0.30);
+  --accent-glow-2: 0 0 22px rgba(110, 76, 240, 0.28);
+
+  --success:       #10B981;
+  --warn:          #E0930B;
+  --danger:        #E23D5B;
+
+  --shadow:        0 18px 44px -14px rgba(38, 54, 92, 0.32);
+  --shadow-soft:   0 8px 22px -10px rgba(38, 54, 92, 0.24);
+
+  color-scheme: light;
+}
+
+/* ============================================================================
+   AURORA fon (liquid bloblar) — orqada suzib yuruvchi rangli nur
+   ========================================================================== */
+.aurora {
+  position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none;
+  filter: saturate(1.1);
+}
+.aurora-blob {
+  position: absolute; border-radius: 50%;
+  filter: blur(90px); opacity: 0.55; mix-blend-mode: screen;
+  animation: drift 26s var(--ease) infinite alternate;
+}
+:root[data-theme="light"] .aurora-blob { opacity: 0.42; mix-blend-mode: multiply; filter: blur(96px); }
+.aurora-blob.b1 { width: 46vw; height: 46vw; left: -8vw;  top: -10vw;
+  background: radial-gradient(circle at 30% 30%, #35E0FF, transparent 62%); }
+.aurora-blob.b2 { width: 42vw; height: 42vw; right: -10vw; top: 14vh;
+  background: radial-gradient(circle at 60% 40%, #9B7CFF, transparent 62%);
+  animation-delay: -8s; }
+.aurora-blob.b3 { width: 40vw; height: 40vw; left: 24vw;  bottom: -18vw;
+  background: radial-gradient(circle at 50% 50%, #FF5FD2, transparent 60%);
+  animation-delay: -15s; }
+@keyframes drift {
+  0%   { transform: translate3d(0,0,0) scale(1); }
+  50%  { transform: translate3d(4vw,3vh,0) scale(1.12); }
+  100% { transform: translate3d(-3vw,-4vh,0) scale(0.96); }
+}
+@media (prefers-reduced-motion: reduce) { .aurora-blob { animation: none; } }
+
+/* ============================================================================
+   Layout skeleti (#app grid) + sidebar + topbar
+   ========================================================================== */
+#app {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  height: 100vh; gap: 16px; padding: 16px;
+}
+
+/* Umumiy glass yuzasi */
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
+  border: 1px solid var(--glass-brd);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-hi);
+  border-radius: var(--radius);
+}
+
+/* Sidebar */
+#sidebar { display: flex; flex-direction: column; padding: 20px 16px; overflow: hidden; }
+.brand { display: flex; align-items: center; gap: 13px; padding: 6px 8px 20px; }
+.brand-mark {
+  width: 42px; height: 42px; border-radius: 13px; flex: 0 0 auto;
+  background: var(--accent-grad); box-shadow: var(--accent-glow);
+  position: relative;
+}
+.brand-mark::after {
+  content: ""; position: absolute; inset: 6px; border-radius: 8px;
+  border: 2px solid rgba(255,255,255,0.75); opacity: 0.9;
+  -webkit-mask: linear-gradient(135deg,#000 40%,transparent 42%); mask: linear-gradient(135deg,#000 40%,transparent 42%);
+}
+.brand-title { font-size: 17px; font-weight: 700; letter-spacing: 0.2px; }
+.brand-title span { background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.brand-sub { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+
+#nav { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; flex: 1 1 auto; }
+.nav-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 14px;
+  color: var(--text-dim); font-size: 14px; font-weight: 550;
+  transition: color .2s var(--ease), background .2s var(--ease), transform .18s var(--ease);
+  position: relative;
+}
+.nav-item .nav-ico { width: 20px; height: 20px; display: grid; place-items: center; }
+.nav-item .nav-ico svg { width: 20px; height: 20px; }
+.nav-item:hover { color: var(--text); background: var(--glass-hi); transform: translateX(2px); }
+.nav-item.active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.nav-item.active::before {
+  content: ""; position: absolute; left: -16px; top: 20%; height: 60%; width: 3px;
+  border-radius: 3px; background: var(--accent-grad); box-shadow: var(--accent-glow);
+}
+.nav-item.active .nav-ico { color: var(--accent); filter: drop-shadow(0 0 6px color-mix(in srgb,var(--accent) 70%,transparent)); }
+
+.sidebar-foot { padding-top: 14px; }
+.conn-status { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--text-dim);
+  padding: 10px 12px; border-radius: 12px; background: var(--glass-hi); }
+.conn-status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-faint); flex: 0 0 auto; }
+.conn-status[data-state="ok"] .dot { background: var(--success); box-shadow: 0 0 10px var(--success); }
+.conn-status[data-state="off"] .dot { background: var(--danger); }
+.conn-status[data-state="checking"] .dot { background: var(--warn); animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: 0.3; } }
+
+/* Main + topbar */
+#main { display: grid; grid-template-rows: var(--topbar-h) 1fr; gap: 16px; min-width: 0; }
+#topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 26px; }
+#topbar h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.2px; }
+#topbar .muted { font-size: 12.5px; color: var(--text-faint); margin-top: 3px; }
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+
+.icon-btn {
+  width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center;
+  color: var(--text-dim); border: 1px solid var(--glass-brd); background: var(--glass-hi);
+  transition: color .2s, transform .18s var(--ease), box-shadow .2s;
+}
+.icon-btn:hover { color: var(--accent); transform: translateY(-1px); box-shadow: var(--accent-glow); }
+.theme-ico { width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent-grad); box-shadow: inset -6px -3px 0 0 var(--glass-bg-2); }
+:root[data-theme="light"] .theme-ico { box-shadow: inset -6px -3px 0 0 #fff; }
+
+/* Ekran sohasi */
+#screen-root { min-height: 0; overflow: hidden; }
+.screen { height: 100%; overflow: auto; padding-right: 4px; }
+.screen.enter { animation: screen-in .42s var(--ease) both; }
+@keyframes screen-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+/* Toast konteyner */
+#toasts { position: fixed; right: 22px; bottom: 22px; z-index: 60;
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-faint) 45%, transparent); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--accent) 55%, transparent); background-clip: padding-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* Xato qutisi (ekran render xatosi) */
+.error-box { padding: 18px; margin: 20px; color: var(--danger); }
+.error-box pre { white-space: pre-wrap; font-size: 12px; color: var(--text-dim); margin-top: 8px; }
+
+.muted { color: var(--text-dim); }

@@ -1,0 +1,171 @@
+/* ============================================================================
+   Network Studio — qayta ishlatiladigan komponentlar (glass/neon/liquid)
+   theme.css tokenlariga tayanadi. Ekranlar shu klasslardan foydalanadi.
+   ========================================================================== */
+
+/* ---- Karta ---- */
+.card {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  border: 1px solid var(--glass-brd);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-hi);
+  padding: 20px;
+  position: relative;
+}
+.card.hover { transition: transform .22s var(--ease), box-shadow .22s var(--ease), border-color .22s; }
+.card.hover:hover { transform: translateY(-3px); border-color: var(--glass-brd-2);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--glass-hi); }
+.card-title { font-size: 14.5px; font-weight: 650; letter-spacing: .1px; margin-bottom: 3px; }
+.card-sub { font-size: 12px; color: var(--text-faint); margin-bottom: 14px; }
+
+/* Umumiy grid/util */
+.grid { display: grid; gap: 16px; }
+.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.cols-4 { grid-template-columns: repeat(4, 1fr); }
+.row { display: flex; gap: 12px; align-items: center; }
+.row.wrap { flex-wrap: wrap; }
+.spread { justify-content: space-between; }
+.pad { padding: 22px; }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+@media (max-width: 1120px) { .cols-4 { grid-template-columns: repeat(2, 1fr); } .cols-3 { grid-template-columns: 1fr; } }
+
+/* ---- Statistika plitalari (KPI) ---- */
+.tile {
+  border-radius: var(--radius); padding: 18px 20px; position: relative; overflow: hidden;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)); backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-brd);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-hi);
+  transition: transform .22s var(--ease), box-shadow .22s var(--ease);
+}
+.tile:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+.tile::after {   /* neon burchak nuri */
+  content: ""; position: absolute; top: -40%; right: -30%; width: 60%; height: 120%;
+  background: radial-gradient(circle, var(--tile-accent, var(--accent)) 0%, transparent 62%);
+  opacity: .18; filter: blur(8px); pointer-events: none;
+}
+.tile .tile-label { font-size: 12px; color: var(--text-dim); font-weight: 550; }
+.tile .tile-value { font-size: 30px; font-weight: 750; letter-spacing: -.6px; margin: 6px 0 2px;
+  background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.tile .tile-hint { font-size: 11.5px; color: var(--text-faint); }
+.tile[data-accent="accent"]   { --tile-accent: var(--accent); }
+.tile[data-accent="accent-2"] { --tile-accent: var(--accent-2); }
+.tile[data-accent="accent-3"] { --tile-accent: var(--accent-3); }
+.tile[data-accent="success"]  { --tile-accent: var(--success); }
+.tile[data-accent="danger"]   { --tile-accent: var(--danger); }
+.tile[data-accent="success"] .tile-value,
+.tile[data-accent="danger"]  .tile-value { background: none; color: var(--tile-accent); -webkit-text-fill-color: var(--tile-accent); }
+
+/* ---- Tugmalar ---- */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; justify-content: center;
+  padding: 11px 18px; border-radius: 13px; font-size: 13.5px; font-weight: 600;
+  border: 1px solid var(--glass-brd); background: var(--glass-hi); color: var(--text);
+  transition: transform .16s var(--ease), box-shadow .2s, background .2s, border-color .2s, color .2s;
+}
+.btn:hover { transform: translateY(-1px); border-color: var(--glass-brd-2); }
+.btn:active { transform: translateY(0) scale(.98); }
+.btn .ico svg { width: 16px; height: 16px; }
+.btn.primary {
+  background: var(--accent-grad); color: #05070f; border: none; font-weight: 700;
+  box-shadow: var(--accent-glow);
+}
+:root[data-theme="light"] .btn.primary { color: #fff; }
+.btn.primary:hover { box-shadow: 0 0 30px color-mix(in srgb, var(--accent) 60%, transparent); }
+.btn.ghost { background: transparent; }
+.btn.ghost:hover { background: var(--glass-hi); }
+.btn.neon { background: transparent; border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--accent); }
+.btn.neon:hover { box-shadow: var(--accent-glow); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.btn.danger { border-color: color-mix(in srgb, var(--danger) 55%, transparent); color: var(--danger); background: transparent; }
+.btn.danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.btn:disabled { opacity: .45; pointer-events: none; }
+.btn.sm { padding: 7px 12px; font-size: 12.5px; border-radius: 10px; }
+
+/* ---- Forma boshqaruvlari ---- */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > label { font-size: 12px; color: var(--text-dim); font-weight: 550; }
+.input, .select, textarea.input {
+  width: 100%; padding: 11px 13px; border-radius: 12px; font-size: 13.5px;
+  color: var(--text); background: color-mix(in srgb, var(--bg-2) 60%, transparent);
+  border: 1px solid var(--glass-brd); outline: none;
+  transition: border-color .2s, box-shadow .2s, background .2s;
+}
+.input:focus, .select:focus, textarea.input:focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: var(--ring);
+}
+.select { -webkit-appearance: none; appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%), linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+  padding-right: 34px; }
+.select option { background: var(--bg-2); color: var(--text); }
+textarea.input { resize: vertical; min-height: 90px; font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 12.5px; }
+
+/* Segment / toggle */
+.segment { display: inline-flex; padding: 4px; gap: 4px; border-radius: 13px;
+  background: var(--glass-hi); border: 1px solid var(--glass-brd); }
+.segment button { padding: 7px 14px; border-radius: 10px; font-size: 12.5px; font-weight: 600; color: var(--text-dim); }
+.segment button.active { color: var(--text); background: color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent); }
+
+/* ---- Badge / chip ---- */
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 600; background: var(--glass-hi); color: var(--text-dim); border: 1px solid var(--glass-brd); }
+.badge.ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+.badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+.badge.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.badge.neon { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); box-shadow: var(--accent-glow); }
+
+/* ---- Jadval ---- */
+.table-wrap { overflow: auto; border-radius: var(--radius-sm); border: 1px solid var(--glass-brd); }
+table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.data th { text-align: left; padding: 11px 13px; color: var(--text-dim); font-weight: 600;
+  background: var(--glass-hi); position: sticky; top: 0; backdrop-filter: blur(8px); }
+table.data td { padding: 10px 13px; border-top: 1px solid var(--glass-brd); color: var(--text); white-space: nowrap; }
+table.data tbody tr:hover td, table.data tr:hover td { background: var(--glass-hi); }
+
+/* ---- Progress ---- */
+.progress { height: 10px; border-radius: 999px; background: var(--glass-hi); overflow: hidden; border: 1px solid var(--glass-brd); }
+.progress > span { display: block; height: 100%; border-radius: 999px; background: var(--accent-grad);
+  box-shadow: var(--accent-glow); transition: width .4s var(--ease); position: relative; }
+.progress > span::after { content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.35), transparent);
+  animation: sheen 1.6s linear infinite; }
+@keyframes sheen { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+/* ---- Konsol / log ---- */
+.console { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.6;
+  color: var(--text-dim); background: color-mix(in srgb, #000 30%, var(--bg-2)); border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-brd); padding: 14px 16px; overflow: auto; }
+.console .ln { white-space: pre-wrap; }
+
+/* ---- Toast ---- */
+.toast { padding: 13px 18px; border-radius: 14px; font-size: 13px; font-weight: 550;
+  min-width: 220px; max-width: 380px; transform: translateY(14px); opacity: 0;
+  transition: transform .3s var(--ease), opacity .3s; box-shadow: var(--shadow); }
+.toast.in { transform: none; opacity: 1; }
+.toast.info    { border-left: 3px solid var(--accent); }
+.toast.success { border-left: 3px solid var(--success); }
+.toast.warn    { border-left: 3px solid var(--warn); }
+.toast.danger  { border-left: 3px solid var(--danger); }
+
+/* ---- Bo'sh holat ---- */
+.empty { display: grid; place-items: center; text-align: center; color: var(--text-faint);
+  padding: 60px 20px; gap: 10px; }
+.empty .empty-ico { width: 54px; height: 54px; opacity: .5; }
+
+/* ---- Chart canvas o'rovi ---- */
+.chart { width: 100%; display: block; }
+.chart-box { position: relative; }
+
+/* Segment/legend, kichik matn */
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-dim); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.hint { font-size: 11.5px; color: var(--text-faint); }
+.mono { font-family: "SF Mono", ui-monospace, Menlo, monospace; }
+.sep { height: 1px; background: var(--glass-brd); margin: 4px 0; }

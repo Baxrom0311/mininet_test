@@ -1,0 +1,218 @@
+/* ============================================================================
+   builder — vizual topologiya muharriri (SVG canvas, Packet-Tracer uslubi)
+   Faqat theme.css tokenlariga tayanadi; kun/tun mavzuda ishlaydi.
+   ========================================================================== */
+
+.builder-wrap {
+  display: flex; flex-direction: column; gap: 14px;
+  height: 100%; min-height: 0; padding: 2px;
+}
+
+/* ---- Ustki asboblar paneli ---- */
+.builder-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 14px;
+}
+.builder-bar .seg-label {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--text-faint); margin-right: 2px;
+}
+.builder-modes { flex-wrap: wrap; }
+.builder-modes button { display: inline-flex; align-items: center; gap: 7px; }
+.builder-modes button svg { width: 15px; height: 15px; }
+.builder-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+.builder-sep { width: 1px; align-self: stretch; background: var(--glass-brd); margin: 2px 2px; }
+
+/* ---- Jonli hisob chiplar ---- */
+.builder-chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.b-chip {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  color: var(--text-dim); background: var(--glass-hi); border: 1px solid var(--glass-brd);
+}
+.b-chip b { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
+.b-chip i { width: 8px; height: 8px; border-radius: 3px; display: inline-block; }
+.b-chip .dot-sw { background: var(--accent); }
+.b-chip .dot-ho { background: var(--success); }
+.b-chip .dot-ln { background: var(--accent-2); }
+.b-chip.val-ok { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+.b-chip.val-bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+
+/* ---- Sahna (canvas o'rovi) ---- */
+.builder-stage {
+  position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden;
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 22% 18%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 45%),
+    radial-gradient(circle at 82% 84%, color-mix(in srgb, var(--accent-2) 9%, transparent), transparent 48%),
+    var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  backdrop-filter: blur(var(--glass-blur)) saturate(1.35);
+  border: 1px solid var(--glass-brd);
+  box-shadow: var(--shadow-soft), inset 0 1px 0 var(--glass-hi);
+}
+
+.builder-svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.builder-svg[data-mode="add-switch"],
+.builder-svg[data-mode="add-host"] { cursor: crosshair; }
+.builder-svg[data-mode="add-link"]  { cursor: cell; }
+.builder-svg[data-mode="delete"]    { cursor: pointer; }
+.builder-svg[data-mode="select"] .b-node { cursor: grab; }
+.builder-svg[data-mode="select"] .b-node.dragging { cursor: grabbing; }
+
+/* faint grid */
+.b-grid { pointer-events: none; }
+.b-grid line { stroke: var(--glass-brd); stroke-width: 1; opacity: .5; }
+
+/* ---- Bog'lanishlar ---- */
+.b-link-line { stroke: var(--accent); stroke-width: 3; stroke-linecap: round;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 55%, transparent)); }
+.b-link.access .b-link-line { stroke: var(--text-faint); stroke-width: 1.6;
+  stroke-dasharray: 5 6; filter: none; opacity: .85; }
+.b-link-hit { stroke: transparent; stroke-width: 16; fill: none; }
+.builder-svg[data-mode="delete"] .b-link-hit { cursor: pointer; }
+.builder-svg[data-mode="delete"] .b-link:hover .b-link-line { stroke: var(--danger);
+  filter: drop-shadow(0 0 6px var(--danger)); opacity: 1; }
+.b-link-cap { fill: var(--text-dim); font: 600 11px -apple-system, sans-serif;
+  paint-order: stroke; stroke: var(--bg); stroke-width: 3px; opacity: .9; }
+
+/* ---- Tugunlar ---- */
+.b-node { --nc: var(--accent); }
+.b-node.as0 { --nc: var(--accent); }
+.b-node.as1 { --nc: var(--accent-2); }
+.b-node.as2 { --nc: var(--accent-3); }
+.b-node.as3 { --nc: var(--success); }
+.b-node.as4 { --nc: var(--warn); }
+.b-node.role-server  { --nc: var(--success); }
+.b-node.role-client  { --nc: var(--accent); }
+.b-node.role-gateway { --nc: var(--warn); }
+
+.b-shape {
+  fill: color-mix(in srgb, var(--nc) 16%, var(--glass-bg-2));
+  stroke: var(--nc); stroke-width: 1.8;
+  transition: filter .18s var(--ease), stroke-width .18s var(--ease);
+}
+.b-node:hover .b-shape { filter: drop-shadow(0 0 8px var(--nc)); }
+.b-node.selected .b-shape { stroke-width: 2.6; filter: drop-shadow(0 0 10px var(--nc)); }
+.builder-svg[data-mode="add-link"] .b-node.link-src .b-shape {
+  stroke-width: 2.8; filter: drop-shadow(0 0 12px var(--nc));
+  stroke-dasharray: 4 3;
+}
+.builder-svg[data-mode="delete"] .b-node:hover .b-shape {
+  stroke: var(--danger); filter: drop-shadow(0 0 9px var(--danger));
+}
+
+.b-name { fill: var(--text); font: 700 14px -apple-system, sans-serif;
+  text-anchor: middle; dominant-baseline: middle; pointer-events: none; }
+.b-name.host { font-size: 12.5px; }
+.b-sub { fill: var(--text-faint); font: 600 11px -apple-system, sans-serif;
+  text-anchor: middle; pointer-events: none;
+  paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.b-badge { fill: var(--nc); font: 700 9.5px -apple-system, sans-serif;
+  text-anchor: middle; pointer-events: none; opacity: .95; }
+
+/* pending link rubber-band */
+.b-rubber { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 5;
+  opacity: .7; pointer-events: none; }
+
+/* ---- Sahna overlay: bo'sh holat + maslahat ---- */
+.builder-empty {
+  position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+  gap: 12px; pointer-events: none; color: var(--text-faint); padding: 24px;
+}
+.builder-empty .be-ico {
+  width: 66px; height: 66px; border-radius: 20px; display: grid; place-items: center;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: var(--accent-glow);
+}
+.builder-empty .be-ico svg { width: 32px; height: 32px; }
+.builder-empty h3 { color: var(--text); font-size: 16px; font-weight: 700; }
+.builder-empty p { font-size: 13px; max-width: 340px; line-height: 1.5; }
+
+.builder-hint {
+  position: absolute; left: 16px; bottom: 14px; pointer-events: none;
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 13px; border-radius: 12px; font-size: 12px; font-weight: 550;
+  color: var(--text-dim); background: var(--glass-bg-2);
+  border: 1px solid var(--glass-brd); box-shadow: var(--shadow-soft);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  max-width: 62%;
+}
+.builder-hint kbd {
+  font: 600 11px "SF Mono", ui-monospace, monospace; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  padding: 1px 6px; border-radius: 6px;
+}
+
+/* ---- Modal ---- */
+.b-modal-back {
+  position: fixed; inset: 0; z-index: 80; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  animation: bmodal-fade .2s var(--ease) both; padding: 24px;
+}
+@keyframes bmodal-fade { from { opacity: 0; } to { opacity: 1; } }
+.b-modal {
+  width: min(520px, 100%); max-height: 88vh; overflow: auto;
+  padding: 22px; animation: bmodal-pop .28s var(--ease) both;
+}
+@keyframes bmodal-pop { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
+.b-modal .bm-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.b-modal .bm-ico {
+  width: 38px; height: 38px; border-radius: 11px; flex: 0 0 auto; display: grid; place-items: center;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+}
+.b-modal .bm-ico svg { width: 20px; height: 20px; }
+.b-modal .bm-ico.danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 28%, transparent); }
+.b-modal .bm-title { font-size: 16px; font-weight: 700; }
+.b-modal .bm-sub { font-size: 12.5px; color: var(--text-faint); margin-top: 2px; }
+.b-modal .bm-foot { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }
+
+.b-form { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+.b-form .full { grid-column: 1 / -1; }
+
+.b-endpoints {
+  display: flex; align-items: center; justify-content: center; gap: 14px;
+  padding: 14px; border-radius: 14px; background: var(--glass-hi);
+  border: 1px solid var(--glass-brd); font-weight: 700; font-size: 15px;
+}
+.b-endpoints .ep { padding: 6px 14px; border-radius: 10px; background: var(--glass-bg-2);
+  border: 1px solid var(--glass-brd); }
+.b-endpoints .arrow { color: var(--accent); font-size: 18px; }
+
+/* Open picker */
+.b-pick-group { margin-bottom: 8px; }
+.b-pick-group h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--text-faint); margin: 4px 2px 10px; font-weight: 700; }
+.b-pick-list { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.b-pick {
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  padding: 12px 13px; border-radius: 13px; color: var(--text);
+  background: var(--glass-hi); border: 1px solid var(--glass-brd);
+  transition: transform .16s var(--ease), border-color .18s, box-shadow .18s;
+}
+.b-pick:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: var(--accent-glow); }
+.b-pick .pk-ico { width: 30px; height: 30px; border-radius: 9px; flex: 0 0 auto; display: grid; place-items: center;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.b-pick .pk-ico svg { width: 16px; height: 16px; }
+.b-pick.custom .pk-ico { color: var(--accent-3); background: color-mix(in srgb, var(--accent-3) 12%, transparent); }
+.b-pick .pk-name { font-weight: 650; font-size: 13.5px; }
+.b-pick .pk-kind { font-size: 11px; color: var(--text-faint); }
+
+/* saqlangan buyruq */
+.b-cmd { display: flex; align-items: center; gap: 8px; margin-top: 6px;
+  padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, #000 30%, var(--bg-2));
+  border: 1px solid var(--glass-brd); }
+.b-cmd code { font: 12px "SF Mono", ui-monospace, monospace; color: var(--text-dim);
+  white-space: nowrap; overflow-x: auto; flex: 1 1 auto; }
+
+@media (max-width: 720px) {
+  .b-form { grid-template-columns: 1fr; }
+  .b-pick-list { grid-template-columns: 1fr; }
+  .builder-actions { margin-left: 0; }
+}

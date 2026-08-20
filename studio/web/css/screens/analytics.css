@@ -1,0 +1,89 @@
+/* ============================================================================
+   Analitika ekrani — dataset ustidan ma'lumot tadqiqoti (data workbench)
+   theme.css tokenlariga tayanadi. Faqat komponent klasslari + screen-lokal
+   kichik bezaklar. Kun/tun mavzuda ham ishlaydi.
+   ========================================================================== */
+
+.an-wrap { display: flex; flex-direction: column; gap: 16px; padding: 6px 6px 26px; }
+
+/* ---- Sarlavha kartasi: papka tanlash + xulosa ---- */
+.an-head { display: flex; align-items: flex-end; gap: 22px; flex-wrap: wrap; }
+.an-head .an-picker { min-width: 260px; flex: 0 0 auto; }
+.an-head .an-picker .field > label { display: flex; align-items: center; gap: 7px; }
+.an-head .an-picker .field > label .an-live {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--success);
+  box-shadow: 0 0 8px var(--success); flex: 0 0 auto;
+}
+
+.an-summary { display: flex; align-items: center; gap: 12px 14px; flex-wrap: wrap;
+  font-size: 13px; color: var(--text-dim); padding-bottom: 4px; min-height: 30px; }
+.an-summary .an-sum { display: inline-flex; align-items: baseline; gap: 6px; }
+.an-summary .an-sum b { font-size: 18px; font-weight: 750; color: var(--text); letter-spacing: -.3px; }
+.an-summary .an-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--text-faint); opacity: .7; }
+.an-summary .an-modes { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.an-summary .an-faint { color: var(--text-faint); font-size: 12px; }
+
+/* ---- Tab bar (segment) ---- */
+.an-tabbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.an-tabbar .an-tabhint { font-size: 11.5px; color: var(--text-faint); }
+
+/* ---- Panellar ---- */
+.an-panels { position: relative; }
+.an-panel { animation: an-fade .34s var(--ease) both; }
+@keyframes an-fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.an-two { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 1040px) { .an-two { grid-template-columns: 1fr; } }
+
+.an-cap { font-size: 11.5px; color: var(--text-faint); margin-top: 12px; line-height: 1.5;
+  display: flex; align-items: flex-start; gap: 8px; }
+.an-cap svg { width: 14px; height: 14px; flex: 0 0 auto; margin-top: 1px; color: var(--accent); }
+
+/* ---- Chart qutilari (canvas o'lchamini beradi) ---- */
+.an-cbox { position: relative; height: 252px; margin-top: 4px; }
+.an-cbox.sm { height: 116px; margin-top: 2px; }
+.an-cbox.tall { height: 288px; }
+.an-mini-label { font-size: 11px; color: var(--text-dim); font-weight: 600; margin-top: 12px;
+  display: flex; align-items: center; gap: 7px; }
+.an-mini-label i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+
+/* ---- Yuklanish / bo'sh holat panel ichida ---- */
+.an-load { display: grid; place-items: center; padding: 66px 20px; gap: 14px; color: var(--text-faint); }
+.an-load .an-spin { width: 34px; height: 34px; border-radius: 50%;
+  border: 2.5px solid var(--glass-brd); border-top-color: var(--accent);
+  animation: an-rot .8s linear infinite; }
+.an-load span { font-size: 12.5px; }
+@keyframes an-rot { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .an-load .an-spin { animation-duration: 2.4s; } }
+
+/* ---- SQL konsoli (imzo elementi) ---- */
+.an-sql { display: flex; flex-direction: column; gap: 16px; }
+.an-sql-editor { position: relative; }
+.an-sql-editor textarea.input { min-height: 132px; line-height: 1.55; padding: 14px 15px; }
+.an-sql-editor .an-kbd { position: absolute; right: 12px; bottom: 11px; font-size: 10.5px;
+  color: var(--text-faint); background: var(--glass-hi); border: 1px solid var(--glass-brd);
+  padding: 3px 8px; border-radius: 7px; pointer-events: none; letter-spacing: .3px; }
+
+.an-chips-head { font-size: 11.5px; color: var(--text-faint); margin-bottom: 9px;
+  display: flex; align-items: center; gap: 7px; }
+.an-chips-head svg { width: 13px; height: 13px; color: var(--accent); }
+.an-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+.an-chip { cursor: pointer; font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 11px;
+  transition: color .18s var(--ease), border-color .18s var(--ease), transform .16s var(--ease), box-shadow .18s; }
+.an-chip:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  transform: translateY(-1px); box-shadow: var(--accent-glow); }
+.an-chip .an-chip-n { color: var(--text-faint); margin-left: 2px; font-weight: 500; }
+.an-chip:hover .an-chip-n { color: color-mix(in srgb, var(--accent) 70%, var(--text-faint)); }
+
+.an-run-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.an-status { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); min-height: 22px; }
+.an-status .an-err { color: var(--danger); font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 11.5px; }
+
+.an-tablewrap { max-height: 440px; }
+.an-tablewrap table.data td { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 11.5px; }
+.an-tablewrap table.data td.an-num { text-align: right; font-variant-numeric: tabular-nums; }
+.an-null { color: var(--text-faint); opacity: .6; }
+
+/* ---- Global bo'sh holat (dataset yo'q) ---- */
+.an-empty-global { margin-top: 6px; }
+.an-empty-global .empty { padding: 88px 24px; }

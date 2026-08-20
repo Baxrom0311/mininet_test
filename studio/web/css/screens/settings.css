@@ -1,0 +1,126 @@
+/* ============================================================================
+   Sozlamalar ekrani — server/ilova konfiguratsiyasi
+   theme.css tokenlariga tayanadi; qattiq rang ishlatmaydi.
+   ========================================================================== */
+
+.settings-wrap { padding: 6px 6px 28px; max-width: 1160px; }
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 980px) {
+  .settings-grid { grid-template-columns: 1fr; }
+}
+
+/* ---- Karta sarlavhasi (ikonka + matn) ---- */
+.set-card { padding: 22px 22px 20px; }
+.set-head { display: flex; align-items: flex-start; gap: 13px; margin-bottom: 18px; }
+.set-head .card-sub { margin-bottom: 0; line-height: 1.45; }
+
+.set-head-ico {
+  width: 40px; height: 40px; border-radius: 12px; flex: 0 0 auto;
+  display: grid; place-items: center;
+  color: var(--head-c, var(--accent));
+  background: color-mix(in srgb, var(--head-c, var(--accent)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--head-c, var(--accent)) 32%, transparent);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+.set-head-ico svg { width: 21px; height: 21px; }
+.set-head-ico[data-accent="accent"]   { --head-c: var(--accent); }
+.set-head-ico[data-accent="accent-2"] { --head-c: var(--accent-2); }
+.set-head-ico[data-accent="accent-3"] { --head-c: var(--accent-3); }
+
+/* ---- Maydonlar tarmog'i ---- */
+.set-fields { gap: 14px 16px; }
+@media (max-width: 620px) {
+  .set-fields.cols-2, .set-fields.cols-3 { grid-template-columns: 1fr; }
+}
+.set-fields .input::placeholder { color: var(--text-faint); }
+
+/* ---- Amal qatori (tugmalar + natija) ---- */
+.set-actions {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 18px; padding-top: 16px;
+  border-top: 1px solid var(--glass-brd);
+}
+.set-actions-sp { flex: 1 1 auto; }
+@media (max-width: 620px) { .set-actions-sp { display: none; } }
+
+/* ---- Ulanish tekshiruvi natijasi ---- */
+.test-result {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 12.5px; color: var(--text-dim);
+  animation: set-fade .28s var(--ease) both;
+  min-width: 0;
+}
+.test-result .test-msg {
+  color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 340px;
+}
+.test-result.ok  .test-msg { color: color-mix(in srgb, var(--success) 80%, var(--text)); }
+.test-result.bad .test-msg { color: color-mix(in srgb, var(--danger) 78%, var(--text)); }
+@keyframes set-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* ---- Tugma spinneri ---- */
+.spinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-top-color: var(--accent);
+  animation: set-spin .7s linear infinite;
+  display: inline-block;
+}
+.spinner[hidden] { display: none; }
+@keyframes set-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 1.4s; } }
+
+/* ---- Ko'rinish / mavzu ---- */
+.set-theme { width: 100%; }
+.set-theme button { flex: 1 1 0; }
+
+.theme-preview {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 16px; padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--glass-brd);
+  background: var(--glass-hi);
+}
+.tp-swatch {
+  width: 22px; height: 22px; border-radius: 7px;
+  border: 1px solid var(--glass-brd-2);
+  box-shadow: inset 0 1px 0 var(--glass-hi);
+}
+.tp-bg { background: var(--bg-2); }
+.tp-a1 { background: var(--accent);   box-shadow: var(--accent-glow); }
+.tp-a2 { background: var(--accent-2); }
+.tp-a3 { background: var(--accent-3); }
+.tp-note { margin-left: auto; }
+
+/* ---- Ilova haqida ---- */
+.set-about-mark { width: 40px; height: 40px; border-radius: 12px; }
+.set-about .grad {
+  background: var(--accent-grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.set-about-text {
+  font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-bottom: 14px;
+}
+.set-about-list { list-style: none; display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.set-about-list li {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 12.5px; color: var(--text-dim); line-height: 1.45;
+}
+.set-about-list .dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; margin-top: 5px;
+  background: var(--d, var(--accent));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--d, var(--accent)) 70%, transparent);
+}
+.set-about-note {
+  padding: 11px 13px; border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 28%, transparent);
+  color: color-mix(in srgb, var(--warn) 82%, var(--text));
+  line-height: 1.5;
+}
