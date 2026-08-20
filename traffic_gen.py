@@ -10,6 +10,7 @@ import time
 from collections import deque
 
 from config import DATA_DIR
+from netutil import locked_cmd
 
 TRAFFIC_MIX = [
     ("web",     0.25, "tcp", (100, 2000)),
@@ -83,10 +84,35 @@ class TrafficGen:
         self._host_cc = {}  # host_name -> TCP congestion control algoritmi
 
     def _safe_cmd(self, host, cmd_str):
+        # locked_cmd — bir node'da bir vaqtda faqat bitta .cmd() ishlashini
+        # kafolatlaydi (Node.cmd() thread-safe emas).
         try:
-            return host.cmd(cmd_str)
+            return locked_cmd(host, cmd_str)
         except Exception:
             return ""
+
+    # iperf3 klient chiqishida ulanish muvaffaqiyatsizligini aniqlash
+    # markerlari (server band / rad etilgan / yo'q). Bularning biri chiqsa
+    # test aslida bajarilmagan — uni "muvaffaqiyatli" deb loglash yolg'on
+    # ma'lumot bo'lardi.
+    _IPERF_FAIL_MARKERS = ("unable to connect", "connection refused",
+                           "no route to host", "the server is busy",
+                           "unable to receive", "control socket has closed",
+                           "interrupt")
+
+    @classmethod
+    def _iperf_connected(cls, output):
+        """iperf3 klient chiqishiga qarab ulanish amalga oshdimi (rostmi)."""
+        if output is None:
+            return False
+        low = output.lower()
+        if "iperf3: error" in low:
+            return False
+        for m in cls._IPERF_FAIL_MARKERS:
+            if m in low:
+                return False
+        # Muvaffaqiyatli test chiqishida doim natija jadvali/"sender" bo'ladi.
+        return ("sender" in low) or ("receiver" in low) or ("bitrate" in low)
 
     def _get_load_factor(self):
         """Vaqtga bog'liq yuklanish koeffitsienti (diurnal pattern)."""
@@ -105,9 +131,15 @@ class TrafficGen:
         srv_list = list(self.servers.values())
 
         # ── 1. Real HTTP serverlar ──
+        # 5201/5202 — old-plan (foreground) testlar uchun; 5203 — uzoq
+        # muddatli fon oqimi uchun ALOHIDA daemon. Ilgari 24 soatlik fon
+        # oqimi 5201'dagi yagona test daemon'ini band qilib qo'yardi, shu
+        # sababli ko'p foreground TCP test rad etilardi (lekin baribir
+        # "bajarilgan" deb loglanardi). Endi fon oqimi 5203'da yashaydi.
         for name, host in self.servers.items():
             self._safe_cmd(host, "iperf3 -s -p 5201 -D 2>/dev/null")
             self._safe_cmd(host, "iperf3 -s -p 5202 -D 2>/dev/null")
+            self._safe_cmd(host, "iperf3 -s -p 5203 -D 2>/dev/null")
             # Real HTTP server (Python) — yengil fayllar
             self._safe_cmd(host, "mkdir -p /tmp/www")
             self._safe_cmd(host, "dd if=/dev/urandom of=/tmp/www/small.bin bs=1K count=5 2>/dev/null")
@@ -129,7 +161,9 @@ class TrafficGen:
         for name, client in self.clients.items():
             srv = random.choice(srv_list)
             bw = random.choice(["30K", "50K", "100K"])
-            self._safe_cmd(client, f"iperf3 -c {srv.IP()} -p 5201 -t 86400 -b {bw} --logfile /dev/null &")
+            # Fon oqimi ALOHIDA 5203 portida — 5201/5202 foreground testlar
+            # uchun bo'sh qoladi.
+            self._safe_cmd(client, f"iperf3 -c {srv.IP()} -p 5203 -t 86400 -b {bw} --logfile /dev/null &")
             self._log_event("background", name, srv.name, "tcp", bw, tcp_cc=self._host_cc.get(name))
 
         # ── 4. Barcha loop'lar ──
@@ -171,11 +205,18 @@ class TrafficGen:
             port = 5201 if proto == "tcp" else 5202
             flag = "" if proto == "tcp" else "-u "
             dscp_name, tos, band = DSCP_MAP.get(name, DEFAULT_DSCP)
-            self._safe_cmd(client, f"iperf3 -c {server.IP()} -p {port} {flag}-t {duration} -b {rate}K "
-                                    f"-S {tos} --logfile /dev/null &")
-            self._log_event(name, client.name, server.name, proto, f"{rate}K",
-                           load_factor=round(load, 2), tcp_cc=self._host_cc.get(client.name),
-                           dscp=dscp_name, queue_band=band)
+            # Foreground testni SINXRON (background `&` emas) ishga tushiramiz
+            # va klient chiqishini o'qiymiz. Yagona test daemon'i band bo'lsa
+            # iperf3 ulanolmaydi — bunday rad etilgan oqimni "bajarilgan" deb
+            # loglash yolg'on ma'lumot bo'lardi. --connect-timeout rad etishni
+            # tez aniqlaydi (server band bo'lsa uzoq osilib qolmaydi).
+            out = self._safe_cmd(client,
+                f"iperf3 -c {server.IP()} -p {port} {flag}-t {duration} -b {rate}K "
+                f"-S {tos} --connect-timeout 2000 2>&1")
+            if self._iperf_connected(out):
+                self._log_event(name, client.name, server.name, proto, f"{rate}K",
+                               load_factor=round(load, 2), tcp_cc=self._host_cc.get(client.name),
+                               dscp=dscp_name, queue_band=band, connected=True)
             time.sleep(random.uniform(0.3, 2.0))
 
     def _burst_loop(self):
@@ -219,14 +260,58 @@ class TrafficGen:
                            f"{bw}Mbps_link", load_factor=round(load, 2),
                            dscp=dscp_name, queue_band=band)
 
-    # ── Real HTTP trafik (wget/curl) ──
+    @staticmethod
+    def _parse_curl(output):
+        """`curl -w '%{http_code} %{size_download} %{time_total}'` chiqishini
+        (oxirida " RC=<exit>") tahlil qiladi.
+
+        Qaytaradi: (status_code:int, bytes_downloaded:int, time_ms:float|None,
+        rc:int|None). Ulanish amalga oshmasa curl http_code=000 (ya'ni 0) va
+        rc!=0 chiqaradi — bu holat SOXTALASHTIRILMAY, o'sha holicha loglanadi."""
+        status_code, bytes_dl, time_ms, rc = 0, 0, None, None
+        if not output:
+            return status_code, bytes_dl, time_ms, rc
+        text = output.strip()
+        rc_idx = text.rfind("RC=")
+        if rc_idx != -1:
+            tail = text[rc_idx + 3:].strip().split()
+            if tail:
+                try:
+                    rc = int(tail[0])
+                except ValueError:
+                    rc = None
+            text = text[:rc_idx].strip()
+        parts = text.split()
+        if len(parts) >= 3:
+            try:
+                status_code = int(parts[-3])
+            except ValueError:
+                pass
+            try:
+                bytes_dl = int(float(parts[-2]))
+            except ValueError:
+                pass
+            try:
+                time_ms = round(float(parts[-1]) * 1000, 2)
+            except ValueError:
+                pass
+        return status_code, bytes_dl, time_ms, rc
+
+    # ── Real HTTP trafik (curl) ──
     def _http_loop(self):
-        """Real HTTP GET/POST so'rovlari — turli URL, turli o'lcham."""
+        """Real HTTP GET/POST so'rovlari — turli URL, turli o'lcham.
+
+        Barcha loglangan maydonlar REAL o'lchanadi: status_code va
+        bytes_downloaded curl'ning `-w` chiqishidan, response_time esa
+        curl `time_total`'idan olinadi. Ilgari status/bytes/keep_alive/
+        user_agent/tls tasodifiy generatsiya qilinar edi — ular endi butunlay
+        olib tashlandi (o'lchab bo'lmaydigan qiymatlarni fakt sifatida
+        ko'rsatmaslik uchun)."""
         srv_list = list(self.servers.values())
         cli_list = list(self.clients.values())
         files = ["index.html", "small.bin", "medium.bin", "large.bin"]
         methods = ["GET"] * 8 + ["POST"] * 2  # 80% GET, 20% POST
-        status_codes = [200] * 85 + [301] * 3 + [304] * 4 + [404] * 5 + [500] * 2 + [503] * 1
+        curl_w = "%{http_code} %{size_download} %{time_total}"
         while self._running:
             load = self._get_load_factor()
             client = random.choice(cli_list)
@@ -237,28 +322,34 @@ class TrafficGen:
             start_t = time.time()
             if method == "GET":
                 result = self._safe_cmd(client,
-                    f"wget -q -O /dev/null --timeout=5 {url} 2>&1; echo $?")
+                    f"curl -s -o /dev/null -w '{curl_w}' --max-time 5 {url} 2>/dev/null; "
+                    f'echo " RC=$?"')
             else:
+                # Chegaralangan tasodifiy yuk — ilgari `-d '@/dev/urandom'`
+                # oqimni --max-time gacha cheksiz xotiraga bufer qilardi. Endi
+                # aniq o'lchamdagi vaqtinchalik faylni --data-binary bilan
+                # yuboramiz.
                 payload_size = random.randint(100, 5000)
+                payload_file = f"/tmp/http_post_{client.name}.bin"
                 result = self._safe_cmd(client,
-                    f"curl -s -o /dev/null -w '%{{http_code}} %{{time_total}} %{{size_download}} %{{speed_download}}' "
-                    f"-X POST -d '@/dev/urandom' --max-time 5 {url} 2>/dev/null || echo 'fail'")
+                    f"head -c {payload_size} /dev/urandom > {payload_file} 2>/dev/null; "
+                    f"curl -s -o /dev/null -w '{curl_w}' -X POST --data-binary @{payload_file} "
+                    f"--max-time 5 {url} 2>/dev/null; "
+                    f'echo " RC=$?"')
             elapsed_ms = (time.time() - start_t) * 1000
-            # Connection state tracking
+            status_code, bytes_dl, curl_ms, rc = self._parse_curl(result)
+            response_ms = curl_ms if curl_ms is not None else round(elapsed_ms, 2)
             self._conn_counter += 1
             conn_id = self._conn_counter
-            status = random.choice(status_codes)
             entry = {
                 "ts": time.time(), "conn_id": conn_id,
                 "client": client.name, "client_ip": client.IP(),
                 "server": server.name, "server_ip": server.IP(),
                 "method": method, "url": f"/{target}", "port": 80,
-                "status_code": status, "response_time_ms": round(elapsed_ms, 2),
-                "bytes_transferred": {"index.html": 100, "small.bin": 5120,
-                                       "medium.bin": 51200, "large.bin": 204800}.get(target, 0),
-                "keep_alive": random.random() > 0.3,
-                "user_agent": random.choice(["Mozilla/5.0", "Chrome/125", "curl/8.0", "python-requests/2.31"]),
-                "tls": target != "index.html" and random.random() > 0.4,
+                "status_code": status_code,        # REAL (curl %{http_code}); 0 = ulanmadi
+                "response_time_ms": response_ms,   # REAL (curl time_total yoki wall-clock)
+                "bytes_downloaded": bytes_dl,      # REAL (curl %{size_download})
+                "curl_exit_code": rc,              # 0 = muvaffaqiyat
                 "tcp_cc": self._host_cc.get(client.name),
             }
             try:
@@ -267,7 +358,7 @@ class TrafficGen:
             except OSError:
                 pass
             self._log_event("http", client.name, server.name, "tcp", f"{method}:{target}",
-                           status=status, response_ms=round(elapsed_ms, 2),
+                           status=status_code, response_ms=response_ms,
                            tcp_cc=self._host_cc.get(client.name))
             time.sleep(random.uniform(0.3, 1.5))
 

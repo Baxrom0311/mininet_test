@@ -9,7 +9,7 @@ import threading
 import time
 
 from config import DATA_DIR
-from netutil import parse_ping
+from netutil import locked_cmd, parse_ping
 from routing import compute_paths
 
 
@@ -128,7 +128,7 @@ class PathTracer:
         # Real ping
         rtt = {}
         try:
-            result = src_host.cmd(f"ping -c 3 -W 2 {dst_host.IP()}")
+            result = locked_cmd(src_host, f"ping -c 3 -W 2 {dst_host.IP()}")
             rtt = parse_ping(result)
         except Exception:
             pass

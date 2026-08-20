@@ -95,6 +95,15 @@ topologies import TOPOLOGIES; print(compute_paths(TOPOLOGIES['five_as'], 'ospf')
 syntax with `python3 -c "import ast; ast.parse(open('X.py').read())"`. Do not attempt to start
 Mininet/Docker on a machine that doesn't have them.
 
+CI (GitHub Actions, `.github/workflows/ci.yml`) runs on every push/PR and covers exactly these
+Mininet-free checks: `py_compile` over the root modules, `import light_simulation` (guards the
+lazy-import convention — Mininet/os-ken are deliberately not installed, so a top-level
+`import mininet`/`os_ken` breaks CI), a `compute_paths()` sanity sweep over all 4 topologies x
+11 modes (non-empty, full distinct-host pair coverage, correct path endpoints — it does *not*
+assert loop-free paths, since `routing.py` injects deliberate RIP/OSPF path imperfections), and
+a `docker build` (build only) that then imports every copied module inside the image to catch a
+missing Dockerfile `COPY` regression.
+
 Cleanup between runs matters: Mininet/OVS state from a crashed run will break the next one.
 `light_simulation.py` calls `mininet.clean.cleanup()` at start and in its signal handler/finally
 block; if a run is interrupted outside the script (killed process, host reboot), run

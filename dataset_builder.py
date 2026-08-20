@@ -8,7 +8,7 @@ from impairments import IMPAIRMENT_EVENTS
 from traffic_gen import TRAFFIC_MIX
 
 
-def build_dataset(topo, routing_mode):
+def build_dataset(topo, routing_mode, seed=None):
     import pandas as pd
     print("\n[Dataset] Ma'lumotlar qayta ishlanmoqda...")
     os.makedirs(f"{DATA_DIR}/datasets", exist_ok=True)
@@ -104,6 +104,7 @@ def build_dataset(topo, routing_mode):
     topo_json["links"] = {f"{k[0]}-{k[1]}": v for k, v in topo["links"].items()}
     with open(f"{DATA_DIR}/datasets/metadata.json", "w") as f:
         json.dump({"topology": topo_json, "routing": routing_mode,
+                    "seed": seed,
                     "traffic_mix": [{"name": m[0], "weight": m[1], "proto": m[2]} for m in TRAFFIC_MIX],
                     "impairments": IMPAIRMENT_EVENTS}, f, indent=2, default=str)
 

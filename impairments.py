@@ -8,7 +8,8 @@ import threading
 import time
 
 from config import DATA_DIR
-from network_build import QOS_BANDS
+from netutil import locked_cmd
+from network_build import QOS_BANDS, get_base_netem
 
 # QOS_BANDS (network_build.py) — (classid, handle, share) ro'yxati EF/AF21/BE
 # tartibida. Shu yerda tc buyruqlari uchun "1:<hex>" parent handle satrlariga
@@ -43,7 +44,7 @@ def _tc_change(node, ifname, band_handle, netem_args):
     """`band_handle` — masalan "1:30" (BE). Handle raqami parent bilan bir
     xil bo'lishi shart (network_build._setup_qos_qdisc bilan mos)."""
     handle = band_handle.split(":")[1]
-    node.cmd(f"tc qdisc change dev {ifname} parent {band_handle} handle {handle}: netem {netem_args}")
+    locked_cmd(node, f"tc qdisc change dev {ifname} parent {band_handle} handle {handle}: netem {netem_args}")
 
 
 class Impairments:
@@ -78,6 +79,20 @@ class Impairments:
         self._restore_threads.append(t)
         return t
 
+    def _restore_base(self, node, ifname, band_name):
+        """Band'ni network_build o'rnatgan ASL netem parametrlariga qaytaradi.
+        Ilgari restore "delay 0ms" bilan bajarilar edi — bu netem'ni ALMASHTIRAR
+        (o'chirmas) edi, natijada link'ning bazaviy delay/jitter/loss/limit
+        qiymatlari butun run davomida yo'qolardi. Endi asl satr aynan tiklanadi.
+        Baza noma'lum bo'lsa (masalan QoS qdisc o'rnatilmagan interfeys) eski
+        xatti-harakat: delay/loss'ni nolga tushirish + ogohlantirish logi."""
+        base = get_base_netem(ifname, band_name)
+        if base is None:
+            _tc_change(node, ifname, BAND_HANDLES[band_name], "delay 0ms loss 0%")
+            self._log_event("restore_base_unknown", node.name, ifname, 0, band=band_name)
+            return
+        _tc_change(node, ifname, BAND_HANDLES[band_name], base)
+
     def _loop(self):
         sw_links = [l for l in self.net.links
                      if l.intf1.node.name.startswith("s") and l.intf2.node.name.startswith("s")]
@@ -98,15 +113,15 @@ class Impairments:
             if ename == "link_flap":
                 self._log_event("link_flap_start", src, dst, dur)
                 try:
-                    link.intf1.node.cmd(f"ip link set {link.intf1.name} down")
-                    link.intf2.node.cmd(f"ip link set {link.intf2.name} down")
+                    locked_cmd(link.intf1.node, f"ip link set {link.intf1.name} down")
+                    locked_cmd(link.intf2.node, f"ip link set {link.intf2.name} down")
                 except Exception:
                     continue
                 def restore(l=link, d=dur, s=src, ds=dst):
                     time.sleep(d)
                     try:
-                        l.intf1.node.cmd(f"ip link set {l.intf1.name} up")
-                        l.intf2.node.cmd(f"ip link set {l.intf2.name} up")
+                        locked_cmd(l.intf1.node, f"ip link set {l.intf1.name} up")
+                        locked_cmd(l.intf2.node, f"ip link set {l.intf2.name} up")
                     except Exception:
                         pass
                     self._log_event("link_flap_end", s, ds, 0)
@@ -126,7 +141,7 @@ class Impairments:
                     continue
                 def restore_reorder(n=node, i=intf.name, d=dur, s=src, ds=dst):
                     time.sleep(d)
-                    try: _tc_change(n, i, BAND_HANDLES["BE"], "delay 0ms")
+                    try: self._restore_base(n, i, "BE")
                     except Exception: pass
                     self._log_event("packet_reorder_end", s, ds, 0, bands=["BE"])
                 self._spawn_restore(restore_reorder)
@@ -143,7 +158,7 @@ class Impairments:
                     continue
                 def restore_bloat(n=node, i=intf.name, d=dur, s=src, ds=dst):
                     time.sleep(d)
-                    try: _tc_change(n, i, BAND_HANDLES["BE"], "delay 0ms")
+                    try: self._restore_base(n, i, "BE")
                     except Exception: pass
                     self._log_event("buffer_bloat_end", s, ds, 0, bands=["BE"])
                 self._spawn_restore(restore_bloat)
@@ -153,12 +168,12 @@ class Impairments:
                 # interfeys darajasida).
                 self._log_event("mtu_blackhole", src, dst, dur, mtu=576)
                 try:
-                    node.cmd(f"ip link set {intf.name} mtu 576")
+                    locked_cmd(node, f"ip link set {intf.name} mtu 576")
                 except Exception:
                     continue
                 def restore_mtu(n=node, i=intf.name, d=dur, s=src, ds=dst):
                     time.sleep(d)
-                    try: n.cmd(f"ip link set {i} mtu 1500")
+                    try: locked_cmd(n, f"ip link set {i} mtu 1500")
                     except Exception: pass
                     self._log_event("mtu_blackhole_end", s, ds, 0)
                 self._spawn_restore(restore_mtu)
@@ -174,7 +189,7 @@ class Impairments:
                     continue
                 def restore_dup(n=node, i=intf.name, d=dur, s=src, ds=dst):
                     time.sleep(d)
-                    try: _tc_change(n, i, BAND_HANDLES["BE"], "delay 0ms")
+                    try: self._restore_base(n, i, "BE")
                     except Exception: pass
                     self._log_event("duplicate_end", s, ds, 0, bands=["BE"])
                 self._spawn_restore(restore_dup)
@@ -195,7 +210,7 @@ class Impairments:
                     continue
                 def restore_jitter(n=node, i=intf.name, d=dur, s=src, ds=dst):
                     time.sleep(d)
-                    try: _tc_change(n, i, BAND_HANDLES["BE"], "delay 0ms")
+                    try: self._restore_base(n, i, "BE")
                     except Exception: pass
                     self._log_event("jitter_spike_end", s, ds, 0, bands=["BE"])
                 self._spawn_restore(restore_jitter)
@@ -245,7 +260,7 @@ class Impairments:
                     time.sleep(d)
                     for bname in bnds:
                         try:
-                            _tc_change(n, i, BAND_HANDLES[bname], "delay 0ms loss 0%")
+                            self._restore_base(n, i, bname)
                         except Exception:
                             pass
                     self._log_event(f"{en}_end", s, ds, 0, bands=bnds)

@@ -8,6 +8,7 @@ import threading
 import time
 
 from config import CONTROLLER_PORT, DATA_DIR
+from netutil import locked_cmd
 
 
 def _parse_ms(val):
@@ -23,7 +24,20 @@ QOS_BANDS = [
     (0x20, 0x20, 0.3),   # AF21 — interaktiv (web/https/dns/ssh)
     (0x30, 0x30, 0.2),   # BE/CS1 — fon/bulk trafik
 ]
+QOS_BAND_NAMES = ("EF", "AF21", "BE")  # QOS_BANDS bilan bir tartibda
 QOS_TOS_FILTERS = [(0xB8, 0x10), (0x48, 0x20), (0x20, 0x30)]  # (tos, classid)
+
+# Har (ifname, band_nomi) uchun _setup_qos_qdisc o'rnatgan ASL netem argument
+# satri. Impairments moduli hodisa tugagach band'ni aynan shu bazaga
+# qaytaradi (aks holda "delay 0ms" bilan restore link'ning bazaviy
+# delay/jitter/loss/limit qiymatlarini butun run davomida o'chirib yuboradi).
+_BASE_NETEM = {}
+
+
+def get_base_netem(ifname, band_name):
+    """`_setup_qos_qdisc` saqlagan asl netem argument satrini qaytaradi
+    (masalan "delay 5.0ms 1.0ms loss 0.5% limit 100"). Noma'lum bo'lsa None."""
+    return _BASE_NETEM.get((ifname, band_name))
 
 
 def _setup_qos_qdisc(intf, params):
@@ -43,12 +57,17 @@ def _setup_qos_qdisc(intf, params):
     # paytida) ichki sendCmd/waitOutput mexanizmi qotib qolishi mumkin edi.
     cmds = [f"tc qdisc del dev {ifname} root 2>/dev/null",
             f"tc qdisc add dev {ifname} root handle 1: htb default 30"]
-    for classid, handle, share in QOS_BANDS:
+    # Har band uchun bazaviy netem argumentlari — barcha band bir xil
+    # delay/jitter/loss/limit oladi (faqat HTB ustuvorligi farqlanadi).
+    # Impairments moduli restore paytida shu satrni aynan qayta ishlatadi.
+    base_netem = f"delay {delay}ms {jitter}ms loss {loss}% limit {queue}"
+    for (classid, handle, share), band_name in zip(QOS_BANDS, QOS_BAND_NAMES):
         rate = max(bw * share, 0.1)
         cmds.append(f"tc class add dev {ifname} parent 1: classid 1:{classid:x} "
                     f"htb rate {rate:.2f}mbit ceil {bw:.2f}mbit prio {handle // 0x10 - 1}")
         cmds.append(f"tc qdisc add dev {ifname} parent 1:{classid:x} handle {handle:x}: "
-                    f"netem delay {delay}ms {jitter}ms loss {loss}% limit {queue}")
+                    f"netem {base_netem}")
+        _BASE_NETEM[(ifname, band_name)] = base_netem
     for prio, (tos, classid) in enumerate(QOS_TOS_FILTERS, start=1):
         cmds.append(f"tc filter add dev {ifname} parent 1: protocol ip prio {prio} "
                     f"u32 match ip tos {tos} 0xfc flowid 1:{classid:x}")
@@ -173,7 +192,7 @@ class NATMonitor:
             if not self._running:
                 break
             ts = time.time()
-            out = gw.cmd("cat /proc/net/nf_conntrack 2>/dev/null")
+            out = locked_cmd(gw, "cat /proc/net/nf_conntrack 2>/dev/null")
             for line in out.splitlines():
                 if subnet_prefix not in line:
                     continue

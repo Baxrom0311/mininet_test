@@ -37,6 +37,7 @@ Ishlatish:
 
 import argparse
 import os
+import random
 import signal
 import sys
 import time
@@ -90,6 +91,10 @@ Misollar:
         "ecmp", "spf", "policy", "static", "hybrid"
     ], default="l2_learn")
     parser.add_argument("--duration", type=int, default=180)
+    parser.add_argument("--seed", type=int, default=42,
+                        help="RNG urug'i (reproducibility). Barcha modul global "
+                             "`random` modulidan foydalanadi, shuning uchun bitta "
+                             "random.seed() barchasini qamrab oladi. Default: 42.")
     parser.add_argument("--cli", action="store_true")
     parser.add_argument("--dataset-only", action="store_true")
     parser.add_argument("--no-traffic", action="store_true")
@@ -98,6 +103,14 @@ Misollar:
                         help="Topologiya PNG rasmini generatsiya qiladi (sudo kerak emas)")
     args = parser.parse_args()
 
+    # RNG urug'ini ENG BOSHIDA o'rnatamiz — tarmoq qurish, thread'lar,
+    # PathTracer va boshqa RNG'ga bog'liq tanlovlardan (traffic mix,
+    # impairment tanlash, host-juftlik namunasi) OLDIN. Barcha modullar
+    # global `random` modulidan foydalanadi, shuning uchun bitta chaqiruv
+    # kifoya. Ko'p-thread'li trafik vaqtlanishi baribir to'liq deterministik
+    # bo'lmaydi (OS scheduler), lekin RNG-tanlovlar reproducible bo'ladi.
+    random.seed(args.seed)
+
     topo = TOPOLOGIES[args.topology]
 
     if args.visualize:
@@ -105,7 +118,7 @@ Misollar:
         return
 
     if args.dataset_only:
-        build_dataset(topo, args.routing)
+        build_dataset(topo, args.routing, seed=args.seed)
         return
 
     if os.geteuid() != 0:
@@ -277,7 +290,7 @@ Misollar:
     # Dataset builder — Mininet to'xtagandan keyin (xotira bo'shaydi)
     import gc; gc.collect()
     try:
-        build_dataset(topo, args.routing)
+        build_dataset(topo, args.routing, seed=args.seed)
     except Exception as e:
         print(f"Dataset XATO: {e}")
     print("\n[Done]\n")

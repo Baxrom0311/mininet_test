@@ -36,12 +36,18 @@ apt-get install -y -qq mininet 2>/dev/null || {
 }
 
 echo "[4/6] Python paketlari..."
+# Controller sifatida ryu YOKI os-ken yetarli; light VM'da biri o'rnatilmasligi
+# mumkin, shuning uchun bu ikki qatorni tolerant (|| true) qoldiramiz.
 pip3 install --break-system-packages --quiet \
     eventlet msgpack ovs ryu 2>/dev/null || true
 pip3 install --break-system-packages --quiet \
     os-ken 2>/dev/null || true
-pip3 install --break-system-packages --quiet \
-    requests pandas numpy networkx scapy pyarrow
+# Qolgan barcha Python bog'liqliklari YAGONA manbadan — docker/requirements.txt.
+# Ilgari bu yerda qo'lda tuzilgan ro'yxat bo'lib, docker/requirements.txt'dan
+# ajralib ketgan edi (matplotlib/scipy yo'q edi -> --visualize ImportError berardi).
+# -r orqali endi drift bo'lmaydi. Manba yo'li skript joylashuviga nisbatan.
+REQ="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/docker/requirements.txt"
+pip3 install --break-system-packages -r "$REQ"
 
 echo "[5/6] Kataloglar..."
 mkdir -p /data/{pcap,stats,flows,datasets}

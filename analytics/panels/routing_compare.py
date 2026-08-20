@@ -60,7 +60,12 @@ class RoutingComparePanel(ttk.Frame):
 
         ax2 = self.figure.add_subplot(122)
         box_data = [df.loc[df["routing"] == m, "real_rtt_ms"].values for m in modes]
-        ax2.boxplot(box_data, vert=False, labels=modes, showfliers=False)
+        # matplotlib 3.9+ `labels=`ni deprecate qildi (3.11'da olib tashlangan),
+        # o'rniga `tick_labels=`. Eski/yangi ikkalasida ishlashi uchun fallback.
+        try:
+            ax2.boxplot(box_data, vert=False, tick_labels=modes, showfliers=False)
+        except TypeError:
+            ax2.boxplot(box_data, vert=False, labels=modes, showfliers=False)
         ax2.set_xlabel("RTT taqsimoti (ms)")
         ax2.set_title("RTT tarqalishi (box-plot)")
 

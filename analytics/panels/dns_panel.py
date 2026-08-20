@@ -54,7 +54,12 @@ class DNSPanel(ttk.Frame):
         stages = [s for s in STAGE_ORDER if s in df["stage"].unique()]
         ax1 = self.figure.add_subplot(121)
         box_data = [df.loc[df["stage"] == s, "response_time_ms"].dropna().values for s in stages]
-        ax1.boxplot(box_data, labels=stages, showfliers=False)
+        # matplotlib 3.9+ `labels=`ni deprecate qildi (3.11'da olib tashlangan),
+        # o'rniga `tick_labels=`. Eski/yangi ikkalasida ishlashi uchun fallback.
+        try:
+            ax1.boxplot(box_data, tick_labels=stages, showfliers=False)
+        except TypeError:
+            ax1.boxplot(box_data, labels=stages, showfliers=False)
         ax1.set_ylabel("Javob vaqti (ms)")
         ax1.set_title("Bosqich bo'yicha kechikish")
 

@@ -32,20 +32,40 @@ class DataStore:
         self.con = duckdb.connect(":memory:")
         self.data_dir = None
         self.available = []  # shu papkada haqiqatda mavjud dataset nomlari
+        self.errors = {}     # o'qib bo'lmagan fayllar: name -> xato matni
         self.set_data_dir(data_dir)
 
     def set_data_dir(self, data_dir):
-        """Papkani (qayta) ochadi, mavjud CSV'lar uchun VIEW yaratadi."""
+        """Papkani (qayta) ochadi, mavjud CSV'lar uchun VIEW yaratadi.
+
+        Har bir VIEW alohida try/except ichida yaratiladi -- bitta buzuq/yarim
+        yozilgan CSV (masalan to'xtatilgan simulyatsiyadan) butun ilovani
+        yiqitmasin, faqat o'sha dataset o'tkazib yuboriladi va `self.errors`ga
+        yoziladi. Papka almashtirilganda eski VIEW'lar ham tozalanadi -- aks
+        holda yangi papkada yo'q dataset uchun eski papkaning ma'lumoti
+        ko'rinib qolardi."""
         self.data_dir = data_dir
+        # Eskilarini tashla -- almashtirilgan papkada yo'q dataset stale
+        # VIEW sifatida qolib ketmasligi uchun.
+        for name in DATASET_FILES:
+            try:
+                self.con.execute(f"DROP VIEW IF EXISTS {name}")
+            except Exception:
+                pass
         self.available = []
+        self.errors = {}
         for name, filename in DATASET_FILES.items():
             path = os.path.join(data_dir, filename)
             if not os.path.exists(path):
                 continue
             escaped = path.replace("'", "''")
-            self.con.execute(
-                f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM read_csv_auto('{escaped}')"
-            )
+            try:
+                self.con.execute(
+                    f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM read_csv_auto('{escaped}')"
+                )
+            except Exception as e:
+                self.errors[name] = str(e)
+                continue
             self.available.append(name)
 
     def has(self, name):
@@ -57,8 +77,14 @@ class DataStore:
 
     def row_counts(self):
         counts = {}
-        for name in self.available:
-            counts[name] = self.con.execute(f"SELECT count(*) FROM {name}").fetchone()[0]
+        for name in list(self.available):
+            try:
+                counts[name] = self.con.execute(
+                    f"SELECT count(*) FROM {name}").fetchone()[0]
+            except Exception as e:
+                # VIEW yaratilganda o'tgan, lekin so'rov paytida buzilgan CSV --
+                # xatoni yig'ib, sanoqdan chiqarib tashlaymiz (ilova ochiq qolsin).
+                self.errors[name] = str(e)
         return counts
 
     def routing_modes(self):

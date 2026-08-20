@@ -23,6 +23,25 @@ Mininet + SDN (os-ken/Ryu) yordamida real internet trafikini simulyatsiya qilish
 
 ## O'rnatish
 
+### Git LFS kerak (klonlashdan oldin)
+
+Repo'dagi dataset CSV fayllari (`results/**/*.csv`) **Git LFS** orqali saqlanadi
+(`.gitattributes`ga qarang). LFS o'rnatilmagan holda klonlansa, CSV o'rniga kichik "pointer"
+fayllari tushadi va `combine_datasets.py`/ML skriptlari xato beradi. Shuning uchun klonlashdan
+**oldin** LFS'ni o'rnating:
+
+```bash
+# Debian/Ubuntu
+sudo apt install -y git-lfs
+git lfs install
+
+# so'ng klonlang — CSV'lar avtomatik yuklanadi
+git clone <repo-url>
+
+# Agar LFS'siz allaqachon klonlagan bo'lsangiz:
+git lfs install && git lfs pull
+```
+
 ### Docker bilan (tavsiya etiladi)
 
 ```bash
@@ -186,21 +205,33 @@ anomaly = pd.read_csv("datasets/anomaly_events.csv")
 
 ## Barcha kombinatsiyalarni ishga tushirish
 
+Barcha topologiya x 11 routing rejim (va istalgan sonli seed) kombinatsiyalarini
+`run_campaign.sh` ketma-ket ishga tushiradi va har run'ning **butun** `datasets/` papkasini
+(`metadata.json` bilan birga) `results/<topo>_<mode>_seed<s>/datasets/` ga ko'chiradi — bu aynan
+`combine_datasets.py` kutgan layout:
+
 ```bash
-for topo in three_as five_as datacenter campus; do
-    for route in l2_learn rip ospf isis eigrp bgp ecmp spf policy static hybrid; do
-        echo "=== $topo + $route ==="
-        sudo python3 light_simulation.py \
-            --topology $topo --routing $route --duration 300
-        # Datasetni saqlash
-        mkdir -p results/${topo}_${route}
-        cp /data/datasets/*.csv results/${topo}_${route}/
-    done
-done
+# Default: 4 topologiya x 11 rejim x seed 0, har biri 300s
+sudo bash run_campaign.sh
+
+# Faqat five_as, 3 ta seed bilan (ilmiy takrorlanuvchanlik uchun)
+sudo bash run_campaign.sh --topologies "five_as" --seeds "0 1 2" --duration 300
+
+# Nima ishlashini oldindan ko'rish (hech narsa ishga tushmaydi)
+bash run_campaign.sh --dry-run
 ```
 
-`results/combine_datasets.py` shu tarzda yig'ilgan `results/five_as_<routing>/` papkalarini bitta
-`results/combined/*.csv` to'plamiga birlashtiradi (har bir qatorga `routing` ustuni qo'shib).
+So'ng birlashtirish:
+
+```bash
+python3 results/combine_datasets.py                    # barcha topologiya x rejim
+python3 results/combine_datasets.py --topology five_as # faqat five_as* run'lar
+```
+
+`combine_datasets.py` `results/<topo>_<mode>[_seed<N>]/datasets/` papkalaridagi bir xil nomli
+CSV'larni birlashtiradi va har qatorga provenance ustunlarini qo'shadi (`routing`, `topology`,
+`seed`, `run_id`, `source_dir`) — natijadagi qatorni qaysi run yaratganini kuzatish mumkin.
+Chiqish: `results/combined/*.csv`.
 
 ## Arxitektura
 

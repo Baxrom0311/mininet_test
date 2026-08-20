@@ -7,11 +7,27 @@ saqlangan topologiya darhol `--topology <nom>` orqali ishlatiladi.
 
 import json
 import os
+import re
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
 import routing
 import topologies
+
+# Node nomlari uchun ruxsat etilgan format. '-' va bo'sh joy taqiqlangan --
+# link'lar "s1-s2" ko'rinishida saqlanib, qayta o'qishda split('-',1) qilinadi,
+# shuning uchun nomdagi '-' formatni buzadi. Harf bilan boshlanishi shart.
+NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+# validate_topology qaysi routing rejimlarida yo'l hisoblashni tekshiradi.
+# Faqat l2_learn yetarli emas: ospf bw=0 da ZeroDivision beradi, spf esa
+# raqamli bo'lmagan delay'da yiqiladi -- shu sababli vakillik qiluvchi to'plam.
+VALIDATION_MODES = ["l2_learn", "ospf", "spf"]
+
+# topologies.py'da qattiq belgilangan (built-in) topologiyalar. Custom nom shu
+# nomlardan biri bo'lsa, loader built-in'ni soya qilib bosib ketadi -- shuning
+# uchun bunday nomlarda saqlashni rad etamiz.
+BUILTIN_TOPOLOGIES = {"three_as", "five_as", "datacenter", "campus"}
 
 CUSTOM_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "custom_topologies")
@@ -127,6 +143,56 @@ class TopologyBuilderPanel(ttk.Frame):
     def refresh(self):
         pass  # bu panel DuckDB store'ga bog'liq emas
 
+    # ── Validatsiya yordamchilari ────────────────────────────
+    @staticmethod
+    def _valid_name(name):
+        """Node nomi saqlash formati bilan mos (harf bilan boshlanadi, faqat
+        harf/raqam/pastki chiziq, '-' va bo'sh joysiz)."""
+        return bool(NAME_RE.match(name))
+
+    def _next_default_ip(self):
+        """Yangi host uchun takrorlanmaydigan standart IP (10.0.0.N/8)."""
+        used = {i.get("ip", "").split("/")[0] for i in self.hosts.values()}
+        n = 1
+        while f"10.0.0.{n}" in used:
+            n += 1
+        return f"10.0.0.{n}/8"
+
+    @staticmethod
+    def _parse_ms(val):
+        """'5ms' -> 5.0. Faqat '<manfiy bo'lmagan son>ms' formati qabul qilinadi.
+        Noto'g'ri bo'lsa ValueError."""
+        s = str(val).strip()
+        m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*ms", s)
+        if not m:
+            raise ValueError(f"'{val}' -- '<son>ms' ko'rinishida bo'lishi kerak (masalan 5ms)")
+        return float(m.group(1))
+
+    def _validate_link_params(self, key, params):
+        """Link parametrlari keyingi routing bosqichlarini yiqitmasligini
+        tekshiradi. Xato matni qaytaradi (yoki None -- to'g'ri bo'lsa)."""
+        s1, s2 = key
+        try:
+            bw = float(params.get("bw"))
+        except (TypeError, ValueError):
+            return f"{s1}-{s2}: bw son bo'lishi kerak."
+        if bw <= 0:
+            return f"{s1}-{s2}: bw musbat bo'lishi kerak (ospf cost = ref_bw/bw)."
+        try:
+            loss = float(params.get("loss", 0))
+        except (TypeError, ValueError):
+            return f"{s1}-{s2}: loss son bo'lishi kerak."
+        if not (0 <= loss <= 100):
+            return f"{s1}-{s2}: loss 0..100 oralig'ida bo'lishi kerak."
+        for field in ("delay", "jitter"):
+            if params.get(field) in (None, ""):
+                continue
+            try:
+                self._parse_ms(params[field])
+            except ValueError as e:
+                return f"{s1}-{s2}: {field} {e}"
+        return None
+
     # ── canvas bosish -> rejimga qarab yo'naltirish ──────────
     def _on_canvas_click(self, event):
         mode = self.mode.get()
@@ -149,6 +215,14 @@ class TopologyBuilderPanel(ttk.Frame):
     def _add_switch(self, x, y):
         name = simpledialog.askstring("Switch nomi", "Switch nomi (masalan s1):", parent=self.winfo_toplevel())
         if not name:
+            return
+        name = name.strip()
+        if not self._valid_name(name):
+            messagebox.showerror(
+                "Xato",
+                f"'{name}' noto'g'ri nom. Harf bilan boshlanib, faqat harf, raqam "
+                f"va '_' ishlatilsin ('-' va bo'sh joy mumkin emas -- link saqlash "
+                f"formatini buzadi).")
             return
         if name in self.switches or name in self.hosts:
             messagebox.showerror("Xato", f"'{name}' nomi allaqachon band.")
@@ -198,13 +272,20 @@ class TopologyBuilderPanel(ttk.Frame):
         name = simpledialog.askstring("Host nomi", "Host nomi (masalan web1):", parent=self.winfo_toplevel())
         if not name:
             return
+        name = name.strip()
+        if not self._valid_name(name):
+            messagebox.showerror(
+                "Xato",
+                f"'{name}' noto'g'ri nom. Harf bilan boshlanib, faqat harf, raqam "
+                f"va '_' ishlatilsin ('-' va bo'sh joy mumkin emas).")
+            return
         if name in self.switches or name in self.hosts:
             messagebox.showerror("Xato", f"'{name}' nomi allaqachon band.")
             return
         form = SimpleForm(self, f"Host: {name}", [
             ("switch", "Ulanadigan switch", "combo", (list(self.switches.keys()),
                                                         list(self.switches.keys())[0])),
-            ("ip", "IP/mask", "entry", "10.0.0.1/8"),
+            ("ip", "IP/mask", "entry", self._next_default_ip()),
             ("role", "Rol", "combo", (HOST_ROLES, "client")),
             ("bw", "Access bw (Mbps)", "entry", "10"),
             ("delay", "Access delay", "entry", "1ms"),
@@ -216,12 +297,18 @@ class TopologyBuilderPanel(ttk.Frame):
         if sw not in self.switches:
             messagebox.showerror("Xato", f"Switch '{sw}' topilmadi.")
             return
+        ip = form.result["ip"].strip()
+        ip_addr = ip.split("/")[0]
+        used_ips = {i.get("ip", "").split("/")[0] for i in self.hosts.values()}
+        if ip_addr in used_ips:
+            messagebox.showerror("Xato", f"IP '{ip_addr}' allaqachon boshqa host'da band.")
+            return
         try:
             bw = float(form.result["bw"]); loss = float(form.result["loss"])
         except ValueError:
             messagebox.showerror("Xato", "bw/loss son bo'lishi kerak.")
             return
-        self.hosts[name] = {"switch": sw, "ip": form.result["ip"], "role": form.result["role"],
+        self.hosts[name] = {"switch": sw, "ip": ip, "role": form.result["role"],
                              "x": x, "y": y,
                              "access": {"bw": bw, "delay": form.result["delay"], "loss": loss}}
         self._draw_host(name)
@@ -331,14 +418,18 @@ class TopologyBuilderPanel(ttk.Frame):
         self._set_status(f"O'chirildi: {kind} {key}")
 
     def clear_all(self):
+        """Canvas'ni tozalaydi. Tozalangan bo'lsa (yoki tozalash shart
+        bo'lmasa) True, foydalanuvchi rad etsa False qaytaradi -- shu orqali
+        load_topology tozalash rad etilganda yuklashni to'xtatadi."""
         if not (self.switches or self.hosts or self.links):
-            return
+            return True
         if not messagebox.askyesno("Tasdiqlash", "Butun canvas tozalansinmi?"):
-            return
+            return False
         self.canvas.delete("all")
         self.switches.clear(); self.hosts.clear(); self.links.clear()
         self._item_owner.clear(); self._link_pending = None
         self._set_status("Tozalandi.")
+        return True
 
     # ── TOPOLOGIES sxemasiga aylantirish ─────────────────────────
     def _to_topo_dict(self):
@@ -363,23 +454,42 @@ class TopologyBuilderPanel(ttk.Frame):
         if not self.switches:
             self._set_status("Kamida bitta switch kerak.", error=True)
             return None
+
+        # Link parametrlarini oldindan tekshirish -- bw=0 ospf'da ZeroDivision,
+        # raqamli bo'lmagan delay spf/isis'da yiqiladi. Bularni saqlashdan
+        # oldin ushlaymiz.
+        for key, params in self.links.items():
+            err = self._validate_link_params(key, params)
+            if err:
+                self._set_status(err, error=True)
+                messagebox.showerror("Validatsiya xatosi", err)
+                return None
+
         topo = self._to_topo_dict()
-        try:
-            paths = routing.compute_paths(topo, "l2_learn")
-        except Exception as e:
-            self._set_status(f"Xato: {e}", error=True)
-            messagebox.showerror("Validatsiya xatosi", str(e))
-            return None
         expected = [(a, b) for a in self.hosts for b in self.hosts if a != b]
-        missing = [p for p in expected if p not in paths]
-        if missing:
-            msg = (f"{len(missing)} host juftligi orasida yo'l topilmadi -- "
-                   f"tarmoq bo'lingan bo'lishi mumkin (masalan: {missing[0]}).")
-            self._set_status(msg, error=True)
-            messagebox.showerror("Validatsiya xatosi", msg)
-            return None
+        # Bir nechta rejimni tekshiramiz -- l2_learn o'tsa ham ospf/spf
+        # boshqa metrik (bw/delay) ishlatgani sabab yiqilishi mumkin.
+        total_paths = 0
+        for mode in VALIDATION_MODES:
+            try:
+                paths = routing.compute_paths(topo, mode)
+            except Exception as e:
+                msg = f"'{mode}' rejimida xato: {e}"
+                self._set_status(msg, error=True)
+                messagebox.showerror("Validatsiya xatosi", msg)
+                return None
+            missing = [p for p in expected if p not in paths]
+            if missing:
+                msg = (f"'{mode}': {len(missing)} host juftligi orasida yo'l "
+                       f"topilmadi -- tarmoq bo'lingan bo'lishi mumkin "
+                       f"(masalan: {missing[0]}).")
+                self._set_status(msg, error=True)
+                messagebox.showerror("Validatsiya xatosi", msg)
+                return None
+            total_paths = len(paths)
         self._set_status(f"To'g'ri: {len(self.switches)} switch, {len(self.hosts)} host, "
-                          f"{len(self.links)} link, {len(paths)} yo'l hisoblandi.")
+                          f"{len(self.links)} link, {total_paths} yo'l "
+                          f"({len(VALIDATION_MODES)} rejimda tekshirildi).")
         return topo
 
     def save_topology(self):
@@ -393,9 +503,21 @@ class TopologyBuilderPanel(ttk.Frame):
         if not safe_name:
             messagebox.showerror("Xato", "Nom noto'g'ri.")
             return
+        if safe_name in BUILTIN_TOPOLOGIES:
+            messagebox.showerror(
+                "Xato",
+                f"'{safe_name}' -- built-in topologiya nomi. Uni tanlasangiz, "
+                f"loader haqiqiy built-in'ni soya qilib bosib ketadi. "
+                f"Boshqa nom tanlang.")
+            return
+        path = os.path.join(CUSTOM_DIR, f"{safe_name}.json")
+        if os.path.exists(path) and not messagebox.askyesno(
+                "Ustiga yozish",
+                f"'custom_topologies/{safe_name}.json' allaqachon mavjud. "
+                f"Ustiga yozilsinmi?"):
+            return
         save_topo = dict(topo)
         save_topo["links"] = {f"{k[0]}-{k[1]}": v for k, v in topo["links"].items()}
-        path = os.path.join(CUSTOM_DIR, f"{safe_name}.json")
         with open(path, "w") as f:
             json.dump(save_topo, f, indent=2)
         self._set_status(f"Saqlandi: custom_topologies/{safe_name}.json")
@@ -417,7 +539,11 @@ class TopologyBuilderPanel(ttk.Frame):
             return
         with open(os.path.join(CUSTOM_DIR, f"{name}.json")) as f:
             topo = json.load(f)
-        self.clear_all()
+        # Tozalash rad etilsa yuklashni to'xtatamiz -- aks holda yuklangan
+        # topologiya mavjudining ustiga qo'shilib ketardi.
+        if not self.clear_all():
+            self._set_status("Yuklash bekor qilindi (tozalash rad etildi).")
+            return
         positions = topo.get("_positions", {})
         for sname, info in topo["switches"].items():
             x, y = positions.get(sname, [100 + 80 * len(self.switches), 100])

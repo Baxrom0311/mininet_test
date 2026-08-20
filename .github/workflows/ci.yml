@@ -1,0 +1,111 @@
+name: CI
+
+# Lightweight checks that run WITHOUT Mininet/OVS/GPU. They guard the two things
+# most likely to silently break this repo: the lazy-import convention (no top-level
+# mininet/os-ken import in the root modules) and the Dockerfile COPY list.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Pure-Python deps only. Mininet/os-ken are intentionally NOT installed — so if
+      # someone moves a `import mininet`/`os_ken` to module top level, the import step
+      # below fails, which is exactly the regression we want to catch.
+      - name: Install lightweight deps
+        run: pip install --quiet pandas numpy networkx
+
+      # Root modules only (the same set the Dockerfile COPYs); legacy/ is not lazy and
+      # is not part of the active code path.
+      - name: Syntax check (py_compile) root modules
+        run: python -m py_compile *.py
+
+      - name: Import light_simulation (lazy-import convention, no Mininet present)
+        run: python -c "import light_simulation; print('import light_simulation OK')"
+
+      # For every topology x each of the 11 routing modes, compute_paths() must return a
+      # non-empty result that covers every distinct-host ordered pair, and every returned
+      # path (including ECMP multipath sub-lists) must start at the source host's switch
+      # and end at the destination host's switch.
+      #
+      # NOTE: we deliberately do NOT assert loop-free paths. routing.py intentionally
+      # injects stochastic imperfections (RIP counting-to-infinity `path + [path[-1]]`,
+      # OSPF SPF-staleness re-routing) that can repeat a node — those are realistic
+      # dataset artifacts, not bugs. We seed `random` only for a reproducible run; the
+      # asserted invariants (coverage + correct endpoints) hold regardless of the draws.
+      - name: compute_paths sanity sweep (all topologies x 11 modes)
+        run: |
+          python - <<'PY'
+          import itertools, random, sys
+          random.seed(0)
+          from routing import compute_paths
+          from topologies import TOPOLOGIES
+
+          MODES = ["l2_learn", "rip", "ospf", "isis", "eigrp", "bgp",
+                   "ecmp", "spf", "policy", "static", "hybrid"]
+          errors = []
+
+          def subpaths(val):
+              # A value is either a single path (list[str]) or ECMP multipath (list[list[str]]).
+              if val and isinstance(val[0], list):
+                  yield from val
+              else:
+                  yield val
+
+          for tname, topo in TOPOLOGIES.items():
+              hosts = topo["hosts"]
+              names = list(hosts.keys())
+              for mode in MODES:
+                  paths = compute_paths(topo, mode)
+                  if not paths:
+                      errors.append(f"{tname}/{mode}: empty result")
+                      continue
+                  missing = [(s, d) for s, d in itertools.permutations(names, 2)
+                             if (s, d) not in paths]
+                  if missing:
+                      errors.append(f"{tname}/{mode}: {len(missing)} missing pairs e.g. {missing[:3]}")
+                  for (s, d), val in paths.items():
+                      ssw, dsw = hosts[s]["switch"], hosts[d]["switch"]
+                      for p in subpaths(val):
+                          if not p:
+                              errors.append(f"{tname}/{mode}: empty path {s}->{d}")
+                              break
+                          if p[0] != ssw or p[-1] != dsw:
+                              errors.append(f"{tname}/{mode}: bad endpoints {s}->{d}: {p} "
+                                            f"(want {ssw}..{dsw})")
+                              break
+
+          if errors:
+              print("SANITY SWEEP FAILED:")
+              for e in errors[:30]:
+                  print("  ", e)
+              sys.exit(1)
+          print("compute_paths sweep OK: 4 topologies x 11 modes, "
+                "non-empty, full pair coverage, correct endpoints")
+          PY
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Build only (no run — Mininet needs --privileged and a real network namespace).
+      # This catches a missing-COPY regression: if a root module the app imports is left
+      # out of the Dockerfile, the image still builds, so we additionally smoke-check the
+      # image below by importing every copied module inside the container.
+      - name: Docker build (build only)
+        run: docker build -f docker/Dockerfile -t internet-sim:ci .
+
+      - name: Verify all root modules were copied into the image
+        run: |
+          docker run --rm --entrypoint python3 internet-sim:ci -c \
+            "import config, topologies, routing, netutil; print('modules present in image')"

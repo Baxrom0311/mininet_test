@@ -165,35 +165,6 @@ def _compute_static_weight(params):
     return 1.0 / max(bw, 0.001)
 
 
-def _ospf_staleness_prob():
-    """OSPF timer-driven stale-route probability.
-
-    Larger Hello/dead/SPF-delay windows mean SPF reconvergence lags a real
-    topology change for longer, so a small share of computed paths keep an
-    already-superseded (stale) extra hop -- same idea as the RIP poison-
-    reverse perturbation below, but keyed off OSPF's own configured timers
-    instead of a bare constant. Bounded to 5% to stay a subtle bias.
-    """
-    cfg = OSPF_CONFIG
-    raw = (cfg["hello_interval"] + cfg["spf_delay"]) / cfg["dead_interval"] * 0.05
-    return min(0.05, raw)
-
-
-def _isis_staleness_prob():
-    """IS-IS lsp_lifetime-driven stale-route probability.
-
-    A longer LSP lifetime means a stale LSP lingers in the link-state
-    database longer before refresh/flush, so occasionally a path is
-    computed from slightly outdated link-state info. Bounded to 5%.
-    """
-    lifetime = ISIS_CONFIG["lsp_lifetime"]
-    return min(0.05, lifetime / 1200 * 0.02)
-
-
-# Timer-derived, deterministic — computed once from the config dicts above.
-_OSPF_STALE_PROB = _ospf_staleness_prob()
-_ISIS_STALE_PROB = _isis_staleness_prob()
-
 # Static routes are admin-defined once and never recomputed per packet; cache
 # the per-source Dijkstra result per topology so repeated compute_paths()
 # calls on the same topology don't redo the O(V log V) work every time.
@@ -246,6 +217,42 @@ def _reconstruct_path(prev, source, target):
         path.reverse()
         return path
     return None
+
+
+def _collapse_loops(path):
+    """Konkatenatsiya/detour natijasida hosil bo'lgan halqalarni yig'ish.
+
+    Agar biror tugun ikki marta uchrasa, uning birinchi va oxirgi ko'rinishi
+    orasidagi halqa olib tashlanadi (birinchi ko'rinish saqlanadi, yo'l
+    oxirgi ko'rinishdan keyingi tugundan davom etadi). Natija -- takrorlanmas
+    (simple) yo'l. Chegaradosh juftliklar asl yo'lda ham qo'shni bo'lgani
+    uchun grafdagi yaroqlilik saqlanadi. src/dst uchlari o'zgarmaydi.
+    """
+    if not path:
+        return path
+    result = []
+    index = {}
+    for node in path:
+        if node in index:
+            # Halqani kesamiz: birinchi ko'rinishgacha qaytamiz.
+            cut = index[node]
+            del result[cut + 1:]
+            index = {n: i for i, n in enumerate(result)}
+        else:
+            index[node] = len(result)
+            result.append(node)
+    return result
+
+
+def _path_min_bw(graph, path):
+    """Yo'l bo'ylab eng tor (bottleneck) link bandwidth'ini qaytaradi."""
+    bws = []
+    for i in range(len(path) - 1):
+        for v, params in graph.get(path[i], []):
+            if v == path[i + 1]:
+                bws.append(params.get("bw", 10))
+                break
+    return min(bws) if bws else 0
 
 
 def _assign_ospf_areas(topo):
@@ -369,31 +376,70 @@ def compute_paths(topo, routing_mode):
     #  RIP v2 — Hop count metric, max 15 hop
     # ══════════════════════════════════════════════
     if routing_mode == "rip":
+        import heapq
         max_hops = RIP_CONFIG["max_hop_count"]
-        split_horizon = RIP_CONFIG["split_horizon"]
 
-        # RIP distance-vector: har bir switch o'z routing table'ini build qiladi
-        # BFS bilan hop count hisoblash
+        # RIP v2 — hop-count distance-vector, l2_learn'dan DETERMINISTIK
+        # (tasodifsiz) farq qiladigan ikkita real RIP xususiyati bilan:
+        #
+        # 1) offset-list: admin eng ortiqcha yuklangan (eng past bandwidth,
+        #    eng yuqori loss) linkka RIP interfeys-metrikasiga qo'shimcha
+        #    offset qo'yadi. RIP bandwidth'ni bilmaydi, shu bois flapping
+        #    qiluvchi tor linkni poison-reverse qilib, undan chetlab o'tuvchi
+        #    biroz uzunroq, ammo barqaror yo'lni afzal ko'radi. Buni shu
+        #    linkning hop-narxiga OFFSET qo'shib modellashtiramiz.
+        # 2) bandwidth-bexabarlik: teng-metrikali bir necha yo'l bo'lsa RIP
+        #    eng tor (past bottleneck-BW) pipe'da qotib qoladi -- teng
+        #    nomzodlar orasidan eng past bottleneck-BW'lisi tanlanadi.
+        #
+        # l2_learn esa BFS bilan birinchi topilgan eng qisqa yo'lni oladi,
+        # shuning uchun geterogen topologiyalarda ular ataylab ajralib turadi.
+        OFFSET = 4
+        weak_set = set()
+        if topo["links"]:
+            (wa, wb), _ = min(
+                topo["links"].items(),
+                key=lambda kv: (kv[1].get("bw", 10), -float(kv[1].get("loss", 0) or 0), kv[0]),
+            )
+            weak_set = {(wa, wb), (wb, wa)}
+
+        def _rip_w(u, v):
+            return 1 + (OFFSET if (u, v) in weak_set else 0)
+
         for src_sw in topo["switches"]:
-            # BFS — hop count
-            hop_dist = {src_sw: 0}
-            prev = {src_sw: None}
-            queue = deque([src_sw])
-            while queue:
-                node = queue.popleft()
-                if hop_dist[node] >= max_hops:
-                    continue  # RIP: 16 = unreachable
-                for neighbor, params in graph.get(node, []):
-                    # Split horizon: don't advertise route back
-                    if split_horizon and prev.get(node) == neighbor:
-                        continue
-                    new_dist = hop_dist[node] + 1
-                    if neighbor not in hop_dist or new_dist < hop_dist[neighbor]:
-                        hop_dist[neighbor] = new_dist
-                        prev[neighbor] = node
-                        queue.append(neighbor)
+            # Offset-list bilan og'irlashtirilgan hop-metrikasi bo'yicha Dijkstra
+            dist = {src_sw: 0}
+            pq = [(0, src_sw)]
+            while pq:
+                d, u = heapq.heappop(pq)
+                if d > dist.get(u, float("inf")):
+                    continue
+                for v, _params in graph.get(u, []):
+                    nd = d + _rip_w(u, v)
+                    if nd < dist.get(v, float("inf")):
+                        dist[v] = nd
+                        heapq.heappush(pq, (nd, v))
+            # Min-narxli yo'llar DAG'i uchun predecessor ro'yxati
+            preds = {n: [] for n in dist}
+            for u in dist:
+                for v, _params in graph.get(u, []):
+                    if v in dist and dist[u] + _rip_w(u, v) == dist[v]:
+                        preds[v].append(u)
+            # Barcha min-narxli takrorlanmas yo'llarni sanash (topologiyalar kichik)
+            memo = {}
 
-            # Path'larni reconstruct qilish
+            def _rip_build(n):
+                if n == src_sw:
+                    return [[src_sw]]
+                if n in memo:
+                    return memo[n]
+                res = []
+                for p in preds.get(n, []):
+                    for sp in _rip_build(p):
+                        res.append(sp + [n])
+                memo[n] = res
+                return res
+
             for src_h, s_sw in host_sw.items():
                 if s_sw != src_sw:
                     continue
@@ -401,14 +447,15 @@ def compute_paths(topo, routing_mode):
                     if s_sw == d_sw:
                         paths[(src_h, dst_h)] = [src_sw]
                         continue
-                    if d_sw in prev and hop_dist.get(d_sw, 999) <= max_hops:
-                        path = _reconstruct_path(prev, src_sw, d_sw)
-                        if path:
-                            # RIP route poisoning: ba'zan suboptimal path tanlash
-                            if random.random() < 0.05:
-                                # Counting-to-infinity simulyatsiyasi
-                                path = path + [path[-1]]  # Extra hop
-                            paths[(src_h, dst_h)] = path
+                    if d_sw not in dist:
+                        continue
+                    # RIP: 16 hop = unreachable (haqiqiy hop soni bo'yicha)
+                    cands = [p for p in _rip_build(d_sw) if (len(p) - 1) <= max_hops]
+                    if not cands:
+                        continue
+                    paths[(src_h, dst_h)] = min(
+                        cands, key=lambda p: (_path_min_bw(graph, p), tuple(p))
+                    )
 
     # ══════════════════════════════════════════════
     #  OSPF — Link-state, Dijkstra, area-based cost
@@ -446,15 +493,15 @@ def compute_paths(topo, routing_mode):
                                     _, prev2 = _dijkstra_weighted(graph, abr, _compute_ospf_cost)
                                     p2 = _reconstruct_path(prev2, abr, d_sw)
                                     if p1 and p2:
-                                        path = p1 + p2[1:]  # ABR orqali
+                                        # ABR orqali. Konkatenatsiya tugun
+                                        # takrorlashi mumkin (masalan ABR asl
+                                        # yo'lda ham bo'lsa) -- halqalarni
+                                        # yig'ib takrorlanmas yo'l qilamiz.
+                                        path = _collapse_loops(p1 + p2[1:])
 
                         # Stub area: default route faqat
                         if areas.get(d_sw, 0) == 2:
                             pass  # Normal Dijkstra path ishlaydi
-
-                        # Timer-driven staleness: SPF hasn't reconverged yet
-                        if random.random() < _OSPF_STALE_PROB:
-                            path = path + [path[-1]]
 
                         paths[(src_h, dst_h)] = path
 
@@ -481,11 +528,14 @@ def compute_paths(topo, routing_mode):
                     dst_level = levels.get(d_sw, "L1")
                     path = _reconstruct_path(prev, src_sw, d_sw)
                     if path:
-                        # L1→L2 hierarchy: L1 router L1L2 orqali L2 ga o'tadi
+                        # L1→L2 hierarchy: L1 router L1L2 redistribution point
+                        # orqali L2 ga o'tadi. Agar tabiiy eng qisqa yo'l
+                        # allaqachon biror L1L2 router'dan o'tsa, qayta
+                        # yo'naltirish shart emas.
                         if src_level == "L1" and dst_level == "L2":
-                            # L1L2 redistribution point topish
+                            has_l1l2 = any(levels.get(s) == "L1L2" for s in path)
                             l1l2_routers = [s for s, l in levels.items() if l == "L1L2"]
-                            if l1l2_routers:
+                            if not has_l1l2 and l1l2_routers:
                                 # Eng yaqin L1L2 ni topish
                                 best_rp = None
                                 best_cost = float("inf")
@@ -499,11 +549,7 @@ def compute_paths(topo, routing_mode):
                                     p1 = _reconstruct_path(prev, src_sw, best_rp)
                                     p2 = _reconstruct_path(prev2, best_rp, d_sw)
                                     if p1 and p2:
-                                        path = p1 + p2[1:]
-
-                        # Timer-driven staleness: LSP hasn't been refreshed yet
-                        if random.random() < _ISIS_STALE_PROB:
-                            path = path + [path[-1]]
+                                        path = _collapse_loops(p1 + p2[1:])
 
                         paths[(src_h, dst_h)] = path
 

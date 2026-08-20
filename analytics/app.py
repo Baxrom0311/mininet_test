@@ -42,7 +42,22 @@ class AnalyticsApp(tk.Tk):
         self.title("Internet Simulation -- Analitika")
         self.geometry("1000x700")
 
-        self.store = DataStore(data_dir)
+        # Butun papka o'qilmasa ham ilova ochilishi kerak -- DataStore
+        # qurilishini himoyalaymiz. set_data_dir ichida har bir CSV alohida
+        # try/except'da, bu esa faqat DuckDB ulanishining o'zi yiqilsa (juda
+        # kam holat) ishlaydigan oxirgi himoya.
+        try:
+            self.store = DataStore(data_dir)
+        except Exception as e:
+            messagebox.showerror(
+                "Ogohlantirish",
+                f"Dataset papkasini ochib bo'lmadi, ilova bo'sh holatda "
+                f"ochiladi:\n{e}")
+            self.store = DataStore.__new__(DataStore)
+            self.store.con = __import__("duckdb").connect(":memory:")
+            self.store.data_dir = data_dir
+            self.store.available = []
+            self.store.errors = {"(papka)": str(e)}
 
         self._build_menu()
         self._build_tabs()

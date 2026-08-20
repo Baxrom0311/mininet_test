@@ -64,6 +64,16 @@ Both scripts now write, into `OUT_DIR`:
 Load them together at inference time rather than re-fitting a fresh scaler/encoder, or
 predictions won't be comparable to training.
 
+> **Only the `.pt` files are committed to this repo (`ml/out/anomaly_model.pt`,
+> `ml/out/routing_model.pt`). The `.joblib` artifacts are NOT committed** — they are regenerated
+> into `OUT_DIR` every time you re-run the corresponding training script. A committed `.pt` on its
+> own is therefore **not usable for inference**: without the exact `scaler.joblib` /
+> `feature_cols.joblib` (/ `label_encoder.joblib`) that were fitted in the same run, you can't
+> reproduce the model's input preprocessing, and its predictions are meaningless. To do inference,
+> re-run training (`python3 ml/train_*.py`) to produce a matched `.pt` + `.joblib` set, then load
+> them together. (See also "Known accuracy" below — the committed `.pt`s predate the latest
+> data/routing fixes and are stale anyway.)
+
 ## Dependencies
 
 `torch`, `pandas`, `numpy`, `scikit-learn` (`sklearn.model_selection`, `sklearn.preprocessing`,

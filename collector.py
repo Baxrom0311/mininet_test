@@ -9,7 +9,7 @@ import threading
 import time
 
 from config import DATA_DIR
-from netutil import parse_ping
+from netutil import locked_cmd, parse_ping
 
 
 class Collector:
@@ -58,7 +58,7 @@ class Collector:
                     break
                 h1, h2 = random.sample(hosts, 2)
                 try:
-                    result = h1.cmd(f"ping -c 3 -W 2 {h2.IP()}")
+                    result = locked_cmd(h1, f"ping -c 3 -W 2 {h2.IP()}")
                 except Exception:
                     result = ""
                 if result:

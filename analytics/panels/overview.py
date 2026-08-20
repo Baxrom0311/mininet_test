@@ -15,6 +15,11 @@ class OverviewPanel(ttk.Frame):
         self.path_label = ttk.Label(self, foreground="#666")
         self.path_label.pack(anchor="w", padx=12, pady=(0, 8))
 
+        # O'qib bo'lmagan (buzuq/yarim yozilgan) CSV'lar haqida ogohlantirish.
+        self.errors_label = ttk.Label(self, foreground="#c0392b", wraplength=900,
+                                      justify="left")
+        self.errors_label.pack(anchor="w", padx=12, pady=(0, 8))
+
         columns = ("dataset", "rows")
         self.tree = ttk.Treeview(self, columns=columns, show="headings", height=14)
         self.tree.heading("dataset", text="Dataset")
@@ -35,6 +40,15 @@ class OverviewPanel(ttk.Frame):
         for row in self.tree.get_children():
             self.tree.delete(row)
         counts = self.store.row_counts()
+        # row_counts() so'rov paytidagi xatolarni ham to'ldirishi mumkin,
+        # shuning uchun sanoqdan keyin o'qiymiz.
+        errors = getattr(self.store, "errors", {})
+        if errors:
+            lines = "; ".join(f"{name}: {msg}" for name, msg in errors.items())
+            self.errors_label.config(
+                text=f"Ogohlantirish -- o'qib bo'lmagan fayllar ({len(errors)}): {lines}")
+        else:
+            self.errors_label.config(text="")
         for name, n in sorted(counts.items(), key=lambda kv: -kv[1]):
             self.tree.insert("", "end", values=(name, f"{n:,}"))
         modes = self.store.routing_modes()

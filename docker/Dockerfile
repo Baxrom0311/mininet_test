@@ -33,10 +33,13 @@ RUN echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.d/99-mininet.conf \
     && echo "net.core.wmem_max = 4194304" >> /etc/sysctl.d/99-mininet.conf
 
 # ─── Application ───
+# Barcha root modullarni ko'chiramiz. Aniq ro'yxat o'rniga *.py — yangi modul
+# (masalan netutil.py) qo'shilganda COPY ro'yxatini yangilashni unutish natijasida
+# konteyner ishga tushishida ModuleNotFoundError bo'lishining oldini oladi.
+# .dockerignore hech qanday .py'ni chiqarib tashlamaydi (faqat datasets/png/csv/
+# parquet/jsonl/pcap va h.k.), va build konteksti root'da faqat shu 13 modul bor.
 WORKDIR /app
-COPY light_simulation.py config.py topologies.py routing.py network_build.py \
-     traffic_gen.py impairments.py collector.py path_tracer.py \
-     dataset_builder.py controller.py visualize.py /app/
+COPY *.py /app/
 
 # ─── Entrypoint ───
 COPY docker/docker-entrypoint.sh /app/

@@ -159,10 +159,20 @@ TOPOLOGIES = {
             "cli2":  {"switch": "s4", "ip": "10.0.4.1/8", "role": "client"},
         },
         "links": {
-            ("s1","s3"): {"bw": 40, "delay": "0.1ms","loss": 0.001,"jitter": "0.02ms","queue": 200},
-            ("s1","s4"): {"bw": 40, "delay": "0.1ms","loss": 0.001,"jitter": "0.02ms","queue": 200},
-            ("s2","s3"): {"bw": 40, "delay": "0.1ms","loss": 0.001,"jitter": "0.02ms","queue": 200},
-            ("s2","s4"): {"bw": 40, "delay": "0.1ms","loss": 0.001,"jitter": "0.02ms","queue": 200},
+            # Fat-tree'da yadroga ikkita teng-hopli yo'l bor: s1 orqali va s2
+            # orqali. Ilgari to'rttala core-agg linki bir xil (bw40, 0.1ms)
+            # bo'lgani uchun narx-asosli protokollar l2_learn bilan bir xil
+            # yo'l tanlar edi (spf/static 56/56). Endi ularni ataylab
+            # anti-korrelyatsiyalab qo'yamiz: s1-yo'li past-BW/yuqori-delay,
+            # s2-yo'li yuqori-BW/past-delay. Shunda BFS (l2_learn) qo'shni
+            # ro'yxatidagi tartib bo'yicha s1-yo'lini birinchi topib qoladi,
+            # bandwidth-afzal (static/ospf/isis/eigrp) va delay-afzal (spf)
+            # protokollar esa ikkalasi ham s2-yo'liga o'tib, hop-count'dan
+            # ajralib turadi. Fat-tree shakli va nomlar o'zgarmaydi. Fix #3.
+            ("s1","s3"): {"bw": 10, "delay": "0.3ms","loss": 0.001,"jitter": "0.02ms","queue": 200},
+            ("s1","s4"): {"bw": 10, "delay": "0.3ms","loss": 0.001,"jitter": "0.02ms","queue": 200},
+            ("s2","s3"): {"bw": 40, "delay": "0.05ms","loss": 0.001,"jitter": "0.02ms","queue": 200},
+            ("s2","s4"): {"bw": 40, "delay": "0.05ms","loss": 0.001,"jitter": "0.02ms","queue": 200},
             ("s3","s5"): {"bw": 20, "delay": "0.05ms","loss":0.001,"jitter": "0.01ms","queue": 100},
             ("s4","s6"): {"bw": 20, "delay": "0.05ms","loss":0.001,"jitter": "0.01ms","queue": 100},
         },
@@ -237,6 +247,26 @@ TOPOLOGIES = {
 }
 
 
+def _parse_link_key(key, switch_names):
+    """"s1-s2" ko'rinishidagi link kalitini (s1, s2) tuple'ga aylantiradi.
+
+    Switch nomlari ichida '-' bo'lishi mumkinligi sabab, oddiy split("-", 1)
+    xato juftlik berishi mumkin (masalan "a-b-c" -> ("a", "b-c")). Shu bois
+    har bir '-' pozitsiyasini sinab ko'ramiz va faqat ikkala tomoni ham
+    ma'lum switch nomi bo'lgan yagona bo'linishni qabul qilamiz. Yaroqsiz,
+    bo'sh yoki noaniq (bir nechta yoki hech qanday mos bo'linish) kalitlar
+    uchun None qaytadi.
+    """
+    candidates = []
+    for i, ch in enumerate(key):
+        if ch != "-":
+            continue
+        left, right = key[:i], key[i + 1:]
+        if left in switch_names and right in switch_names:
+            candidates.append((left, right))
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _load_custom_topologies():
     """`analytics/`dagi topologiya quruvchi bilan yaratilgan
     custom_topologies/*.json fayllarini TOPOLOGIES'ga qo'shadi. Bitta
@@ -252,8 +282,27 @@ def _load_custom_topologies():
             with open(os.path.join(custom_dir, fname)) as f:
                 topo = json.load(f)
             # JSON tuple key qo'llamaydi -- "s1-s2" matn ko'rinishida
-            # saqlanadi, shu yerda qayta tuple'ga aylantiriladi.
-            topo["links"] = {tuple(k.split("-", 1)): v for k, v in topo["links"].items()}
+            # saqlanadi, shu yerda qayta tuple'ga aylantiriladi. Har bir
+            # kalitni ma'lum switch nomlariga tekshiramiz; birortasi yaroqsiz
+            # bo'lsa buzuq grafni yuklamaymiz -- ogohlantirib o'tkazib
+            # yuboramiz.
+            switch_names = set(topo.get("switches", {}).keys())
+            parsed_links = {}
+            corrupt = False
+            for k, v in topo.get("links", {}).items():
+                pair = _parse_link_key(k, switch_names)
+                if pair is None:
+                    print(
+                        f"[topologies] custom_topologies/{fname}: yaroqsiz link "
+                        f"kaliti {k!r} (ma'lum switchlarga 2 ta bo'linmadi) -- "
+                        f"topologiya o'tkazib yuborildi"
+                    )
+                    corrupt = True
+                    break
+                parsed_links[pair] = v
+            if corrupt:
+                continue
+            topo["links"] = parsed_links
             TOPOLOGIES[fname[:-5]] = topo
         except Exception as e:
             print(f"[topologies] custom_topologies/{fname} o'qilmadi: {e}")
