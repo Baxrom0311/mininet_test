@@ -103,6 +103,37 @@ NetLab'da ham xuddi shunday:
 | **ns-3** | Diskret-hodisali simulyatsiya (OPNET bilan bir xil tamoyil): paket darajasida, virtual vaqtda, deterministik (seed) | Ilmiy natija, takrorlanuvchan tajriba, real vaqtdan tez |
 | **Mininet** | Haqiqiy emulyatsiya: iperf3/ping haqiqiy Linux TCP/UDP, FRR, OVS, P4, SDN orqali o'tadi | Protokol va konfiguratsiyani "haqiqatda" tekshirish |
 
+### Parametrik tadqiqot (OPNET "parametric study")
+
+Ssenariy oynasining pastki qismida bitta parametr tanlanadi:
+- kabel: tezlik, kechikish, loss yoki navbat;
+- ilova: tezlik yoki paket o'lchami.
+
+So'ng qiymatlar ro'yxati yoziladi (masalan `1,2,5,10,20,50,100`). Har bir qiymat
+uchun ssenariy tanlangan dvigatelda alohida ishga tushadi. Natijalar oynasida
+**"Parametr grafigi"** chiziladi: x o'qi — parametr qiymati (diapazon keng bo'lsa,
+logarifmik), y o'qi — tanlangan o'lchovning o'rtacha qiymati, har bir oqim uchun
+alohida chiziq.
+
+Masalan, `ospf_lab` → `asosiy` ssenariysida r1–r2 kabeli tezligini 1→100 Mbit/s
+gacha o'zgartirsangiz, quyidagilar ko'rinadi:
+- 5 Mbit/s dan past tezlikda UDP video kabelni to'liq egallaydi va TCP umuman o'tolmaydi;
+- tezlik oshgani sari FTP chiziqli o'sadi;
+- kechikish soniyalardan millisekundlarga tushadi.
+
+### Routing konvergensiyasi: RIP va OSPF
+
+`rip_ring` namunasi — uchburchak topologiya: r1–r2 asosiy yo'l, r1–r3–r2 zaxira yo'l.
+`uzilish` ssenariysida t=10 s da asosiy kabel uziladi:
+
+| Routing | ns-3 | Analitik |
+|---|---|---|
+| RIP (`ripd`) | ns-3 RIPv2: ~24 s trafik yo'q, zaxira yo'l keyingi periodik update'da (≤30 s) o'rganiladi | `rip_convergence_s` (standart 15 s) — eski yo'llar ishlatiladi |
+| OSPF (`ospfd`) | SPF darhol qayta hisoblanadi — uzilish yo'q | uzilish yo'q |
+
+Daemonni routerning Sozlama oynasida almashtirib (`ripd` ↔ `ospfd`), ikkala holatni
+ishga tushiring va natijalarni bitta grafikda solishtiring.
+
 ns-3 o'rnatish (Mininet shart emas, Windows'da WSL yoki Linux kerak):
 
 ```bash
@@ -115,7 +146,7 @@ va ns-3 bir xil o'tkazuvchanlikni (~5 Mbit/s video, kabel uzilganda 0) beradi,
 lekin kechikish va TCP tiklanishi farq qiladi. Bu modellarning chegarasini ko'rsatadi.
 
 **ns-3 modellashtirishdagi soddalashtirishlar:**
-- Dinamik routing (OSPF/IS-IS/BGP) o'rniga global SPF ishlatiladi; kabel uzilganda yo'llar darhol qayta hisoblanadi.
+- `ripd` yoqilgan routerlar ns-3'ning haqiqiy RIPv2 protokolida ishlaydi. OSPF, IS-IS va BGP o'rniga global SPF ishlatiladi: kabel uzilganda yo'llar darhol qayta hisoblanadi (OSPF'ning sekundlik konvergensiyasi modellashtirilmaydi).
 - Jitter parametri modellashtirilmaydi.
 - P4 switch ns-3'da oddiy L2 bridge, SDN router esa oddiy L3 router sifatida ishlaydi (P4 va SDN mantiqi faqat Mininet dvigatelida bajariladi).
 - TCP Cubic, MSS 1448 (Linux'ga yaqin qilib sozlangan).
@@ -143,6 +174,7 @@ Packet Tracer tomoni (haqiqiy qurilmalar, CLI, hardware). ns-3 — OPNET tomoni
 ## Namunalar (Ochish → Namunalar)
 
 - `ospf_lab`: ikki LAN, ikki FRR router, OSPF area 0. Ssenariylar: `asosiy`, `uzilish`, `tez_kabel`.
+- `rip_ring`: uch router uchburchak, RIPv2. `uzilish` ssenariysi — konvergensiya tahlili.
 - `p4_l2_lab`: uchta host, P4 L2 switch, `dmac` jadvali.
 - `sdn_router_lab`: SDN switch + SDN router (`l3_router` ilovasi).
 
@@ -181,4 +213,4 @@ token majburiy. Token URL'ini begonalarga bermang.
 - Real driver Ubuntu'da Mininet 2.3, OVS 2.17+, FRR 8+ va p4lang paketlari bilan ishlash uchun yozilgan. Bu repo'da u faqat statik tekshirilgan (CI'da Mininet yo'q). Birinchi ishga tushirishda xato chiqsa, **Hodisalar** panelidagi logni yuboring.
 - Router qurilmasini tarmoq ishlayotganda qayta nomlab bo'lmaydi.
 - Mininet dvigateli (`engines/emulation.py`) faqat statik tekshirilgan — birinchi real ishga tushirishda xato chiqishi mumkin.
-- Rejada: parametrik tadqiqot (bir parametrni diapazonda o'zgartirib, avtomatik ishga tushirish), ns-3'da OSPF/RIP modellari va simsiz (Wi-Fi/LTE) qurilmalar, ns-3'da kabel yuklamasi statistikasi, VLAN/trunk, pcap yuklab olish.
+- Rejada: ns-3'da simsiz (Wi-Fi/LTE) qurilmalar, bir nechta parametrli tadqiqot (2D), ns-3'da kabel yuklamasi statistikasi, VLAN/trunk, pcap yuklab olish.

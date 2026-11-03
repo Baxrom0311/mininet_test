@@ -152,7 +152,53 @@
       h('div', { class: 'isec' }, [h('h4', { text: 'Ishga tushirish' }), h('div', { style: { padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' } }, [
         h('div', { class: 'row wrap' }, [engSel, runBtn, prog, h('button', { class: 'btn ghost sm', text: 'Natijalar', onclick: () => NL.reswin.open() })]),
         engHint, runLog])]));
-    return { dispose: unsub };
+
+    // --- parametrik tadqiqot: bitta parametr, bir nechta qiymat -> har biri alohida ishga tushirish
+    const PARAM_DEFAULTS = { bw: '1,2,5,10,20,50,100', delay: '1,5,10,20,50,100', loss: '0,0.5,1,2,5,10',
+      queue: '10,50,100,500,1000', rate: '1Mbps,2Mbps,5Mbps,10Mbps,20Mbps', size: '200,500,1000,1400' };
+    const FIELD_LABEL = { bw: 'tezlik (Mbit/s)', delay: 'kechikish (ms)', loss: 'yo\'qotish (%)', queue: 'navbat (paket)', rate: 'tezlik', size: 'paket (B)' };
+    const opts = [];
+    Object.entries(S.project.links).forEach(([lid, l]) => ['bw', 'delay', 'loss', 'queue'].forEach(f =>
+      opts.push([`link|${lid}|${f}`, `kabel ${lid} (${l.a.dev}↔${l.b.dev}) · ${FIELD_LABEL[f]}`])));
+    sc.apps.forEach(a => (a.type === 'tcp' ? ['rate'] : a.type === 'udp' ? ['rate', 'size'] : []).forEach(f =>
+      opts.push([`app|${a.id}|${f}`, `ilova ${a.id} · ${FIELD_LABEL[f]}`])));
+    const pSel = F().sel(opts, NL.storage.get('netlab.studyParam', opts[0] ? opts[0][0] : ''));
+    pSel.style.width = '330px';
+    const vals = F().inp('', 'qiymatlar, vergul bilan');
+    const setDefault = () => { const f = (pSel.value || '').split('|')[2]; vals.value = PARAM_DEFAULTS[f] || ''; };
+    setDefault();
+    pSel.addEventListener('change', () => { NL.storage.set('netlab.studyParam', pSel.value); setDefault(); });
+    const stBar = h('i'), stProg = h('div', { class: 'bar', style: { flex: '1', minWidth: '120px' } }, stBar);
+    const stInfo = h('span', { class: 'note' });
+    const stBtn = h('button', { class: 'btn neon sm', text: '▶ Tadqiqotni boshlash', onclick: startStudy });
+    let study = null;
+    const unsub2 = NL.on('ev:study', (ev) => {
+      if (!study || ev.study_id !== study.id) return;
+      if (ev.done) { stBtn.disabled = false; stBar.style.width = '100%'; stInfo.textContent = `tayyor: ${ev.total} ta ishga tushirish`;
+        NL.toast('Parametrik tadqiqot tayyor', 'ok'); NL.reswin.openStudy(study.id); study = null; return; }
+      study.i = ev.index; stInfo.textContent = `${ev.index + 1}/${ev.total}: ${ev.value}`;
+      stBar.style.width = (ev.index / ev.total * 100) + '%';
+    });
+    const unsub3 = NL.on('ev:run', (ev) => {
+      if (study && ev.progress != null && ev.run_id.startsWith(study.id)) stBar.style.width = ((study.i + ev.progress) / study.n * 100) + '%';
+    });
+    async function startStudy() {
+      dur.dispatchEvent(new Event('change'));
+      const [kind, target, field] = (pSel.value || '').split('|');
+      const values = vals.value.split(',').map(x => x.trim()).filter(Boolean).map(x => (/^[\d.]+$/.test(x) ? parseFloat(x) : x));
+      if (!kind) { NL.toast('Parametr tanlang', 'warn'); return; }
+      try {
+        const r = await NL.api.post('/api/studies', { project: S.project, scenario: name, engine: engSel.value,
+          param: kind === 'link' ? { kind, link: target, field } : { kind, app: target, field }, values });
+        study = { id: r.study_id, n: r.runs, i: 0 }; stBtn.disabled = true; stBar.style.width = '0'; stInfo.textContent = `0/${r.runs}`;
+      } catch (e) { NL.toast(e.message, 'error'); }
+    }
+    body.append(h('div', { class: 'isec' }, [h('h4', { text: 'Parametrik tadqiqot (bir parametr — ko\'p qiymat)' }),
+      h('div', { style: { padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' } }, [
+        h('div', { class: 'row wrap' }, [pSel, h('div', { style: { flex: '1', minWidth: '180px' } }, vals)]),
+        h('div', { class: 'row wrap' }, [stBtn, stProg, stInfo]),
+        h('div', { class: 'note', text: 'Har bir qiymat uchun ssenariy yuqoridagi dvigatelda alohida ishga tushiriladi; natijalar oynasida "parametr ↔ o\'lchov" grafigi chiziladi (OPNET parametric study).' })])]));
+    return { dispose() { unsub(); unsub2(); unsub3(); } };
   }
 
   // ======================= natijalar oynasi =======================
@@ -166,9 +212,13 @@
   ];
 
   NL.reswin = {
+    openStudy(studyId) {
+      if (NL.win.has('results')) NL.win.close('results');
+      this.open({ study: studyId });
+    },
     open(runId) {
       const id = 'results';
-      if (NL.win.has(id)) { NL.win.focus(id); NL.emit('results:select', runId); return; }
+      if (NL.win.has(id)) { NL.win.focus(id); if (typeof runId === 'string') NL.emit('results:select', runId); return; }
       NL.win.open(id, { title: 'Natijalar — ' + S.project.name, sub: 'ssenariy ishga tushirishlari: grafiklar, solishtirish', w: 1040, h: 680,
         icon: NL.ui.ico('<path d="M4 19V5M4 19h16M7 14l3-3 3 2 5-6"/>'),
         render(body) { return renderResults(body, runId); } });
@@ -181,6 +231,8 @@
     const main = h('div', { class: 'res-main' });
     body.appendChild(h('div', { class: 'res-wrap' }, [list, main]));
     const cache = {};
+    let studyView = (initial && initial.study) || null;
+    if (initial && initial.study) initial = null;
     let runs = [], selected = new Set(initial ? [initial] : []), metric = NL.storage.get('netlab.metric', 'thr_bps'), flowSel = '__all__', linkSel = '';
 
     async function loadList() {
@@ -193,11 +245,21 @@
       list.innerHTML = '';
       list.appendChild(h('div', { class: 'sec-title', text: 'Ishga tushirishlar' }));
       if (!runs.length) list.appendChild(h('div', { class: 'res-empty', text: 'Hali yo\'q — Ssenariy oynasida "Ishga tushirish".' }));
+      const seenStudy = new Set();
       runs.forEach(r => {
+        if (r.study_id && !seenStudy.has(r.study_id)) {
+          seenStudy.add(r.study_id);
+          const members = runs.filter(x => x.study_id === r.study_id);
+          const running = members.some(x => x.status === 'running');
+          list.appendChild(h('div', { class: 'res-study' + (studyView === r.study_id ? ' on' : '') }, [
+            h('div', { class: 'n', text: 'Tadqiqot: ' + (r.scenario_name || '') }),
+            h('div', { class: 'd', text: `${members.length} qiymat · ${(r.label || '').split('=')[0]}${running ? ' · ishlayapti…' : ''}` }),
+            h('button', { class: 'btn neon sm', text: 'Parametr grafigi', onclick: () => { studyView = r.study_id; drawList(); draw(); } })]));
+        }
         const cb = h('input', { type: 'checkbox' }); cb.checked = selected.has(r.run_id); cb.disabled = r.status === 'running';
-        cb.addEventListener('change', () => { if (cb.checked) selected.add(r.run_id); else selected.delete(r.run_id); draw(); });
+        cb.addEventListener('change', () => { studyView = null; if (cb.checked) selected.add(r.run_id); else selected.delete(r.run_id); drawList(); draw(); });
         const eng = { analytic: 'analitik', ns3: 'ns-3', mininet: 'mininet' }[r.engine] || r.engine;
-        list.appendChild(h('label', { class: 'res-run' + (r.status === 'error' ? ' err' : '') }, [cb,
+        list.appendChild(h('label', { class: 'res-run' + (r.status === 'error' ? ' err' : '') + (r.study_id ? ' sub' : '') }, [cb,
           h('div', { style: { minWidth: 0, flex: 1 } }, [
             h('div', { class: 'n', text: r.label || r.scenario_name }),
             h('div', { class: 'd', text: `${eng} · ${r.status === 'running' ? Math.round((r.progress || 0) * 100) + '%…' : new Date(r.created * 1000).toLocaleTimeString()}${r.wall_s != null ? ' · ' + r.wall_s + 's' : ''}` })]),
@@ -212,8 +274,52 @@
       return cache[id];
     }
     let drawGen = 0;
+    const paramNum = (v) => { const m = String(v).match(/[\d.]+/); return m ? parseFloat(m[0]) : NaN; };
+    async function drawStudy(gen) {
+      const members = runs.filter(r => r.study_id === studyView && r.status === 'done');
+      let data;
+      try { data = await Promise.all(members.map(r => getRun(r.run_id))); } catch (e) { return; }
+      if (gen !== drawGen) return;
+      main.innerHTML = '';
+      data.sort((a, b) => (a.study_index || 0) - (b.study_index || 0));
+      const P = (data[0] || {}).study_param || {};
+      const seg = h('div', { class: 'segment' });
+      METRICS.forEach(m => seg.appendChild(h('button', { class: m.id === metric ? 'active' : '', text: m.label, onclick: () => { metric = m.id; NL.storage.set('netlab.metric', metric); draw(); } })));
+      const M = METRICS.find(m => m.id === metric) || METRICS[0];
+      main.append(h('div', { class: 'row wrap', style: { gap: '10px', padding: '12px 14px 0' } }, [seg, h('div', { class: 'top-spacer' }),
+        h('button', { class: 'btn ghost sm', text: '← vaqt bo\'yicha', onclick: () => { studyView = null; drawList(); draw(); } }),
+        h('button', { class: 'btn ghost sm', text: 'CSV', onclick: () => exportCsv(data) })]));
+      if (!data.length) { main.appendChild(h('div', { class: 'res-empty', style: { padding: '30px' }, text: 'Tadqiqot natijalari hali tayyor emas…' })); return; }
+      const xs = data.map(r => paramNum(r.study_value));
+      const flowIds = [...new Set(data.flatMap(r => Object.keys(r.flows || {})))];
+      let series;
+      if (M.link) {
+        const lid = P.kind === 'link' ? P.link : Object.keys(data[0].links || {})[0];
+        series = [{ name: `kabel ${lid} o'rtacha yuklama`, color: seriesColor(0), points: data.map((r, i) => {
+          const pts = ((r.links || {})[lid] || []); return { x: xs[i], y: pts.length ? pts.reduce((a, p) => a + p.util, 0) / pts.length : null };
+        }) }];
+      } else {
+        series = flowIds.slice(0, SERIES_N).map((fid, k) => ({ name: (data[0].flows[fid] || {}).label || fid, color: seriesColor(k),
+          points: data.map((r, i) => ({ x: xs[i], y: ((r.flows[fid] || {}).summary || {})[M.sum] ?? null })) }));
+      }
+      const fieldName = { bw: 'kabel tezligi, Mbit/s', delay: 'kechikish, ms', loss: 'loss, %', queue: 'navbat, paket', rate: 'ilova tezligi', size: 'paket, B' }[P.field] || P.field;
+      const box = h('div', { class: 'chart-card' });
+      main.append(box);
+      NL.lineChart(box, { series, fmt: M.fmt, markers: true, xTicks: xs, xFmt: (x) => String(x),
+        title: `${M.label} (o'rtacha) ↔ ${P.label || ''} — ${fieldName}`, xMax: Math.max(...xs) });
+      if (xs.length > 2 && Math.min(...xs) > 0 && Math.max(...xs) / Math.min(...xs) >= 20) box.appendChild(h('div', { class: 'note', style: { padding: '0 4px 4px' }, text: 'x o\'qi logarifmik' }));
+      const rows = [];
+      data.forEach(r => Object.values(r.flows || {}).forEach(f => {
+        const s = f.summary || {};
+        rows.push([String(r.study_value), f.label || f.id, NL.fmtBps(s.avg_thr_bps), fmtMs(s.avg_delay_ms), fmtMs(s.avg_rtt_ms), fmtMs(s.avg_jitter_ms), fmtPct(s.loss_pct)]);
+      }));
+      main.append(h('div', { class: 'isec', style: { margin: '0 14px 14px' } }, [h('h4', { text: `Xulosa — ${P.label} bo'yicha (${({ analytic: 'analitik', ns3: 'ns-3', mininet: 'mininet' }[data[0].engine] || data[0].engine)})` }),
+        h('table', {}, [h('tr', {}, [P.label || 'qiymat', 'Oqim', 'O\'tkazuvchanlik', 'Kechikish', 'RTT', 'Jitter', 'Yo\'qotish'].map(x => h('th', { text: x }))),
+          ...rows.map(r => h('tr', {}, r.map(c => h('td', { text: c }))))])]));
+    }
     async function draw() {
       const gen = ++drawGen;      // asinxron chizishlar aralashmasin — faqat oxirgisi qoladi
+      if (studyView) return drawStudy(gen);
       const ids = [...selected].filter(Boolean);
       if (!ids.length) { main.innerHTML = ''; main.appendChild(h('div', { class: 'res-empty', style: { padding: '30px' }, text: 'Chapdan bir yoki bir nechta natijani tanlang.' })); return; }
       let data;
@@ -282,7 +388,7 @@
       const a = h('a', { href: URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' })), download: `${S.project.name}_natijalar.csv` });
       document.body.appendChild(a); a.click(); a.remove();
     }
-    const u1 = NL.on('ev:run', (ev) => { if (ev.done || ev.progress === 0) { if (ev.done && ev.status === 'done') selected.add(ev.run_id); loadList(); } });
+    const u1 = NL.on('ev:run', (ev) => { if (ev.done || ev.progress === 0) { if (ev.done && ev.status === 'done' && !studyView && !ev.run_id.includes('-study-')) selected.add(ev.run_id); loadList(); } });
     const u2 = NL.on('results:select', (rid) => { if (rid) { selected = new Set([rid]); loadList(); } });
     loadList();
     return { dispose() { u1(); u2(); } };
@@ -304,7 +410,12 @@
     const xMax = Math.max(opt.xMax || 0, ...xs, 1);
     let yMax = Math.max(...ys, 0);
     yMax = yMax <= 0 ? 1 : niceMax(yMax);
-    const X = (x) => m.l + (x / xMax) * (W - m.l - m.r), Y = (y) => H - m.b - (y / yMax) * (H - m.t - m.b);
+    // parametr qiymatlari 1..100 kabi keng diapazonda bo'lsa — logarifmik x o'qi
+    const tv = (opt.xTicks || []).filter(v => isFinite(v));
+    const logX = tv.length > 2 && Math.min(...tv) > 0 && Math.max(...tv) / Math.min(...tv) >= 20;
+    const xLo = logX ? Math.log10(Math.min(...tv)) : 0, xHi = logX ? Math.log10(Math.max(...tv)) : xMax;
+    const X = (x) => m.l + ((logX ? Math.log10(x) : x) - xLo) / ((xHi - xLo) || 1) * (W - m.l - m.r);
+    const Y = (y) => H - m.b - (y / yMax) * (H - m.t - m.b);
     const svg = NL.s('svg', { viewBox: `0 0 ${W} ${H}`, class: 'chart-svg', width: '100%', height: H, role: 'img', 'aria-label': opt.title });
     // grid + o'qlar
     for (let i = 0; i <= 4; i++) {
@@ -312,10 +423,15 @@
       svg.appendChild(NL.s('line', { x1: m.l, x2: W - m.r, y1: y, y2: y, class: 'grid' + (i === 0 ? ' base' : '') }));
       const t = NL.s('text', { x: m.l - 8, y: y + 4, class: 'ax', 'text-anchor': 'end' }); t.textContent = opt.fmt(v); svg.appendChild(t);
     }
-    const xStep = niceStep(xMax / 6);
-    for (let x = 0; x <= xMax + 1e-9; x += xStep) {
-      const t = NL.s('text', { x: X(x), y: H - 8, class: 'ax', 'text-anchor': 'middle' }); t.textContent = x + 's'; svg.appendChild(t);
-    }
+    const xFmt = opt.xFmt || ((x) => x + 's');
+    let ticks = opt.xTicks ? [...new Set(opt.xTicks)].filter(isFinite) : [];
+    if (!ticks.length) { const xStep = niceStep(xMax / 6); for (let x = 0; x <= xMax + 1e-9; x += xStep) ticks.push(x); }
+    let lastX = -1e9;
+    ticks.sort((a, b) => a - b).forEach(x => {
+      if (X(x) - lastX < 26) return;      // yorliqlar ustma-ust tushmasin
+      lastX = X(x);
+      const t = NL.s('text', { x: X(x), y: H - 8, class: 'ax', 'text-anchor': 'middle' }); t.textContent = xFmt(x); svg.appendChild(t);
+    });
     // hodisalar
     (opt.events || []).forEach(e => {
       const x = X(e.t);
@@ -332,6 +448,7 @@
         d += (pen ? 'L' : 'M') + X(p.x).toFixed(1) + ',' + Y(p.y).toFixed(1); pen = true;
       });
       svg.appendChild(NL.s('path', { d, class: 'ln', stroke: s.color }));
+      if (opt.markers) s.points.forEach(p => { if (p.y != null && isFinite(p.y)) svg.appendChild(NL.s('circle', { cx: X(p.x), cy: Y(p.y), r: 4, fill: s.color, class: 'mk' })); });
     });
     if (series.length <= 4) {       // to'g'ridan-to'g'ri yorliqlar (oxirgi nuqtada), to'qnashmasin
       const labels = series.map(s => {
@@ -359,11 +476,10 @@
     hit.addEventListener('mousemove', (ev) => {
       const r = svg.getBoundingClientRect();
       const px = (ev.clientX - r.left) * (W / r.width);
-      const xv = (px - m.l) / (W - m.l - m.r) * xMax;
       let near = null;
-      series.forEach(s => s.points.forEach(p => { if (near == null || Math.abs(p.x - xv) < Math.abs(near - xv)) near = p.x; }));
+      series.forEach(s => s.points.forEach(p => { if (near == null || Math.abs(X(p.x) - px) < Math.abs(X(near) - px)) near = p.x; }));
       cross.setAttribute('x1', X(near)); cross.setAttribute('x2', X(near)); cross.style.display = '';
-      const rows = [h('div', { class: 'tt', text: `t = ${near}s` })];
+      const rows = [h('div', { class: 'tt', text: opt.xTicks ? `qiymat = ${xFmt(near)}` : `t = ${near}s` })];
       series.forEach((s, i) => {
         const p = s.points.find(q => q.x === near);
         if (p && p.y != null) { dots[i].setAttribute('cx', X(p.x)); dots[i].setAttribute('cy', Y(p.y)); dots[i].style.display = ''; }

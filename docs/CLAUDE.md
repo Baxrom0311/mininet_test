@@ -211,6 +211,13 @@ Packet-Tracer/OPNET-style UI where the user builds a topology and runs it live o
   links in ns-3 use SimpleNetDevice/SimpleChannel, not CSMA: CSMA is half-duplex and holds the channel
   for the propagation delay, capping throughput at ms-scale delays. ns-3 TCP is set to Linux-like
   defaults (Cubic, MSS 1448, 4/6 MB buffers) so engines are comparable.
+- Parametric studies (`POST /api/studies`, `RunManager.start_study`): one param (link bw/delay/loss/queue
+  or app rate/size) × N values, run sequentially; each run stores `study_id/study_param/study_value`.
+  Link params are baked into the project copy (analytic/ns-3) or injected as a t=0 `link_params` event
+  (mininet, live network). ns-3: routers with `ripd` (and no ospfd/isisd) get ns-3 RipHelper; others use
+  global SPF. Don't set `IpForward=false` on single-homed hosts — ns-3.44 global routing segfaults on a
+  P2P-attached non-forwarding host. Analytic engine models RIP convergence as stale pre-failure routes
+  for `rip_convergence_s` (default 15).
 - The real driver could not be executed in CI/this repo's sandbox (no Mininet/OVS/root netns); it was
   checked against Mininet 2.3 sources only. Treat first real runs as integration testing.
 

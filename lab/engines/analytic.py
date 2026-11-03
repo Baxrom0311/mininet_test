@@ -25,6 +25,19 @@ from lab.model import normalize_link_params, parse_rate
 MSS_BITS = 1448 * 8
 
 
+class _StaleNet(Net):
+    """Konvergensiya oynasi: RIP routerlar uzilishdan OLDINGI routing jadvalini ishlatadi
+    (forwarding esa joriy kabel holati bo'yicha — uzilgan kabelga yuborilgan paket yo'qoladi)."""
+
+    def __init__(self, project, old_project, rip_set):
+        super().__init__(project)
+        self._old = Net(old_project)
+        self._rip = rip_set
+
+    def routes(self, dev):
+        return self._old.routes(dev) if dev in self._rip else super().routes(dev)
+
+
 def run(project, sc, progress=lambda f: None, log=lambda m: None):
     t_wall = time.time()
     proj = copy.deepcopy(project)
@@ -38,12 +51,22 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     series = {a["id"]: [] for a in apps}
     link_series = {lid: [] for lid in proj["links"]}
     applied, ev_i = [], 0
+    # RIP konvergensiyasi: kabel uzilgandan keyin RIP routerlar eski yo'llarni rip_conv s
+    # davomida ishlatadi (keyingi periodik update'gacha; 30s davr -> kutilgan ~15s).
+    rip_conv = float(sc.get("rip_convergence_s", 15))
+    rip_set = {n for n, d in proj["devices"].items() if d["type"] == "router"
+               and "ripd" in ((d.get("config") or {}).get("daemons") or [])
+               and not ({"ospfd", "isisd", "ospf6d"} & set((d.get("config") or {}).get("daemons") or []))}
+    stale = None   # (eski loyiha nusxasi, qachongacha)
     steps = int(math.ceil(duration))
     for k in range(steps):
         t0, t1 = float(k), float(min(k + 1, duration))
         while ev_i < len(events) and float(events[ev_i].get("t", 0)) <= t0 + 1e-9:
             e = events[ev_i]; ev_i += 1
             l = proj["links"].get(e.get("link"))
+            if l and e["action"] == "link_down" and rip_set and rip_conv > 0:
+                stale = (copy.deepcopy(proj), t0 + rip_conv)
+                log(f"RIP: {rip_conv:.0f}s konvergensiya (eski yo'llar)")
             if l:
                 if e["action"] == "link_down":
                     l["up"] = False
@@ -53,7 +76,10 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     l["params"] = normalize_link_params({**(l.get("params") or {}), **(e.get("params") or {})})
             applied.append({"t": t0, **e})
             log(f"t={t0:.0f}s: {e['action']} {e.get('link')}")
-        n = Net(proj)
+        if stale and t0 < stale[1]:
+            n = _StaleNet(proj, stale[0], rip_set)
+        else:
+            n = Net(proj)
         cap = {}
         for lid, l in proj["links"].items():
             bw = float((l.get("params") or {}).get("bw", 100)) * 1e6
@@ -185,4 +211,5 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     return {"engine": "analytic", "engine_label": "Analitik (oqim modeli)", "duration": duration,
             "flows": flows_out, "links": link_series, "events": applied, "wall_s": round(time.time() - t_wall, 3),
             "notes": ["oqim darajasidagi taxmin: UDP qat'iy, TCP max-min adolat + Mathis, navbat M/M/1",
-                      "dinamik routing: demo modeli (dinamik daemonli routerlar o'zaro barcha subnetlarni biladi)"]}
+                      "dinamik routing: demo modeli (dinamik daemonli routerlar o'zaro barcha subnetlarni biladi)",
+                      "RIP: kabel uzilgandan keyin rip_convergence_s (standart 15s) davomida eski yo'llar"]}

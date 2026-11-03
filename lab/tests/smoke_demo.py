@@ -86,6 +86,37 @@ with TestClient(create_app("demo")) as c:
         check(during and max(during) < 1e5, f"{eng}: kabel uzilganda video to'xtaydi")
         check(after and min(after) > 4e6, f"{eng}: tiklangandan keyin video qaytadi")
         c.delete(f"/api/runs/ospf_lab/{rid}")
+    # ---- parametrik tadqiqot (analitik): kabel tezligi oshsa FTP o'tkazuvchanligi oshadi ----
+    st = c.post("/api/studies", json={"project": p, "scenario": "asosiy", "engine": "analytic",
+                                      "param": {"kind": "link", "link": "l4", "field": "bw"},
+                                      "values": [10, 50, 100]}).json()
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        mem = [r for r in c.get("/api/runs/ospf_lab").json()["runs"] if r.get("study_id") == st["study_id"]]
+        if len(mem) == 3 and all(r["status"] == "done" for r in mem):
+            break
+        time.sleep(0.3)
+    mem.sort(key=lambda r: r["study_index"])
+    ftp = [c.get(f"/api/runs/ospf_lab/{r['run_id']}").json()["flows"]["ftp"]["summary"]["avg_thr_bps"] for r in mem]
+    check(len(ftp) == 3 and ftp[0] < ftp[1] < ftp[2], f"tadqiqot: l4.bw 10/50/100 -> ftp o'sadi {[round(x / 1e6, 1) for x in ftp]}")
+    for r in mem:
+        c.delete(f"/api/runs/ospf_lab/{r['run_id']}")
+
+    # ---- RIP konvergensiyasi: asosiy kabel uzilganda trafik bir muddat to'xtaydi, keyin zaxira yo'l ----
+    rp = c.get("/api/projects/rip_ring?example=true").json()
+    for eng in want:
+        rid = c.post("/api/runs", json={"project": rp, "scenario": "uzilish", "engine": eng}).json()["run_id"]
+        t0 = time.time()
+        while time.time() - t0 < 240:
+            if not any(r.get("status") == "running" for r in c.get("/api/runs/rip_ring").json()["runs"]):
+                break
+            time.sleep(0.5)
+        r = c.get(f"/api/runs/rip_ring/{rid}").json()
+        v = {int(x["t"]): x["thr_bps"] for x in r["flows"]["video"]["series"]}
+        gap = sum(1 for t in range(11, 50) if v.get(t, 0) < 1e5)
+        check(3 <= gap <= 32 and v.get(55, 0) > 3e6, f"{eng}: RIP uzilish {gap}s, keyin zaxira yo'l (r3) orqali tiklanadi")
+        c.delete(f"/api/runs/rip_ring/{rid}")
+
     if "ns3" not in want:
         print("  --   ns-3 o'rnatilmagan (pip install ns3) — ns-3 testi o'tkazib yuborildi")
 

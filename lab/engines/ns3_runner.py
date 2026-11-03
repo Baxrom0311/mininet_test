@@ -77,10 +77,27 @@ def main(inp_path, out_path):
     nodes = {}
     for name in sorted(devs, key=lambda n: devs[n]["id"]):
         nodes[name] = ns.CreateObject[ns.Node]()
+    # Routing: ripd yoqilgan (va ospfd/isisd yoqilmagan) routerlar — ns-3 RIPv2 (haqiqiy
+    # protokol: periodik/triggered update, split horizon, timeout). Qolgan L3 qurilmalar —
+    # static + Ipv4GlobalRouting (SPF; OSPF/IS-IS ekvivalenti, konvergensiya ~0s).
+    def uses_rip(d):
+        dm = set((d.get("config") or {}).get("daemons") or [])
+        return d["type"] == "router" and "ripd" in dm and not (dm & {"ospfd", "isisd", "ospf6d"})
+
+    rip_nodes = [n for n, d in devs.items() if uses_rip(d)]
     stack = ns.InternetStackHelper()
+    rip_stack = None
+    if rip_nodes:
+        rip = ns.RipHelper()
+        lst = ns.Ipv4ListRoutingHelper()
+        lst.Add(ns.Ipv4StaticRoutingHelper(), 0)
+        lst.Add(rip, -10)
+        rip_stack = ns.InternetStackHelper()
+        rip_stack.SetRoutingHelper(lst)
+        emit(log=f"RIPv2 (ns-3): {', '.join(sorted(rip_nodes))}")
     for name, d in devs.items():
         if d["type"] in L3:
-            stack.Install(nodes[name])
+            (rip_stack if name in rip_nodes else stack).Install(nodes[name])
 
     # Eslatma: ns-3'da mavjud bo'lmagan atributga SetAttribute — C++ abort (Python
     # istisnosi emas). Noaniq atributlar uchun doim SetAttributeFailSafe.
@@ -134,12 +151,14 @@ def main(inp_path, out_path):
     if jitter_warn:
         emit(log="eslatma: jitter ns-3 kanal modelida yo'q — e'tiborsiz qoldirildi")
 
+    emit(log=f"kabellar: {len(link_objs)}")
     bridge = ns.BridgeHelper()
     for n, cont in sw_ports.items():
         if cont.GetN():
             bridge.Install(nodes[n], cont)
 
     # IP manzillar
+    emit(log="IP manzillar")
     iface = {}        # (dev, port) -> (ipv4, idx, IPv4Interface)
     for (dname, port), dv in port_dev.items():
         d = devs[dname]
@@ -153,8 +172,11 @@ def main(inp_path, out_path):
             ipv4.AddAddress(idx, ns.Ipv4InterfaceAddress(ns.Ipv4Address(str(ii.ip)), ns.Ipv4Mask(str(ii.netmask))))
             iface[(dname, port)] = (ipv4, idx, ii)
         ipv4.SetUp(idx)
+    # Hostlar tranzit bo'lmasin. Lekin ns-3 Ipv4GlobalRouting P2P bilan ulangan,
+    # IpForward=false bo'lgan hostda segfault beradi (ns-3.44). Bitta interfeysli host
+    # baribir tranzit bo'la olmaydi — faqat ko'p interfeyslilarda o'chiramiz.
     for name, d in devs.items():
-        if d["type"] in ("host", "server"):
+        if d["type"] in ("host", "server") and sum(1 for (dn, _p) in iface if dn == name) > 1:
             nodes[name].GetObject[ns.Ipv4]().SetAttribute("IpForward", ns.BooleanValue(False))
 
     # statik marshrutlar + gateway (Ipv4StaticRouting ustuvorligi global'dan yuqori)
@@ -186,7 +208,9 @@ def main(inp_path, out_path):
                 continue
             sr.AddNetworkRouteTo(ns.Ipv4Address(str(net.network_address)), ns.Ipv4Mask(str(net.netmask)),
                                  ns.Ipv4Address(str(via)), idx)
+    emit(log="routing jadvallari (global SPF)")
     ns.Ipv4GlobalRoutingHelper.PopulateRoutingTables()
+    emit(log="ilovalar")
 
     # ilovalar
     def ip_of(dname, explicit=None):
@@ -351,7 +375,7 @@ def main(inp_path, out_path):
     out = {"engine": "ns3", "engine_label": "ns-3 (diskret-hodisali simulyatsiya)",
            "duration": duration, "flows": flows, "events": applied,
            "wall_s": round(time.time() - t_wall, 2),
-           "notes": ["dinamik routing: Ipv4GlobalRouting (SPF) — OSPF/IS-IS ekvivalenti",
+           "notes": ["dinamik routing: ripd → ns-3 RIPv2 (haqiqiy konvergensiya); ospfd/isisd va boshqalar → Ipv4GlobalRouting (SPF, darhol)",
                      "TCP: Cubic, MSS 1448, bufer 4/6 MB (Linux'ga yaqin)",
                      "jitter parametri modellashtirilmaydi", "P4/SDN mantiqi: switch L2 bridge, SDN router — L3 router sifatida"]}
     with open(out_path, "w") as f:
