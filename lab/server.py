@@ -20,7 +20,9 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from lab.drivers.base import DriverError, EventBus, p4_compile_standalone, p4_pipeline_from_json
-from lab.model import DEVICE_TYPES, FRR_DAEMONS, PROJECT_VERSION, empty_project, validate_project
+from lab.engines.manager import RunManager
+from lab.model import (APP_TYPES, DEVICE_TYPES, EVENT_ACTIONS, FRR_DAEMONS, PROJECT_VERSION, empty_project,
+                       validate_project, validate_scenario)
 
 LAB_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(LAB_DIR)
@@ -55,6 +57,8 @@ def create_app(driver_name="demo", token=None):
     app.state.driver = driver
     app.state.bus = bus
     app.state.token = token
+    runs = RunManager(bus, driver)
+    app.state.runs = runs
     os.makedirs(PROJECTS_DIR, exist_ok=True)
 
     @app.on_event("startup")
@@ -247,6 +251,39 @@ def create_app(driver_name="demo", token=None):
     @app.get("/api/net/frr/{name}/running-config")
     def frr_running(name: str):
         return {"config": driver.frr_running_config(name)}
+
+    # ───────────── ssenariylar va natijalar (OPNET: DES -> Results -> Compare) ─────────────
+    @app.get("/api/engines")
+    def engines():
+        return {"engines": runs.engines(), "app_types": APP_TYPES, "event_actions": EVENT_ACTIONS}
+
+    @app.post("/api/scenario/validate")
+    def scenario_validate(body: dict = Body(...)):
+        return {"errors": validate_scenario(body.get("project") or {}, body.get("scenario") or {})}
+
+    @app.post("/api/runs")
+    def run_start(body: dict = Body(...)):
+        return runs.start(body.get("project") or {}, body.get("scenario"), body.get("engine", "analytic"))
+
+    @app.get("/api/runs/{project}")
+    def run_list(project: str):
+        return {"runs": runs.list(project)}
+
+    @app.get("/api/runs/{project}/{run_id}")
+    def run_get(project: str, run_id: str):
+        try:
+            return runs.get(project, run_id)
+        except FileNotFoundError:
+            raise HTTPException(404, "natija topilmadi")
+
+    @app.patch("/api/runs/{project}/{run_id}")
+    def run_label(project: str, run_id: str, body: dict = Body(...)):
+        return runs.update_label(project, run_id, body.get("label", ""))
+
+    @app.delete("/api/runs/{project}/{run_id}")
+    def run_delete(project: str, run_id: str):
+        runs.delete(project, run_id)
+        return {"ok": True}
 
     # ───────────── WebSocket: hodisalar ─────────────
     @app.websocket("/ws/events")

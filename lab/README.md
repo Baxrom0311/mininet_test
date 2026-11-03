@@ -83,9 +83,66 @@ trace logi.
 3. Kontroller `NETLAB_CONFIG` faylidan har bir qurilmaning portlari, IP'lari va statik marshrutlarini o'qiydi. UI'da biror narsa o'zgarsa, fayl avtomatik yangilanadi.
 4. Kodni o'zgartirib **Saqlash + qayta ishga tushirish** tugmasini bosing — switchlar avtomatik qayta ulanadi.
 
+## Ssenariylar, dvigatellar va natijalar (OPNET ish oqimi)
+
+OPNET'dagi asosiy ish oqimi **Ssenariy → Simulyatsiya → Natijalar → Solishtirish**.
+NetLab'da ham xuddi shunday:
+
+1. Chap panel → **Ssenariylar → +**. Trafik ilovalarini qo'shing:
+   - **UDP** — qat'iy tezlik (video, VoIP);
+   - **TCP** — bor sig'imni oladi (fayl uzatish);
+   - **Ping** — RTT o'lchovi.
+
+   **Vaqtli hodisalar** ham qo'shish mumkin: kabel uzilishi yoki tiklanishi, kabel parametrlarining o'zgarishi.
+2. **Dvigatel**ni tanlab, **Ishga tushirish** tugmasini bosing.
+3. **Natijalar** oynasida o'tkazuvchanlik, kechikish, RTT, jitter, yo'qotish va kabel yuklamasini vaqt bo'yicha ko'rasiz. Bir nechta natijani belgilasangiz, ular bitta grafikda solishtiriladi. Xulosa jadvalini CSV qilib yuklab olish mumkin.
+
+| Dvigatel | Nima | Qachon |
+|---|---|---|
+| **Analitik** | Oqim modeli: UDP qat'iy tezlikda, TCP max-min adolat + Mathis formulasi, navbat M/M/1. ~0.1 s | Tez "nima bo'ladi?" tahlili, katta topologiyalar |
+| **ns-3** | Diskret-hodisali simulyatsiya (OPNET bilan bir xil tamoyil): paket darajasida, virtual vaqtda, deterministik (seed) | Ilmiy natija, takrorlanuvchan tajriba, real vaqtdan tez |
+| **Mininet** | Haqiqiy emulyatsiya: iperf3/ping haqiqiy Linux TCP/UDP, FRR, OVS, P4, SDN orqali o'tadi | Protokol va konfiguratsiyani "haqiqatda" tekshirish |
+
+ns-3 o'rnatish (Mininet shart emas, Windows'da WSL yoki Linux kerak):
+
+```bash
+pip install ns3
+```
+
+Bitta topologiya va bitta ssenariyni uchala dvigatelda ishga tushirib, natijalarni
+solishtirish mumkin. Masalan, `ospf_lab` → `uzilish` ssenariysida analitik model
+va ns-3 bir xil o'tkazuvchanlikni (~5 Mbit/s video, kabel uzilganda 0) beradi,
+lekin kechikish va TCP tiklanishi farq qiladi. Bu modellarning chegarasini ko'rsatadi.
+
+**ns-3 modellashtirishdagi soddalashtirishlar:**
+- Dinamik routing (OSPF/IS-IS/BGP) o'rniga global SPF ishlatiladi; kabel uzilganda yo'llar darhol qayta hisoblanadi.
+- Jitter parametri modellashtirilmaydi.
+- P4 switch ns-3'da oddiy L2 bridge, SDN router esa oddiy L3 router sifatida ishlaydi (P4 va SDN mantiqi faqat Mininet dvigatelida bajariladi).
+- TCP Cubic, MSS 1448 (Linux'ga yaqin qilib sozlangan).
+
+## Mininet va OPNET: farqi nimada
+
+OPNET (Riverbed Modeler) — **diskret-hodisali simulyator**. U vaqtni virtual
+hisoblaydi va har bir protokolning *modelini* bajaradi. Mininet esa
+**emulyator**: haqiqiy Linux yadrosi va haqiqiy dasturlar real vaqtda ishlaydi.
+
+| | OPNET / ns-3 (simulyatsiya) | Mininet (emulyatsiya) |
+|---|---|---|
+| Vaqt | virtual — real vaqtdan tez yoki sekin | real vaqt |
+| Masshtab | minglab tugun | yuzlab (host CPU chegarasi) |
+| Takrorlanuvchanlik | to'liq (seed) | yo'q (OS jadvallashtiruvchisi) |
+| Protokollar | modellar (aniqligi model sifatiga bog'liq) | haqiqiy kod (FRR, Linux TCP, OVS) |
+| Simsiz / fizik qatlam | bor | yo'q (Mininet-WiFi alohida) |
+| Konfiguratsiya / CLI | yo'q | haqiqiy (`vtysh`, `ovs-ofctl`, P4 runtime) |
+
+Xulosa: **faqat Mininet bilan OPNET'ni to'liq takrorlab bo'lmaydi.** Shuning uchun
+NetLab gibrid qilib qurilgan: bitta loyiha modeli, uchta dvigatel. Mininet —
+Packet Tracer tomoni (haqiqiy qurilmalar, CLI, hardware). ns-3 — OPNET tomoni
+(DES, masshtab, statistika, solishtirish).
+
 ## Namunalar (Ochish → Namunalar)
 
-- `ospf_lab`: ikki LAN, ikki FRR router, OSPF area 0.
+- `ospf_lab`: ikki LAN, ikki FRR router, OSPF area 0. Ssenariylar: `asosiy`, `uzilish`, `tez_kabel`.
 - `p4_l2_lab`: uchta host, P4 L2 switch, `dmac` jadvali.
 - `sdn_router_lab`: SDN switch + SDN router (`l3_router` ilovasi).
 
@@ -110,6 +167,10 @@ token majburiy. Token URL'ini begonalarga bermang.
 | `model.py` | Loyiha modeli, validatsiya, port/MAC qoidalari, kontroller konfiguratsiyasi |
 | `drivers/mininet_driver.py` | Real driver: jonli qo'shish/o'chirish, FRR, BMv2, os-ken, tcpdump, `/proc/<pid>/net/dev` statistikasi |
 | `drivers/demo_driver.py` | Demo driver (Mininet'siz) |
+| `engines/analytic.py` | Analitik (oqim) dvigateli |
+| `engines/ns3_runner.py` | Loyiha → ns-3 tarjimasi, alohida jarayonda; FlowMonitor har 1 s da o'lchanadi |
+| `engines/emulation.py` | Mininet dvigateli: iperf3/ping + hodisalar ishlab turgan tarmoqda |
+| `engines/manager.py` | Ishga tushirishlar, progress hodisalari, `results/<loyiha>/` ga saqlash |
 | `templates/p4/`, `templates/sdn/` | P4 va SDN shablonlari |
 | `examples/` | Namunaviy loyihalar |
 | `projects/` | Sizning loyihalaringiz (gitignore) |
@@ -119,4 +180,5 @@ token majburiy. Token URL'ini begonalarga bermang.
 
 - Real driver Ubuntu'da Mininet 2.3, OVS 2.17+, FRR 8+ va p4lang paketlari bilan ishlash uchun yozilgan. Bu repo'da u faqat statik tekshirilgan (CI'da Mininet yo'q). Birinchi ishga tushirishda xato chiqsa, **Hodisalar** panelidagi logni yuboring.
 - Router qurilmasini tarmoq ishlayotganda qayta nomlab bo'lmaydi.
-- Rejada: VLAN/trunk portlar, iperf3 trafik generatori UI'dan, ssenariylar (vaqt bo'yicha hodisalar), natijalarni yozib olish va solishtirish (OPNET uslubidagi tahlil), pcap'ni yuklab olish.
+- Mininet dvigateli (`engines/emulation.py`) faqat statik tekshirilgan — birinchi real ishga tushirishda xato chiqishi mumkin.
+- Rejada: parametrik tadqiqot (bir parametrni diapazonda o'zgartirib, avtomatik ishga tushirish), ns-3'da OSPF/RIP modellari va simsiz (Wi-Fi/LTE) qurilmalar, ns-3'da kabel yuklamasi statistikasi, VLAN/trunk, pcap yuklab olish.

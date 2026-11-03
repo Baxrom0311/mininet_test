@@ -17,11 +17,11 @@
 
   const TYPE_PREFIX = { host: 'pc', server: 'srv', switch: 's', p4switch: 'p', router: 'r', sdnrouter: 'sr' };
 
-  S.empty = (name) => ({ version: 1, name: name || 'untitled', devices: {}, links: {}, p4_programs: {}, controllers: {}, notes: '' });
+  S.empty = (name) => ({ version: 1, name: name || 'untitled', devices: {}, links: {}, p4_programs: {}, controllers: {}, scenarios: {}, notes: '' });
 
   S.load = function (project, opts) {
     S.project = JSON.parse(JSON.stringify(project));
-    ['devices', 'links', 'p4_programs', 'controllers'].forEach(k => { S.project[k] = S.project[k] || {}; });
+    ['devices', 'links', 'p4_programs', 'controllers', 'scenarios'].forEach(k => { S.project[k] = S.project[k] || {}; });
     S.selection = null;
     S.dirty = !!(opts && opts.dirty);
     NL.emit('project');

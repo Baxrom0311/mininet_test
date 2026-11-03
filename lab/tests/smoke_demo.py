@@ -61,6 +61,34 @@ with TestClient(create_app("demo")) as c:
            "links": {}, "p4_programs": {}, "controllers": {}}
     check(len(c.post("/api/validate", json=bad).json()["errors"]) > 0, "noto'g'ri nom rad etiladi")
 
+    # ---- ssenariylar: analitik (har doim) + ns-3 (o'rnatilgan bo'lsa) ----
+    p = c.get("/api/projects/ospf_lab?example=true").json()
+    engines = {e["id"]: e["available"] for e in c.get("/api/engines").json()["engines"]}
+    check(engines["analytic"] and not engines["mininet"], "dvigatellar: analitik bor, mininet demo'da yo'q")
+    bad_sc = {"duration": 10, "apps": [{"id": "x", "type": "udp", "src": "pc1", "dst": "nope"}], "events": []}
+    check(len(c.post("/api/scenario/validate", json={"project": p, "scenario": bad_sc}).json()["errors"]) >= 2,
+          "noto'g'ri ssenariy rad etiladi")
+    want = ["analytic"] + (["ns3"] if engines["ns3"] and os.environ.get("NETLAB_SKIP_NS3") != "1" else [])
+    for eng in want:
+        rid = c.post("/api/runs", json={"project": p, "scenario": "uzilish", "engine": eng}).json()["run_id"]
+        t0 = time.time()
+        while time.time() - t0 < 240:
+            if not any(r.get("status") == "running" for r in c.get("/api/runs/ospf_lab").json()["runs"]):
+                break
+            time.sleep(0.5)
+        r = c.get(f"/api/runs/ospf_lab/{rid}").json()
+        check(r["status"] == "done", f"{eng}: ishga tushirish tugadi ({r.get('error')})")
+        v = r["flows"]["video"]["series"]
+        before = [x["thr_bps"] for x in v if 5 <= x["t"] <= 9]
+        during = [x["thr_bps"] for x in v if 12 <= x["t"] <= 15]
+        after = [x["thr_bps"] for x in v if 20 <= x["t"] <= 28]
+        check(before and min(before) > 4e6, f"{eng}: uzilishdan oldin video ~5 Mbit/s")
+        check(during and max(during) < 1e5, f"{eng}: kabel uzilganda video to'xtaydi")
+        check(after and min(after) > 4e6, f"{eng}: tiklangandan keyin video qaytadi")
+        c.delete(f"/api/runs/ospf_lab/{rid}")
+    if "ns3" not in want:
+        print("  --   ns-3 o'rnatilmagan (pip install ns3) — ns-3 testi o'tkazib yuborildi")
+
 with TestClient(create_app("demo", token="t0k")) as c:
     check(c.get("/api/info").status_code == 401, "token: tokensiz 401")
     check(c.get("/api/info?token=t0k").status_code == 200, "token: to'g'ri token 200")

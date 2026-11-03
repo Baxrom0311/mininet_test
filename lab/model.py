@@ -45,6 +45,7 @@ def empty_project(name="untitled"):
         "links": {},
         "p4_programs": {},
         "controllers": {},
+        "scenarios": {},
         "notes": "",
     }
 
@@ -203,3 +204,76 @@ def controller_config(project):
             }
         out[cname] = {"controller": cname, "devices": devices}
     return out
+
+
+APP_TYPES = ("udp", "tcp", "ping")
+EVENT_ACTIONS = ("link_down", "link_up", "link_params")
+
+
+def validate_scenario(project, sc):
+    """Ssenariy (trafik ilovalari + vaqtli hodisalar) xatolari ro'yxati."""
+    errors = []
+    try:
+        dur = float(sc.get("duration", 0))
+    except (TypeError, ValueError):
+        dur = 0
+    if not (1 <= dur <= 3600):
+        errors.append("davomiylik 1..3600 s")
+    devs = project.get("devices") or {}
+    ids = set()
+    for i, a in enumerate(sc.get("apps") or []):
+        w = f"ilova {a.get('id') or i + 1}"
+        if a.get("id") in ids:
+            errors.append(f"{w}: id takrorlangan")
+        ids.add(a.get("id"))
+        if a.get("type") not in APP_TYPES:
+            errors.append(f"{w}: tur {APP_TYPES} dan biri")
+        for k in ("src", "dst"):
+            d = devs.get(a.get(k))
+            if not d:
+                errors.append(f"{w}: '{a.get(k)}' qurilma yo'q")
+            elif not DEVICE_TYPES[d["type"]]["l3"] or d["type"] == "sdnrouter":
+                errors.append(f"{w}: {a.get(k)} trafik manbai/qabul qiluvchisi bo'la olmaydi (host/server/router)")
+        try:
+            st, sp = float(a.get("start", 0)), float(a.get("stop", dur))
+            if not (0 <= st < sp):
+                errors.append(f"{w}: start < stop bo'lsin")
+        except (TypeError, ValueError):
+            errors.append(f"{w}: start/stop son bo'lsin")
+        if a.get("type") == "udp" and not a.get("rate"):
+            errors.append(f"{w}: UDP uchun rate kerak (masalan 5Mbps)")
+        if a.get("rate"):
+            try:
+                parse_rate(a["rate"])
+            except ValueError as e:
+                errors.append(f"{w}: {e}")
+    for i, e in enumerate(sc.get("events") or []):
+        w = f"hodisa {i + 1}"
+        if e.get("action") not in EVENT_ACTIONS:
+            errors.append(f"{w}: amal {EVENT_ACTIONS} dan biri")
+        if e.get("link") not in (project.get("links") or {}):
+            errors.append(f"{w}: kabel '{e.get('link')}' yo'q")
+        try:
+            if not (0 <= float(e.get("t", -1)) <= dur):
+                errors.append(f"{w}: vaqt 0..davomiylik")
+        except (TypeError, ValueError):
+            errors.append(f"{w}: vaqt son bo'lsin")
+        if e.get("action") == "link_params":
+            try:
+                normalize_link_params(e.get("params") or {})
+            except ValueError as ex:
+                errors.append(f"{w}: {ex}")
+    return errors
+
+
+def parse_rate(v):
+    """'5Mbps' | '500kbps' | '1.5Gbps' | 5 (Mbit/s) -> bit/s (float)."""
+    if isinstance(v, (int, float)):
+        return float(v) * 1e6
+    m = re.fullmatch(r"\s*([\d.]+)\s*([kKmMgG]?)(bps|bit/s|b/s)?\s*", str(v))
+    if not m:
+        raise ValueError(f"tezlik '{v}' noto'g'ri (masalan 5Mbps)")
+    mult = {"": 1, "k": 1e3, "m": 1e6, "g": 1e9}[m.group(2).lower()]
+    if not m.group(2) and not m.group(3):
+        mult = 1e6
+    return float(m.group(1)) * mult

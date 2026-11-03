@@ -2,7 +2,7 @@
 # NetLab o'rnatish (Ubuntu 22.04 / 24.04, shu jumladan WSL2).
 #
 #   sudo bash lab/install_lab.sh            # asos: Mininet + OVS + tcpdump + backend
-#   sudo bash lab/install_lab.sh --all      # + FRR + os-ken (SDN) + BMv2/p4c (P4)
+#   sudo bash lab/install_lab.sh --all      # + FRR + os-ken (SDN) + BMv2/p4c (P4) + ns-3
 #   sudo bash lab/install_lab.sh --frr --sdn --p4   # tanlab
 #
 # Backend paketlari lab/.venv ga o'rnatiladi (--system-site-packages — apt'dagi
@@ -13,11 +13,11 @@ set -euo pipefail
 [ "$(id -u)" -eq 0 ] || { echo "sudo bilan ishga tushiring"; exit 1; }
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(dirname "$HERE")"
-WANT_FRR=0; WANT_SDN=0; WANT_P4=0
+WANT_FRR=0; WANT_SDN=0; WANT_P4=0; WANT_NS3=0
 for a in "$@"; do
   case "$a" in
-    --frr) WANT_FRR=1 ;; --sdn) WANT_SDN=1 ;; --p4) WANT_P4=1 ;;
-    --all) WANT_FRR=1; WANT_SDN=1; WANT_P4=1 ;;
+    --frr) WANT_FRR=1 ;; --sdn) WANT_SDN=1 ;; --p4) WANT_P4=1 ;; --ns3) WANT_NS3=1 ;;
+    --all) WANT_FRR=1; WANT_SDN=1; WANT_P4=1; WANT_NS3=1 ;;
     *) echo "noma'lum parametr: $a"; exit 1 ;;
   esac
 done
@@ -56,6 +56,10 @@ fi
 echo "== Python backend (lab/.venv) =="
 python3 -m venv --system-site-packages "$HERE/.venv"
 "$HERE/.venv/bin/pip" install -q -r "$HERE/requirements.txt" ${PIP_EXTRA:-}
+if [ "$WANT_NS3" -eq 1 ]; then
+  echo "== ns-3 (diskret-hodisali simulyatsiya dvigateli) =="
+  "$HERE/.venv/bin/pip" install -q ns3 || echo "OGOHLANTIRISH: ns3 wheel o'rnatilmadi (Python versiyasi mos emasmi?)"
+fi
 
 echo
 echo "Tayyor. Ishga tushirish:"

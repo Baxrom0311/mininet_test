@@ -136,10 +136,13 @@
     });
     const p4list = h('div', { class: 'res-list' });
     const sdnlist = h('div', { class: 'res-list' });
+    const sclist = h('div', { class: 'res-list' });
     el.append(h('div', { class: 'sec-title', text: 'Qurilmalar' }), pal,
       h('div', { class: 'sec-title', text: 'Asboblar' }), tools,
       h('div', { class: 'sec-title' }, ['P4 dasturlar', h('button', { title: 'Yangi P4 dastur', text: '+', onclick: () => newResource('p4') })]), p4list,
-      h('div', { class: 'sec-title' }, ['SDN kontrollerlar', h('button', { title: 'Yangi kontroller', text: '+', onclick: () => newResource('sdn') })]), sdnlist);
+      h('div', { class: 'sec-title' }, ['SDN kontrollerlar', h('button', { title: 'Yangi kontroller', text: '+', onclick: () => newResource('sdn') })]), sdnlist,
+      h('div', { class: 'sec-title' }, ['Ssenariylar', h('button', { title: 'Yangi ssenariy (trafik + hodisalar)', text: '+', onclick: newScenario })]), sclist,
+      h('button', { class: 'btn ghost sm', text: 'Natijalar va solishtirish', onclick: () => NL.reswin.open() }));
     const sync = () => {
       p4list.innerHTML = ''; sdnlist.innerHTML = '';
       const p4 = Object.keys(S.project.p4_programs), sdn = Object.entries(S.project.controllers);
@@ -147,11 +150,30 @@
       p4.forEach(n => p4list.appendChild(h('div', { class: 'res-item', onclick: () => NL.p4win.open(n) },
         [h('span', { html: NL.icon('p4switch', 16) }), n, h('span', { class: 'tag', text: '.p4' })])));
       if (!sdn.length) sdnlist.appendChild(h('div', { class: 'res-empty', text: 'yo\'q' }));
+      sclist.innerHTML = '';
+      const scs = Object.entries(S.project.scenarios || {});
+      if (!scs.length) sclist.appendChild(h('div', { class: 'res-empty', text: 'yo\'q — trafik va hodisalarni tahlil qilish uchun' }));
+      scs.forEach(([n, sc]) => sclist.appendChild(h('div', { class: 'res-item', onclick: () => NL.scwin.open(n) },
+        [h('span', { html: NL.ui.ico('<path d="M4 19V5M4 19h16M8 15l3-4 3 2 5-6"/>'), style: { width: '16px', height: '16px', display: 'inline-flex' } }), n,
+         h('span', { class: 'tag', text: `${(sc.apps || []).length} ilova` })])));
       sdn.forEach(([n, c]) => sdnlist.appendChild(h('div', { class: 'res-item', onclick: () => NL.sdnwin.open(n) },
         [h('span', { html: NL.icon('sdnrouter', 16) }), n, h('span', { class: 'tag', text: ':' + c.port })])));
     };
     NL.on('change', sync);
     sync();
+  }
+
+  function newScenario() {
+    const name = NL.form.inp('', 'masalan uzilish');
+    NL.modal('Yangi ssenariy', h('div', { class: 'stack' }, [NL.form.field('Nom', name),
+      h('div', { class: 'note', text: 'Ssenariy = trafik ilovalari (UDP/TCP/ping) + vaqtli hodisalar (kabel uzilishi va h.k.). Uni analitik, ns-3 yoki Mininet dvigatelida ishga tushirib, natijalarni solishtirasiz.' })]), [
+      ['Bekor', 'ghost', () => true],
+      ['Yaratish', 'primary', () => {
+        const n = name.value.trim();
+        if (!/^[A-Za-z0-9_\-]{1,30}$/.test(n)) { NL.toast('Nom: harf/raqam/_/- (1-30)', 'error'); return false; }
+        if (S.project.scenarios[n]) { NL.toast('Bu nom band', 'error'); return false; }
+        S.project.scenarios[n] = { duration: 30, apps: [], events: [] }; S.touch(); NL.scwin.open(n); return true;
+      }]]);
   }
 
   function newResource(kind) {

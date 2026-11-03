@@ -100,14 +100,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install NetLab backend deps
-        run: pip install --quiet -r lab/requirements.txt httpx
+      - name: Install NetLab backend deps (+ ns-3 engine wheel)
+        run: pip install --quiet -r lab/requirements.txt httpx ns3
       - name: Syntax check lab/
-        run: python -m py_compile lab/*.py lab/drivers/*.py lab/templates/sdn/*.py lab/tests/*.py
+        run: python -m py_compile lab/*.py lab/drivers/*.py lab/engines/*.py lab/templates/sdn/*.py lab/tests/*.py
       # Real driver must import without Mininet present (all mininet imports are lazy).
       - name: Import real driver without Mininet
         run: python -c "import lab.drivers.mininet_driver"
-      - name: NetLab demo smoke test (examples, terminal ping, link down, token)
+      - name: NetLab smoke test (demo driver, analytic + ns-3 scenario runs, token)
         run: python lab/tests/smoke_demo.py
 
   docker-build:

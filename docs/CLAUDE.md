@@ -203,6 +203,14 @@ Packet-Tracer/OPNET-style UI where the user builds a topology and runs it live o
   approximation) used for UI work, Windows, and CI (`lab/tests/smoke_demo.py`).
 - `lab/web/` — vanilla JS UI; reuses `studio/web/css/{theme,components}.css` via the `/shared` mount.
   `lab/web/vendor/xterm/` is vendored xterm.js 5.3.0 (MIT) so it works offline.
+- Scenarios (`project.scenarios`: apps udp/tcp/ping + timed link events) run on three engines via
+  `lab/engines/manager.py` → `lab/results/<project>/<run_id>.json` (gitignored): `analytic.py` (flow
+  model, in-process), `ns3_runner.py` (ns-3 DES via the `ns3` PyPI wheel, **separate process** — the
+  Simulator is a global singleton and NS_FATAL aborts the process; use `SetAttributeFailSafe` for any
+  attribute that may not exist), `emulation.py` (iperf3/ping on the live real-driver network). Switch
+  links in ns-3 use SimpleNetDevice/SimpleChannel, not CSMA: CSMA is half-duplex and holds the channel
+  for the propagation delay, capping throughput at ms-scale delays. ns-3 TCP is set to Linux-like
+  defaults (Cubic, MSS 1448, 4/6 MB buffers) so engines are comparable.
 - The real driver could not be executed in CI/this repo's sandbox (no Mininet/OVS/root netns); it was
   checked against Mininet 2.3 sources only. Treat first real runs as integration testing.
 

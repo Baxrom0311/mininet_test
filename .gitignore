@@ -26,3 +26,4 @@ studio/config.json
 # NetLab foydalanuvchi loyihalari (lab/examples/ — namunalar, repo'da)
 lab/projects/*.json
 lab/.venv/
+lab/results/

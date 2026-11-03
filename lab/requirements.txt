@@ -1,5 +1,7 @@
 # NetLab backend (sof Python). Mininet/OVS/FRR/BMv2/os-ken — tizim paketlari (install_lab.sh).
 fastapi>=0.100
 uvicorn[standard]>=0.23
+# ixtiyoriy: ns-3 dvigateli (diskret-hodisali simulyatsiya, ~70 MB)
+# ns3>=3.40
 # ixtiyoriy: alohida oyna rejimi (--window)
 # pywebview>=4.0

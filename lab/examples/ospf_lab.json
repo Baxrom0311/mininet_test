@@ -249,5 +249,139 @@
     }
   },
   "p4_programs": {},
-  "controllers": {}
+  "controllers": {},
+  "scenarios": {
+    "asosiy": {
+      "duration": 30,
+      "apps": [
+        {
+          "id": "video",
+          "type": "udp",
+          "src": "pc1",
+          "dst": "srv2",
+          "rate": "5Mbps",
+          "size": 1000,
+          "start": 1,
+          "stop": 29,
+          "label": "video pc1→srv2"
+        },
+        {
+          "id": "ftp",
+          "type": "tcp",
+          "src": "pc2",
+          "dst": "srv1",
+          "start": 2,
+          "stop": 29,
+          "label": "ftp pc2→srv1"
+        },
+        {
+          "id": "ping",
+          "type": "ping",
+          "src": "pc1",
+          "dst": "srv1",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 29,
+          "label": "ping pc1→srv1"
+        }
+      ],
+      "events": [],
+      "notes": "10 Mbit/s r1-r2 kabelini video (UDP) va FTP (TCP) bo'lishadi"
+    },
+    "uzilish": {
+      "duration": 30,
+      "apps": [
+        {
+          "id": "video",
+          "type": "udp",
+          "src": "pc1",
+          "dst": "srv2",
+          "rate": "5Mbps",
+          "size": 1000,
+          "start": 1,
+          "stop": 29,
+          "label": "video pc1→srv2"
+        },
+        {
+          "id": "ftp",
+          "type": "tcp",
+          "src": "pc2",
+          "dst": "srv1",
+          "start": 2,
+          "stop": 29,
+          "label": "ftp pc2→srv1"
+        },
+        {
+          "id": "ping",
+          "type": "ping",
+          "src": "pc1",
+          "dst": "srv1",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 29,
+          "label": "ping pc1→srv1"
+        }
+      ],
+      "events": [
+        {
+          "t": 10,
+          "action": "link_down",
+          "link": "l4"
+        },
+        {
+          "t": 16,
+          "action": "link_up",
+          "link": "l4"
+        }
+      ],
+      "notes": "t=10..16s r1-r2 kabeli uziladi"
+    },
+    "tez_kabel": {
+      "duration": 30,
+      "apps": [
+        {
+          "id": "video",
+          "type": "udp",
+          "src": "pc1",
+          "dst": "srv2",
+          "rate": "5Mbps",
+          "size": 1000,
+          "start": 1,
+          "stop": 29,
+          "label": "video pc1→srv2"
+        },
+        {
+          "id": "ftp",
+          "type": "tcp",
+          "src": "pc2",
+          "dst": "srv1",
+          "start": 2,
+          "stop": 29,
+          "label": "ftp pc2→srv1"
+        },
+        {
+          "id": "ping",
+          "type": "ping",
+          "src": "pc1",
+          "dst": "srv1",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 29,
+          "label": "ping pc1→srv1"
+        }
+      ],
+      "events": [
+        {
+          "t": 0,
+          "action": "link_params",
+          "link": "l4",
+          "params": {
+            "bw": 100,
+            "delay": "10ms"
+          }
+        }
+      ],
+      "notes": "r1-r2 kabeli 100 Mbit/s ga oshirilgan"
+    }
+  }
 }
