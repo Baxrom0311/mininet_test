@@ -180,6 +180,32 @@ only written if their source JSONL has at least one row, so a topology without N
 where NAT translation logging didn't produce output — see limitations below) simply won't have
 a `nat_translations.csv`.
 
+## NetLab (`lab/`) — interactive visual lab
+
+A separate, self-contained app (does **not** touch the dataset pipeline above): a
+Packet-Tracer/OPNET-style UI where the user builds a topology and runs it live on a
+*real* Linux stack. See `lab/README.md` (Uzbek) for usage.
+
+- `lab/netlab.py` — CLI entry (`python3 -m lab.netlab [--driver demo|real] [--host] [--window]`).
+- `lab/server.py` — FastAPI REST + `/ws/events` (packet/stats/log/state events) + `/ws/term/<dev>` (PTY).
+  Binds 127.0.0.1 by default; any other host forces a token (real driver gives root shells).
+- `lab/model.py` — project JSON model + `validate_project()`. Invariants: device names `^[a-z][a-z0-9]{0,7}$`
+  (Linux ifname limit), interface `<dev>-eth<N>` == OpenFlow/BMv2 port N, deterministic MACs
+  `00:00:00:<id hi>:<id lo>:<port>` on namespace devices, dpid == device `id`.
+- `lab/drivers/mininet_driver.py` — real driver. Network is kept alive; devices/links/link params/IPs are
+  applied **live** (no restart). Switches are started individually with *their own* controller (never
+  `net.start()`, which would attach every switch to every controller). FRR daemons run per router with
+  `-N <name>` pathspace (`vtysh -N <name>`). P4 switches start `--no-p4` and load programs via
+  `load_new_config_file`+`swap_configs`. Capture = one `tcpdump -i any` per netns (+root), keep only
+  `Out` lines → each packet maps to exactly one link/direction. Stats from `/proc/<pid>/net/dev`.
+  All Mininet ops hold `driver.lock` (Node.cmd is not thread-safe). Mininet imports are lazy.
+- `lab/drivers/demo_driver.py` — Mininet-free simulation (BFS L2 domains, LPM, dynamic-routing
+  approximation) used for UI work, Windows, and CI (`lab/tests/smoke_demo.py`).
+- `lab/web/` — vanilla JS UI; reuses `studio/web/css/{theme,components}.css` via the `/shared` mount.
+  `lab/web/vendor/xterm/` is vendored xterm.js 5.3.0 (MIT) so it works offline.
+- The real driver could not be executed in CI/this repo's sandbox (no Mininet/OVS/root netns); it was
+  checked against Mininet 2.3 sources only. Treat first real runs as integration testing.
+
 ## Known limitations
 
 - **NAT translations are unreliable inside Docker.** `NATMonitor` reads

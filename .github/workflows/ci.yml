@@ -93,6 +93,23 @@ jobs:
                 "non-empty, full pair coverage, correct endpoints")
           PY
 
+  netlab-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install NetLab backend deps
+        run: pip install --quiet -r lab/requirements.txt httpx
+      - name: Syntax check lab/
+        run: python -m py_compile lab/*.py lab/drivers/*.py lab/templates/sdn/*.py lab/tests/*.py
+      # Real driver must import without Mininet present (all mininet imports are lazy).
+      - name: Import real driver without Mininet
+        run: python -c "import lab.drivers.mininet_driver"
+      - name: NetLab demo smoke test (examples, terminal ping, link down, token)
+        run: python lab/tests/smoke_demo.py
+
   docker-build:
     runs-on: ubuntu-latest
     steps:

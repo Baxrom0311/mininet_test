@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "name": "ospf_lab",
+  "notes": "Ikki LAN, ikki FRR router, OSPF area 0. Router CLI'da: show ip ospf neighbor, show ip route.",
+  "devices": {
+    "pc1": {
+      "id": 1,
+      "type": "host",
+      "x": 120,
+      "y": 200,
+      "config": {
+        "interfaces": {
+          "pc1-eth1": {
+            "ip": "10.0.1.10/24"
+          }
+        },
+        "gateway": "10.0.1.1"
+      }
+    },
+    "pc2": {
+      "id": 2,
+      "type": "host",
+      "x": 120,
+      "y": 420,
+      "config": {
+        "interfaces": {
+          "pc2-eth1": {
+            "ip": "10.0.1.11/24"
+          }
+        },
+        "gateway": "10.0.1.1"
+      }
+    },
+    "s1": {
+      "id": 3,
+      "type": "switch",
+      "x": 320,
+      "y": 310,
+      "config": {
+        "mode": "standalone",
+        "stp": false
+      }
+    },
+    "r1": {
+      "id": 4,
+      "type": "router",
+      "x": 540,
+      "y": 310,
+      "config": {
+        "daemons": [
+          "ospfd"
+        ],
+        "interfaces": {
+          "r1-eth1": {
+            "ip": "10.0.1.1/24"
+          },
+          "r1-eth2": {
+            "ip": "10.0.12.1/30"
+          }
+        },
+        "startup": "hostname r1\n!\nrouter ospf\n ospf router-id 1.1.1.1\n network 10.0.1.0/24 area 0\n network 10.0.12.0/30 area 0\n!"
+      }
+    },
+    "r2": {
+      "id": 5,
+      "type": "router",
+      "x": 780,
+      "y": 310,
+      "config": {
+        "daemons": [
+          "ospfd"
+        ],
+        "interfaces": {
+          "r2-eth1": {
+            "ip": "10.0.12.2/30"
+          },
+          "r2-eth2": {
+            "ip": "10.0.2.1/24"
+          }
+        },
+        "startup": "hostname r2\n!\nrouter ospf\n ospf router-id 2.2.2.2\n network 10.0.12.0/30 area 0\n network 10.0.2.0/24 area 0\n!"
+      }
+    },
+    "s2": {
+      "id": 6,
+      "type": "switch",
+      "x": 990,
+      "y": 310,
+      "config": {
+        "mode": "standalone",
+        "stp": false
+      }
+    },
+    "srv1": {
+      "id": 7,
+      "type": "server",
+      "x": 1180,
+      "y": 220,
+      "config": {
+        "interfaces": {
+          "srv1-eth1": {
+            "ip": "10.0.2.10/24"
+          }
+        },
+        "gateway": "10.0.2.1"
+      }
+    },
+    "srv2": {
+      "id": 8,
+      "type": "server",
+      "x": 1180,
+      "y": 420,
+      "config": {
+        "interfaces": {
+          "srv2-eth1": {
+            "ip": "10.0.2.11/24"
+          }
+        },
+        "gateway": "10.0.2.1"
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "pc1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "2ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "pc2",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "2ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "s1",
+        "port": 3
+      },
+      "b": {
+        "dev": "r1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "2ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l4": {
+      "a": {
+        "dev": "r1",
+        "port": 2
+      },
+      "b": {
+        "dev": "r2",
+        "port": 1
+      },
+      "params": {
+        "bw": 10,
+        "delay": "10ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l5": {
+      "a": {
+        "dev": "r2",
+        "port": 2
+      },
+      "b": {
+        "dev": "s2",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "2ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l6": {
+      "a": {
+        "dev": "s2",
+        "port": 2
+      },
+      "b": {
+        "dev": "srv1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "2ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l7": {
+      "a": {
+        "dev": "s2",
+        "port": 3
+      },
+      "b": {
+        "dev": "srv2",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "2ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "p4_programs": {},
+  "controllers": {}
+}
