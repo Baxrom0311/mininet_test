@@ -103,7 +103,12 @@ def create_app(driver_name="demo", token=None):
     # ───────────── ma'lumot ─────────────
     @app.get("/api/info")
     def info():
-        return {**driver.info(), "device_types": DEVICE_TYPES, "frr_daemons": FRR_DAEMONS,
+        from lab import wifi as W
+        wifi_model = {"mcs": W.MCS, "width_mult": {str(k): v for k, v in W.WIDTH_MULT.items()},
+                      "efficiency": W.EFFICIENCY, "ref_loss": {str(k): v for k, v in W.REF_LOSS.items()},
+                      "min_rssi": W.MIN_RSSI, "exponent": W.EXPONENT, "ap_defaults": W.AP_DEFAULTS,
+                      "standards": W.STANDARDS}
+        return {**driver.info(), "device_types": DEVICE_TYPES, "frr_daemons": FRR_DAEMONS, "wifi": wifi_model,
                 "project_version": PROJECT_VERSION, "status": driver.status()}
 
     @app.get("/api/templates")

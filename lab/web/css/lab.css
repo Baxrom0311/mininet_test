@@ -12,11 +12,12 @@
   --c-p4switch: #FFC24B;
   --c-router: #FF5FD2;
   --c-sdnrouter: #FF8A4B;
+  --c-wifiap: #5BC8FF;
   --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 }
 :root[data-theme="light"] {
   --c-host: #0A93B4; --c-server: #0E9F6E; --c-switch: #6E4CF0;
-  --c-p4switch: #C77B00; --c-router: #D23A9E; --c-sdnrouter: #D9612B;
+  --c-p4switch: #C77B00; --c-router: #D23A9E; --c-sdnrouter: #D9612B; --c-wifiap: #1B83C4;
 }
 
 .lab {
@@ -285,3 +286,15 @@
 .res-study .d { color: var(--text-faint); font-size: 11px; }
 .res-run.sub { margin-left: 10px; padding: 6px 8px; }
 .chart-svg .mk { stroke: var(--bg); stroke-width: 2; }
+
+/* ---- Wi-Fi ---- */
+.lnk.wifi line.wire { stroke-dasharray: 2 5; stroke: color-mix(in srgb, var(--c-wifiap) 75%, transparent); stroke-width: 2.4; }
+.lnk.wifi.down line.wire { stroke: var(--danger); }
+.lnk .rlbl { font-size: 9.5px; fill: var(--c-wifiap); font-family: var(--mono); text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; pointer-events: none; }
+.lnk .rlbl.bad { fill: var(--danger); }
+.cov { fill: color-mix(in srgb, var(--c-wifiap) 5%, transparent); stroke: color-mix(in srgb, var(--c-wifiap) 30%, transparent); stroke-dasharray: 3 6; pointer-events: none; }
+.cov.hi { fill: color-mix(in srgb, var(--c-wifiap) 6%, transparent); stroke-dasharray: none; stroke-opacity: .5; }
+.cov.sel { stroke: color-mix(in srgb, var(--c-wifiap) 70%, transparent); }
+.covlbl { font-size: 11px; fill: var(--c-wifiap); text-anchor: middle; font-family: var(--mono); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.stage-scale { position: absolute; left: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; color: var(--text-dim); font-family: var(--mono); pointer-events: none; }
+.stage-scale i { display: block; height: 6px; border: 1.5px solid var(--text-dim); border-top: none; }

@@ -22,6 +22,7 @@ from collections import deque
 
 from lab.model import (DEVICE_TYPES, device_mac, ifname, link_ports,
                        normalize_link_params, validate_project)
+from lab.wifi import link_estimate as wifi_link_estimate
 from .base import BaseDriver, DriverError, Terminal
 
 DYNAMIC = {"ospfd": "OSPF", "bgpd": "BGP", "ripd": "RIP", "isisd": "IS-IS",
@@ -73,14 +74,24 @@ class Net:
 
     def is_l2(self, dev):
         t = self.devs[dev]["type"]
-        return t in ("switch", "p4switch")
+        return t in ("switch", "p4switch", "wifiap")
+
+    def link_ok(self, lid):
+        """Kabel ishlaydimi: UP va (Wi-Fi bo'lsa) signal yetarli."""
+        l = self.p["links"].get(lid)
+        if not l or l.get("up") is False:
+            return False
+        if (l.get("params") or {}).get("medium") == "wifi":
+            est = wifi_link_estimate(self.p, lid)
+            return bool(est and est["ok"])
+        return True
 
     def l2_reach(self, dev, port):
         """dev:port'dan chiqib L2 domendagi L3 so'nggi nuqtalar:
         {(dev, port): [(link_id, dir), ...]}"""
         out = {}
         first = self.link_on(dev, port)
-        if not first or self.p["links"][first[0]].get("up") is False:
+        if not first or not self.link_ok(first[0]):
             return out
         q = deque([(first[1], first[2], [(first[0], first[3])])])
         seen = {dev}
@@ -96,7 +107,7 @@ class Net:
                 if p2 == inport:
                     continue
                 nxt = self.link_on(cur, p2)
-                if nxt and self.p["links"][nxt[0]].get("up") is not False:
+                if nxt and self.link_ok(nxt[0]):
                     q.append((nxt[1], nxt[2], path + [(nxt[0], nxt[3])]))
         return out
 
@@ -126,7 +137,7 @@ class Net:
         for port, ifn, ipi in self.ifaces(dev):
             if ipi:
                 link = self.link_on(dev, port)
-                if link and self.p["links"][link[0]].get("up") is not False:
+                if link and self.link_ok(link[0]):
                     rt.append((ipi.network, None, ifn, "connected"))
         for r in cfg.get("routes") or []:
             try:
@@ -412,7 +423,17 @@ class DemoDriver(BaseDriver):
                              "rows": [[ip, m, i, "REACHABLE"] for ip, (m, i) in arp.items()]})
                 if t == "router":
                     secs.append({"title": "FRR: show ip route", "kind": "text", "text": self._show_ip_route(n, name)})
-            if t in ("switch", "p4switch", "sdnrouter"):
+            if t == "wifiap":
+                rows = []
+                for p_, (lid_, peer_, _pp) in sorted(ports.items()):
+                    e_ = wifi_link_estimate(self.project, lid_)
+                    if e_:
+                        rows.append([lid_, peer_, e_["distance_m"], e_["rssi_dbm"], e_["snr_db"],
+                                     e_["mcs"] if e_["ok"] else "—", e_["thr_mbps"]])
+                secs.append({"title": "Radio (model): stansiyalar", "kind": "table",
+                             "columns": ["Kabel", "Stansiya", "Masofa m", "RSSI dBm", "SNR dB", "MCS", "Taxminiy Mbit/s"],
+                             "rows": rows})
+            if t in ("switch", "p4switch", "sdnrouter", "wifiap"):
                 rows = [[p, ifname(name, p), f"{peer}:{pp}", "-", "-", "-", "-", 0]
                         for p, (lid, peer, pp) in sorted(ports.items())]
                 secs.append({"title": "Portlar", "kind": "table",

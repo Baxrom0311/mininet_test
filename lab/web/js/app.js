@@ -3,7 +3,7 @@
   'use strict';
   const S = NL.store, h = NL.h;
   const ico = NL.ui.ico;
-  const PALETTE = ['host', 'server', 'switch', 'p4switch', 'router', 'sdnrouter'];
+  const PALETTE = ['host', 'server', 'switch', 'p4switch', 'router', 'sdnrouter', 'wifiap'];
 
   // ---------- modal ----------
   NL.modal = function (title, content, buttons) {

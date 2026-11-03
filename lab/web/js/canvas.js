@@ -4,7 +4,7 @@
   'use strict';
   const S = NL.store;
   const C = NL.canvas = { mode: 'select', placeType: null, linkSrc: null, tx: 0, ty: 0, k: 1, geom: {} };
-  let svg, vp, gLinks, gPkts, gDevs, gGhost, stageEl, hintEl, emptyEl;
+  let svg, vp, gCov, gLinks, gPkts, gDevs, gGhost, stageEl, hintEl, emptyEl, scaleEl;
   const R = 26;   // qurilma radiusi
 
   C.init = function (stage) {
@@ -17,8 +17,8 @@
     svg.appendChild(defs);
     vp = NL.s('g');
     vp.appendChild(NL.s('rect', { x: -20000, y: -20000, width: 40000, height: 40000, fill: 'url(#gridp)', class: 'bg' }));
-    gLinks = NL.s('g'); gPkts = NL.s('g'); gDevs = NL.s('g'); gGhost = NL.s('g');
-    vp.append(gLinks, gPkts, gDevs, gGhost);
+    gCov = NL.s('g'); gLinks = NL.s('g'); gPkts = NL.s('g'); gDevs = NL.s('g'); gGhost = NL.s('g');
+    vp.append(gCov, gLinks, gPkts, gDevs, gGhost);
     svg.appendChild(vp);
     stage.appendChild(svg);
     hintEl = NL.h('div', { class: 'stage-hint' });
@@ -28,7 +28,8 @@
       NL.h('button', { title: 'Kichiklashtirish', text: '−', onclick: () => zoomAt(1 / 1.2) }),
       NL.h('button', { title: 'Hammasini ko\'rsatish', text: '⤢', onclick: () => C.fit() }),
     ]);
-    stage.append(hintEl, emptyEl, zoom);
+    scaleEl = NL.h('div', { class: 'stage-scale', title: 'Masshtab (loyiha: 1 px = meters_per_px m)' }, [NL.h('i'), NL.h('span')]);
+    stage.append(hintEl, emptyEl, zoom, scaleEl);
     bind();
     applyView();
     requestAnimationFrame(tick);
@@ -50,7 +51,16 @@
     C.render();
   };
 
-  function applyView() { vp.setAttribute('transform', `translate(${C.tx},${C.ty}) scale(${C.k})`); }
+  function applyView() { vp.setAttribute('transform', `translate(${C.tx},${C.ty}) scale(${C.k})`); updateScale(); }
+  function updateScale() {
+    if (!scaleEl || !S.project) return;
+    const mpp = NL.wifi.mpp();
+    const target = 120 / C.k * mpp;                 // ~120 ekran px ga to'g'ri keladigan metr
+    const p = Math.pow(10, Math.floor(Math.log10(target)));
+    const nice = [1, 2, 5, 10].map(x => x * p).filter(x => x <= target).pop() || p;
+    scaleEl.firstChild.style.width = (nice / mpp * C.k) + 'px';
+    scaleEl.lastChild.textContent = nice >= 1000 ? (nice / 1000) + ' km' : nice + ' m';
+  }
   function toWorld(ev) {
     const r = svg.getBoundingClientRect();
     return { x: (ev.clientX - r.left - C.tx) / C.k, y: (ev.clientY - r.top - C.ty) / C.k };
@@ -78,10 +88,32 @@
   C.render = function () {
     if (!S.project || !svg) return;
     emptyEl.style.display = Object.keys(S.project.devices).length ? 'none' : '';
+    renderCoverage();
     renderLinks();
     renderDevices();
     updateStats();
+    updateScale();
   };
+
+  // Wi-Fi AP qamrovi: tashqi doira — aloqa chegarasi (RSSI = -82 dBm), ichki — yuqori MCS zonasi (SNR >= 25 dB)
+  function renderCoverage() {
+    gCov.innerHTML = '';
+    if (!S.info || !S.info.wifi) return;
+    const mpp = NL.wifi.mpp();
+    for (const [name, d] of Object.entries(S.project.devices)) {
+      if (d.type !== 'wifiap') continue;
+      const c = NL.wifi.apConfig(d);
+      const sel = S.selection && S.selection.id === name;
+      const rMax = NL.wifi.range(c) / mpp, rHi = NL.wifi.rangeForSnr(c, 25) / mpp;
+      gCov.appendChild(NL.s('circle', { cx: d.x, cy: d.y, r: rMax, class: 'cov' + (sel ? ' sel' : '') }));
+      gCov.appendChild(NL.s('circle', { cx: d.x, cy: d.y, r: rHi, class: 'cov hi' + (sel ? ' sel' : '') }));
+      if (sel) {
+        const t = NL.s('text', { x: d.x, y: d.y - rMax - 6, class: 'covlbl' });
+        t.textContent = `qamrov ~${Math.round(NL.wifi.range(c))} m · ${c.standard.replace('80211', '802.11')} ${c.band} GHz`;
+        gCov.appendChild(t);
+      }
+    }
+  }
 
   function devIP(name) {
     const d = S.dev(name);
@@ -131,7 +163,8 @@
       const x1 = A.x + nx * off, y1 = A.y + ny * off, x2 = B.x + nx * off, y2 = B.y + ny * off;
       C.geom[lid] = { x1, y1, x2, y2 };
       const sel = S.selection && S.selection.kind === 'link' && S.selection.id === lid;
-      const g = NL.s('g', { class: 'lnk' + (sel ? ' sel' : '') + (l.up === false ? ' down' : ''), 'data-link': lid });
+      const est = NL.wifi.linkEstimate(lid);
+      const g = NL.s('g', { class: 'lnk' + (sel ? ' sel' : '') + (l.up === false || (est && !est.ok) ? ' down' : '') + (est ? ' wifi' : ''), 'data-link': lid });
       g.appendChild(NL.s('line', { x1, y1, x2, y2, class: 'wire', id: 'w-' + lid }));
       g.appendChild(NL.s('line', { x1, y1, x2, y2, class: 'hit' }));
       const ux = dx / len, uy = dy / len, d0 = R + 20;
@@ -139,6 +172,11 @@
       const pb = NL.s('text', { x: x2 - ux * d0 + nx * 9, y: y2 - uy * d0 + ny * 9 + 3, class: 'plbl' }); pb.textContent = 'eth' + l.b.port;
       const ul = NL.s('text', { x: (x1 + x2) / 2 - nx * 10, y: (y1 + y2) / 2 - ny * 10 + 3, class: 'ulbl', id: 'u-' + lid });
       g.append(pa, pb, ul);
+      if (est) {      // radio taxmini: MCS va foydali tezlik (masofaga bog'liq)
+        const rl = NL.s('text', { x: (x1 + x2) / 2 + nx * 12, y: (y1 + y2) / 2 + ny * 12 + 3, class: 'rlbl' + (est.ok ? '' : ' bad') });
+        rl.textContent = est.ok ? `MCS${est.mcs} · ~${Math.round(est.thr_mbps)} Mb/s · ${Math.round(est.distance_m)} m` : `signal yo'q · ${Math.round(est.distance_m)} m`;
+        g.appendChild(rl);
+      }
       gLinks.appendChild(g);
     }
   }
@@ -239,7 +277,7 @@
         if (!d) { drag = null; return; }
         let nx = w.x - drag.dx, ny = w.y - drag.dy;
         if (!ev.altKey) { nx = Math.round(nx / 8) * 8; ny = Math.round(ny / 8) * 8; }
-        if (nx !== d.x || ny !== d.y) { d.x = nx; d.y = ny; moved = true; renderLinks(); renderDevices(); updateStats(); }
+        if (nx !== d.x || ny !== d.y) { d.x = nx; d.y = ny; moved = true; renderCoverage(); renderLinks(); renderDevices(); updateStats(); }
       } else if (pan) {
         C.tx = pan.tx + ev.clientX - pan.x; C.ty = pan.ty + ev.clientY - pan.y; moved = true; applyView();
       } else if (C.mode === 'link' && C.linkSrc) {

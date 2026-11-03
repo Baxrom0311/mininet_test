@@ -54,6 +54,7 @@ Alohida oynada ochish uchun (pywebview kerak): `python3 -m lab.netlab --window`.
 | **P4 Switch** | BMv2 `simple_switch` — data-plane'ni **o'zingiz dasturlaysiz** (P4_16, v1model) | `simple_switch_CLI` (table_add, counter_read, register_read ...); Hardware: pipeline diagrammasi, BMv2 paket trace |
 | **Router (FRR)** | Namespace + zebra/staticd + tanlangan daemonlar (ospfd, bgpd, ripd, isisd, ospf6d, eigrpd, pimd, ldpd, bfdd) | `vtysh` — Cisco IOS'ga o'xshash CLI (`configure terminal`, `router ospf`, `show ip route`) |
 | **SDN Router** | OVS bridge + **siz yozgan** kontroller ilovasi (ARP, LPM, TTL, flow o'rnatish) | Jadvallar: flow'lar; kontroller logi |
+| **Wi-Fi AP** | Simsiz kirish nuqtasi (802.11g/n/ac/ax, 2.4/5 GHz, 20–160 MHz, uzatish quvvati). Host/server/router unga simsiz ulanadi | Sozlama: radio parametrlari + stansiyalar jadvali (masofa, RSSI, SNR, MCS) |
 
 **Kabel (fizik qatlam)** parametrlari: tezlik (HTB), kechikish, jitter, yo'qotish
 (netem) va navbat uzunligi. Ular tarmoq ishlayotganda ham darhol qo'llanadi.
@@ -171,10 +172,45 @@ NetLab gibrid qilib qurilgan: bitta loyiha modeli, uchta dvigatel. Mininet —
 Packet Tracer tomoni (haqiqiy qurilmalar, CLI, hardware). ns-3 — OPNET tomoni
 (DES, masshtab, statistika, solishtirish).
 
+## Wi-Fi (simsiz tarmoq)
+
+Kabel asbobi (`C`) bilan Wi-Fi AP'ni va host/server/router'ni ketma-ket bosing —
+kabel avtomatik **simsiz** bo'ladi (kanvasda nuqtali chiziq bilan ko'rsatiladi).
+Kanvasdagi masofa haqiqiy metrga aylanadi: masshtab loyiha sozlamasida
+(`meters_per_px`, standart 1 px = 0.25 m) va kanvasning chap pastki burchagida.
+Qurilmani sudrasangiz, kabel yorlig'idagi MCS, tezlik va masofa darhol yangilanadi.
+AP atrofidagi doiralar: tashqi — aloqa chegarasi, ichki — yuqori tezlik zonasi
+(SNR ≥ 25 dB).
+
+Radio modeli (`lab/wifi.py`):
+- signal susayishi: log-distance, n = 3;
+- SNR asosida MCS tanlanadi;
+- aloqa chegarasi: RSSI ≥ −82 dBm.
+
+Model ns-3 o'lchovlariga kalibrlangan. 802.11ax, 20 MHz, 20 dBm uchun:
+
+| Masofa | 10 m | 20 m | 30 m | 40 m | 50 m | 70 m |
+|---|---|---|---|---|---|---|
+| ns-3 (UDP) | 113.8 | 92.1 | 69.6 | 62.2 | 42.6 | 0 |
+| Model | 114.7 | 91.8 | 68.8 | 61.9 | 41.3 | 0 |
+
+| Dvigatel | Wi-Fi qanday modellashtiriladi |
+|---|---|
+| ns-3 | To'liq: YansWifiPhy, CSMA/CA, umumiy efir, A-MPDU, IdealWifiManager, joylashuv kanvasdan |
+| Analitik | Har bir stansiya tezligi = model taxmini; AP efir vaqti stansiyalar o'rtasida bo'linadi (efir vaqti bo'yicha adolat), TCP ACK uchun ~9% qo'shimcha efir |
+| Mininet | Radio yo'q: AP = OVS switch, Wi-Fi kabeli = model tezligidagi TCLink (umumiy efir emulyatsiya qilinmaydi) |
+
+`wifi_ofis` namunasi: AP, uch noutbuk (23 / 50 / 64 m) va simli server.
+`yuklama` ssenariysi Wi-Fi'ning "performance anomaly" hodisasini ko'rsatadi:
+uzoqdagi sekin stansiya efirni uzoq band qiladi va yaqindagi stansiyani ham
+sekinlashtiradi. Tadqiqot uchun **Wi-Fi AP · uzatish quvvati** parametrini tanlab,
+masalan `5,10,15,20,25` dBm qiymatlarida uzoqdagi stansiya tezligini ko'ring.
+
 ## Namunalar (Ochish → Namunalar)
 
 - `ospf_lab`: ikki LAN, ikki FRR router, OSPF area 0. Ssenariylar: `asosiy`, `uzilish`, `tez_kabel`.
 - `rip_ring`: uch router uchburchak, RIPv2. `uzilish` ssenariysi — konvergensiya tahlili.
+- `wifi_ofis`: Wi-Fi AP, uch noutbuk turli masofada, simli server. Ssenariylar: `yolgiz`, `yuklama`.
 - `p4_l2_lab`: uchta host, P4 L2 switch, `dmac` jadvali.
 - `sdn_router_lab`: SDN switch + SDN router (`l3_router` ilovasi).
 
@@ -213,4 +249,5 @@ token majburiy. Token URL'ini begonalarga bermang.
 - Real driver Ubuntu'da Mininet 2.3, OVS 2.17+, FRR 8+ va p4lang paketlari bilan ishlash uchun yozilgan. Bu repo'da u faqat statik tekshirilgan (CI'da Mininet yo'q). Birinchi ishga tushirishda xato chiqsa, **Hodisalar** panelidagi logni yuboring.
 - Router qurilmasini tarmoq ishlayotganda qayta nomlab bo'lmaydi.
 - Mininet dvigateli (`engines/emulation.py`) faqat statik tekshirilgan — birinchi real ishga tushirishda xato chiqishi mumkin.
-- Rejada: ns-3'da simsiz (Wi-Fi/LTE) qurilmalar, bir nechta parametrli tadqiqot (2D), ns-3'da kabel yuklamasi statistikasi, VLAN/trunk, pcap yuklab olish.
+- Wi-Fi: harakatlanuvchi stansiyalar (mobility), bir nechta AP o'rtasida roaming va AP'lararo kanal interferensiyasi hali yo'q. Har bir AP o'z kanalida ishlaydi.
+- Rejada: LTE/5G, harakatlanuvchi stansiyalar, bir nechta parametrli tadqiqot (2D), ns-3'da kabel yuklamasi statistikasi, VLAN/trunk, pcap yuklab olish.

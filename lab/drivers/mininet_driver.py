@@ -30,6 +30,7 @@ import termios
 import threading
 import time
 
+from lab.wifi import link_estimate as wifi_link_estimate
 from lab.model import (DEVICE_TYPES, FRR_DAEMONS, controller_config, device_mac,
                        ifname, link_ports, normalize_link_params, validate_project)
 from .base import (BaseDriver, DriverError, Terminal, p4_compile_standalone,
@@ -378,6 +379,11 @@ class MininetDriver(BaseDriver):
         elif t == "sdnrouter":
             self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13",
                                failMode="secure")
+        elif t == "wifiap":
+            # Mininet'da radio yo'q: AP = OVS L2 switch, Wi-Fi kabellari radio modelidan
+            # hisoblangan tezlikdagi TCLink (umumiy efir emulyatsiya qilinmaydi).
+            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13",
+                               failMode="standalone")
         elif t == "p4switch":
             self.net.addSwitch(name, cls=P4Switch, dpid=f"{did:016x}",
                                thrift_port=THRIFT_BASE + did, device_id=did)
@@ -394,7 +400,7 @@ class MininetDriver(BaseDriver):
     def _start_device(self, name, d):
         node = self.net.get(name)
         t = d["type"]
-        if t in ("switch", "sdnrouter"):
+        if t in ("switch", "sdnrouter", "wifiap"):
             node.start(self._ctrls_for(d))
         elif t == "p4switch":
             node.start([])
@@ -483,6 +489,15 @@ class MininetDriver(BaseDriver):
             t = d["type"]
             if t in ("host", "server", "router"):
                 self._config_ns_node(name)
+            elif t == "wifiap":
+                for _p, (lid_, _peer, _pp) in link_ports(self.project, name).items():
+                    l_ = self.project["links"][lid_]
+                    if (l_.get("params") or {}).get("medium") == "wifi" and lid_ in self._links:
+                        opts, ok = self._tc_opts(lid_, normalize_link_params(l_.get("params")))
+                        for intf in (self._links[lid_].intf1, self._links[lid_].intf2):
+                            intf.params.update(opts)
+                            intf.config(**opts)
+                            intf.ifconfig("up" if ok and l_.get("up") is not False else "down")
             elif t in ("switch", "sdnrouter"):
                 node = self.net.get(name)
                 oc = (old or {}).get("config") or {}
@@ -505,15 +520,26 @@ class MininetDriver(BaseDriver):
             return {"ok": True}
 
     # ─────────────────────────── kabellar ───────────────────────────
+    def _tc_opts(self, lid, p):
+        """Kabel parametrlari -> TCLink opsiyalari. Wi-Fi kabeli: tezlik radio modelidan
+        (masofa, AP sozlamasi), MAC kechikishi ~1ms + jitter. Qaytaradi: (opts, radio_ok)."""
+        opts = {"bw": p["bw"], "delay": p["delay"], "loss": p["loss"] or None, "max_queue_size": p["queue"]}
+        if p["jitter"] not in ("0ms", "0us", "0s", "0"):
+            opts["jitter"] = p["jitter"]
+        if p.get("medium") == "wifi":
+            est = wifi_link_estimate(self.project, lid)
+            opts.update(bw=max(est["thr_mbps"], 0.1), delay="1ms", jitter="0.5ms", loss=None)
+            return opts, est["ok"]
+        return opts, True
+
     def _add_link_obj(self, lid, l):
         from mininet.link import TCLink
         a, b = l["a"], l["b"]
         da, db = self.project["devices"][a["dev"]], self.project["devices"][b["dev"]]
         p = normalize_link_params(l.get("params"))
-        opts = {"bw": p["bw"], "delay": p["delay"], "loss": p["loss"] or None,
-                "max_queue_size": p["queue"]}
-        if p["jitter"] not in ("0ms", "0us", "0s", "0"):
-            opts["jitter"] = p["jitter"]
+        opts, radio_ok = self._tc_opts(lid, p)
+        if not radio_ok:
+            self.bus.log("warn", f"Wi-Fi {lid}: signal yetmaydi — kabel uzilgan holatda", a["dev"])
         kw = dict(port1=a["port"], port2=b["port"],
                   intfName1=ifname(a["dev"], a["port"]), intfName2=ifname(b["dev"], b["port"]))
         if DEVICE_TYPES[da["type"]]["ns"]:
@@ -523,7 +549,7 @@ class MininetDriver(BaseDriver):
         link = self.net.addLink(self.net.get(a["dev"]), self.net.get(b["dev"]), cls=TCLink,
                                 **kw, **opts)
         self._links[lid] = link
-        if l.get("up") is False:
+        if l.get("up") is False or not radio_ok:
             link.intf1.ifconfig("down")
             link.intf2.ifconfig("down")
         return link
@@ -548,7 +574,7 @@ class MininetDriver(BaseDriver):
         d = self.project["devices"][dev]
         node = self.net.get(dev)
         t = d["type"]
-        if t in ("switch", "sdnrouter"):
+        if t in ("switch", "sdnrouter", "wifiap"):
             node.cmd(f"ovs-vsctl add-port {dev} {intf.name} -- set Interface {intf.name} ofport_request={port}")
             node.cmd(f"ip link set {intf.name} up")
             node.TCReapply(intf)   # OVS port qo'shganda tc qdisc'ni tozalashi mumkin
@@ -574,7 +600,7 @@ class MininetDriver(BaseDriver):
             for side, intf in (("a", link.intf1), ("b", link.intf2)):
                 dev = l[side]["dev"]
                 t = self.project["devices"][dev]["type"]
-                if t in ("switch", "sdnrouter"):
+                if t in ("switch", "sdnrouter", "wifiap"):
                     _run(["ovs-vsctl", "--if-exists", "del-port", dev, intf.name])
                 elif t == "p4switch":
                     self._p4_cli(dev, f"port_remove {l[side]['port']}")
@@ -594,10 +620,7 @@ class MininetDriver(BaseDriver):
                 raise DriverError(f"kabel {link_id} topilmadi")
             if params is not None:
                 p = normalize_link_params(params)
-                opts = {"bw": p["bw"], "delay": p["delay"], "loss": p["loss"] or None,
-                        "max_queue_size": p["queue"]}
-                if p["jitter"] not in ("0ms", "0us", "0s", "0"):
-                    opts["jitter"] = p["jitter"]
+                opts, _ok = self._tc_opts(link_id, p)
                 for intf in (link.intf1, link.intf2):
                     intf.params.update(opts)      # keyingi TCReapply ham yangi qiymatlarni olsin
                     intf.config(**opts)
@@ -854,7 +877,7 @@ class MininetDriver(BaseDriver):
                     qd.append(_run(["mnexec", "-a", str(node.pid), "tc", "-s", "qdisc", "show",
                                     "dev", ifname(name, port)]))
                 secs.append(self._text("Hardware: interfeys navbatlari (tc qdisc)", "\n\n".join(qd)))
-            elif t in ("switch", "sdnrouter"):
+            elif t in ("switch", "sdnrouter", "wifiap"):
                 rows = []
                 for port, (lid, peer, pport) in sorted(link_ports(self.project, name).items()):
                     ifn = ifname(name, port)
@@ -862,7 +885,17 @@ class MininetDriver(BaseDriver):
                     rows.append([port, ifn, f"{peer}:{pport}", c[1], c[4], c[0], c[3], c[2] + c[5]])
                 secs.append(self._table("Portlar", ["Port", "Interfeys", "Ulangan", "RX pkt", "TX pkt",
                                                      "RX bayt", "TX bayt", "Drop"], rows))
-                if t == "switch" and (d.get("config") or {}).get("mode") != "sdn":
+                if t == "wifiap":
+                    est_rows = []
+                    for p_, (lid_, peer_, _pp) in sorted(link_ports(self.project, name).items()):
+                        e_ = wifi_link_estimate(self.project, lid_)
+                        if e_:
+                            est_rows.append([lid_, peer_, e_["distance_m"], e_["rssi_dbm"], e_["snr_db"],
+                                             e_["mcs"] if e_["ok"] else "—", e_["thr_mbps"]])
+                    secs.append(self._table("Radio (model): stansiyalar", ["Kabel", "Stansiya", "Masofa m", "RSSI dBm",
+                                                                           "SNR dB", "MCS", "Taxminiy Mbit/s"], est_rows,
+                                            hint="Mininet'da radio yo'q — TCLink tezligi shu modeldan"))
+                if t in ("switch", "wifiap") and (d.get("config") or {}).get("mode") != "sdn":
                     fdb = _run(["ovs-appctl", "fdb/show", name]).splitlines()
                     rows = [l.split() for l in fdb[1:] if l.strip()]
                     secs.append(self._table("MAC jadvali (FDB)", ["Port", "VLAN", "MAC", "Yosh (s)"], rows))
@@ -928,7 +961,7 @@ class MininetDriver(BaseDriver):
         path = os.path.join(RUN_DIR, "rc", f"{name}.bashrc")
         lines = [f"PS1='\\[\\e[1;36m\\]{name}\\[\\e[0m\\]:\\w# '",
                  "alias ll='ls -la'"]
-        if t in ("switch", "sdnrouter"):
+        if t in ("switch", "sdnrouter", "wifiap"):
             lines += [f"alias flows='ovs-ofctl -O OpenFlow13 dump-flows {name}'",
                       f"alias ports='ovs-ofctl -O OpenFlow13 dump-ports {name}'",
                       f"alias fdb='ovs-appctl fdb/show {name}'",

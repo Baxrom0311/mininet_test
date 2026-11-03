@@ -218,6 +218,13 @@ Packet-Tracer/OPNET-style UI where the user builds a topology and runs it live o
   global SPF. Don't set `IpForward=false` on single-homed hosts — ns-3.44 global routing segfaults on a
   P2P-attached non-forwarding host. Analytic engine models RIP convergence as stale pre-failure routes
   for `rip_convergence_s` (default 15).
+- Wi-Fi: device type `wifiap` (L2) + links with `params.medium == "wifi"` (AP <-> host/server/router, one
+  per station). Radio model in `lab/wifi.py` (log-distance n=3, SNR->MCS tables calibrated to ns-3, link if
+  RSSI >= -82 dBm); the UI re-implements the formula in `lab/web/js/wifi.js` from tables served in
+  `/api/info.wifi` — keep them in sync. Distances = canvas px * `project.meters_per_px`. ns-3: one
+  YansWifi channel per AP, IdealWifiManager, AP device bridged with its wired ports. Analytic: per-station
+  capacity from the model + per-AP airtime resource with airtime-fair TCP sharing. Mininet: AP = OVS
+  switch, Wi-Fi link = TCLink at the modelled rate (no shared medium).
 - The real driver could not be executed in CI/this repo's sandbox (no Mininet/OVS/root netns); it was
   checked against Mininet 2.3 sources only. Treat first real runs as integration testing.
 

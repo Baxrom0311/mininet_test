@@ -10,6 +10,7 @@ Qurilma turlari (DEVICE_TYPES):
     p4switch   BMv2 simple_switch        (P4 dastur bilan dasturlanadi)
     router     FRRouting router          (zebra/ospfd/bgpd/... namespace ichida)
     sdnrouter  SDN router (OVS + kontroller ilovasi routingni bajaradi)
+    wifiap     Wi-Fi kirish nuqtasi (L2 bridge; simsiz kabellar: params.medium == "wifi")
 
 Port raqamlash: interfeys `<qurilma>-eth<N>` har doim OpenFlow/BMv2 port N
 ga mos keladi — P4 jadval yozuvlari va SDN ilovalari shu raqamga tayanadi.
@@ -28,11 +29,12 @@ DEVICE_TYPES = {
     "p4switch":  {"label": "P4 Switch",   "ns": False, "l3": False, "prefix": "p"},
     "router":    {"label": "Router (FRR)", "ns": True,  "l3": True,  "prefix": "r"},
     "sdnrouter": {"label": "SDN Router",  "ns": False, "l3": True,  "prefix": "sr"},
+    "wifiap":    {"label": "Wi-Fi AP",    "ns": False, "l3": False, "prefix": "ap"},
 }
 
 FRR_DAEMONS = ["ospfd", "bgpd", "ripd", "isisd", "ospf6d", "eigrpd", "pimd", "ldpd", "bfdd"]
 
-DEFAULT_LINK = {"bw": 100, "delay": "1ms", "jitter": "0ms", "loss": 0, "queue": 1000}
+DEFAULT_LINK = {"bw": 100, "delay": "1ms", "jitter": "0ms", "loss": 0, "queue": 1000, "medium": "wire"}
 
 PROJECT_VERSION = 1
 
@@ -127,6 +129,7 @@ def validate_project(p):
                 errors.append(f"{name}: noto'g'ri statik marshrut {r}")
 
     used = set()
+    wifi_sta = {}
     for lid, l in (p.get("links") or {}).items():
         for side in ("a", "b"):
             e = l.get(side) or {}
@@ -143,6 +146,16 @@ def validate_project(p):
             used.add(key)
         if l.get("a", {}).get("dev") == l.get("b", {}).get("dev"):
             errors.append(f"link {lid}: qurilma o'ziga ulanmaydi")
+        if (l.get("params") or {}).get("medium") == "wifi":
+            ends = [devs.get((l.get(s_) or {}).get("dev"), {}).get("type") for s_ in ("a", "b")]
+            if ends.count("wifiap") != 1 or not any(t in ("host", "server", "router") for t in ends):
+                errors.append(f"link {lid}: Wi-Fi kabeli faqat Wi-Fi AP <-> host/server/router orasida")
+            else:
+                sta = l["a"]["dev"] if ends[1] == "wifiap" else l["b"]["dev"]
+                wifi_sta[sta] = wifi_sta.get(sta, 0) + 1
+    for sta, n in wifi_sta.items():
+        if n > 1:
+            errors.append(f"{sta}: bitta qurilma faqat bitta Wi-Fi AP'ga ulanadi")
     for cname, c in (p.get("controllers") or {}).items():
         if not NAME_RE.match(cname):
             errors.append(f"kontroller '{cname}': noto'g'ri nom")
@@ -160,6 +173,8 @@ def normalize_link_params(params):
     for k, v in (params or {}).items():
         if k in out and v not in (None, ""):
             out[k] = v
+    if out["medium"] not in ("wire", "wifi"):
+        raise ValueError("medium: wire | wifi")
     out["bw"] = float(out["bw"])
     out["loss"] = float(out["loss"])
     out["queue"] = int(out["queue"])

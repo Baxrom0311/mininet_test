@@ -167,6 +167,27 @@
       pane.append(h('div', { class: 'f-row' }, [field('Rejim', mode), field('SDN kontroller', ctrl)]),
         h('label', { class: 'toggle' }, [stp, 'STP (802.1D) — halqali topologiya uchun (faqat standalone)']));
     }
+    if (t === 'wifiap') {
+      const W = NL.wifi.apConfig(d);
+      const std = sel([['80211ax', '802.11ax (Wi-Fi 6)'], ['80211ac', '802.11ac (Wi-Fi 5)'], ['80211n', '802.11n (Wi-Fi 4)'], ['80211g', '802.11g']], W.standard);
+      const band = sel([['5', '5 GHz'], ['2.4', '2.4 GHz']], String(W.band));
+      const width = sel([['20', '20 MHz'], ['40', '40 MHz'], ['80', '80 MHz'], ['160', '160 MHz']], String(W.width));
+      const txp = inp(W.tx_power, '20', { type: 'number', step: 'any' });
+      const ssid = inp(cfg.ssid || '', 'netlab-' + name);
+      getters.push(() => { cfg.standard = std.value; cfg.band = parseFloat(band.value); cfg.width = parseInt(width.value, 10);
+        cfg.tx_power = parseFloat(txp.value) || 20; cfg.ssid = ssid.value.trim(); });
+      const rows = Object.entries(ports).map(([p_, info]) => {
+        const e = NL.wifi.linkEstimate(info.lid);
+        return e ? h('tr', {}, [info.peer, e.distance_m.toFixed(1) + ' m', e.rssi_dbm.toFixed(1), e.snr_db.toFixed(1), e.ok ? 'MCS' + e.mcs : '—', e.ok ? '~' + e.thr_mbps.toFixed(1) : 'aloqa yo\'q'].map(x => h('td', { text: x })))
+          : h('tr', {}, [info.peer + ' (simli, eth' + p_ + ')', '', '', '', '', ''].map(x => h('td', { text: x })));
+      });
+      pane.append(h('div', { class: 'f-row' }, [field('Standart', std), field('Diapazon', band)]),
+        h('div', { class: 'f-row' }, [field('Kanal kengligi', width), field('Uzatish quvvati (dBm)', txp)]),
+        field('SSID', ssid),
+        h('div', { class: 'isec' }, [h('h4', { text: 'Stansiyalar (radio modeli, joriy joylashuv)' }),
+          h('table', {}, [h('tr', {}, ['Qurilma', 'Masofa', 'RSSI dBm', 'SNR dB', 'MCS', 'Mbit/s'].map(x => h('th', { text: x }))), ...rows])]),
+        h('div', { class: 'note', text: 'Simsiz ulash: kabel asbobi (C) bilan AP va host/server/router ni bosing — avtomatik Wi-Fi bo\'ladi. AP\'ning simli porti (switch/server ga) oddiy kabel.' }));
+    }
     if (t === 'sdnrouter') {
       const ctrl = sel([['', '— tanlang —'], ...Object.keys(S.project.controllers).map(c => [c, c])], cfg.controller || '');
       getters.push(() => { cfg.controller = ctrl.value; });

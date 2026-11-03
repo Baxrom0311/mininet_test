@@ -117,6 +117,30 @@ with TestClient(create_app("demo")) as c:
         check(3 <= gap <= 32 and v.get(55, 0) > 3e6, f"{eng}: RIP uzilish {gap}s, keyin zaxira yo'l (r3) orqali tiklanadi")
         c.delete(f"/api/runs/rip_ring/{rid}")
 
+    # ---- Wi-Fi: radio modeli, ping, qamrovdan tashqari, analitik/ns-3 o'tkazuvchanlik ----
+    wp = c.get("/api/projects/wifi_ofis?example=true").json()
+    check(c.post("/api/validate", json=wp).json()["errors"] == [], "wifi_ofis: validatsiya")
+    c.post("/api/net/start", json={"project": wp})
+    check("0% packet loss" in ping(c, "lap3", "10.0.0.10"), "Wi-Fi: lap3 -> srv1 ping (64 m, MCS3)")
+    far = json.loads(json.dumps(wp)); far["devices"]["lap3"]["x"], far["devices"]["lap3"]["y"] = -400, -400
+    c.post("/api/net/stop"); c.post("/api/net/start", json={"project": far})
+    check("100% packet loss" in ping(c, "lap3", "10.0.0.10", 1), "Wi-Fi: qamrovdan tashqarida ping o'tmaydi")
+    c.post("/api/net/stop")
+    bad = json.loads(json.dumps(wp)); bad["links"]["w2"]["a"]["dev"] = "lap1"   # lap1 ikki marta Wi-Fi'da
+    check(any("bitta Wi-Fi" in e for e in c.post("/api/validate", json=bad).json()["errors"]),
+          "Wi-Fi: bitta stansiya ikki AP/kabelga ulanmaydi")
+    for eng in want:
+        rid = c.post("/api/runs", json={"project": wp, "scenario": "yolgiz", "engine": eng}).json()["run_id"]
+        t0 = time.time()
+        while time.time() - t0 < 240:
+            if not any(r.get("status") == "running" for r in c.get("/api/runs/wifi_ofis").json()["runs"]):
+                break
+            time.sleep(0.5)
+        r = c.get(f"/api/runs/wifi_ofis/{rid}").json()
+        thr = r["flows"]["d1"]["summary"]["avg_thr_bps"] / 1e6
+        check(70 <= thr <= 100, f"{eng}: Wi-Fi TCP (23 m, 802.11ax 20 MHz) 70..100 Mbit/s: {thr:.1f}")
+        c.delete(f"/api/runs/wifi_ofis/{rid}")
+
     if "ns3" not in want:
         print("  --   ns-3 o'rnatilmagan (pip install ns3) — ns-3 testi o'tkazib yuborildi")
 

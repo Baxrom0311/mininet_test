@@ -21,6 +21,7 @@ import time
 
 from lab.drivers.demo_driver import Net, _ms
 from lab.model import normalize_link_params, parse_rate
+from lab.wifi import link_estimate as wifi_link_estimate
 
 MSS_BITS = 1448 * 8
 
@@ -81,9 +82,39 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         else:
             n = Net(proj)
         cap = {}
+        wifi_of = {}    # lid -> (ap, stansiya foydali sig'imi bit/s)
         for lid, l in proj["links"].items():
             bw = float((l.get("params") or {}).get("bw", 100)) * 1e6
+            est = wifi_link_estimate(proj, lid)
+            if est:
+                bw = max(est["thr_mbps"], 0.001) * 1e6
+                wifi_of[lid] = (est["ap"], bw)
+                cap[("air", est["ap"])] = 1.0      # AP efir vaqti: jami ulush <= 1
             cap[(lid, "ab")] = cap[(lid, "ba")] = bw
+
+        max_sta = {}
+        for ap_, c_ in wifi_of.values():
+            max_sta[ap_] = max(max_sta.get(ap_, 0), c_)
+
+        def speed(path):
+            # efir vaqti bo'yicha adolat (A-MPDU'li zamonaviy Wi-Fi): har stansiya teng efir vaqti
+            # oladi -> tezligi o'z sig'imiga proporsional. Simli oqimlar uchun 1.
+            sp = 1.0
+            for lid, _d in path:
+                if lid in wifi_of:
+                    ap_, c_ = wifi_of[lid]
+                    sp = min(sp, c_ / max_sta[ap_])
+            return sp
+
+        def resources(path, tcp=False):
+            # kabel resurslari (bit/s, og'irlik 1) + Wi-Fi efir vaqti (og'irlik 1/stansiya sig'imi):
+            # sekin (uzoq) stansiya bir xil bit uchun ko'proq efir oladi — Wi-Fi "performance anomaly"
+            out = [(h, 1.0) for h in path]
+            for lid, _d in path:
+                if lid in wifi_of:
+                    # TCP: qaytuvchi ACK'lar ham efir oladi (~9%)
+                    out.append((("air", wifi_of[lid][0]), (1.09 if tcp else 1.0) / wifi_of[lid][1]))
+            return out
         flows = []   # har aktiv ilova uchun holat
         for a in apps:
             st = {"app": a, "ok": False, "path": [], "back": [], "rate": 0.0}
@@ -107,21 +138,24 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 f["offered"] = int(a.get("size", 64)) * 8 / float(a.get("interval", 0.2))
             else:
                 f["offered"] = parse_rate(a.get("rate", "1Mbps"))
-            for hop in f["path"]:
-                load[hop] += f["offered"]
+            f["res"] = resources(f["path"])
+            for key, w in f["res"]:
+                load[key] += f["offered"] * w
         scale = {k2: (min(1.0, cap[k2] / v) if v > 0 else 1.0) for k2, v in load.items()}
         used = {k2: 0.0 for k2 in cap}
         for f in flows:
             if "offered" in f:
-                s_min = min([scale[h] for h in f["path"]] or [1.0])
+                s_min = min([scale[key] for key, _w in f["res"]] or [1.0])
                 f["rate"] = f["offered"] * s_min
                 f["overload_drop"] = 1 - s_min
-                for hop in f["path"]:
-                    used[hop] += f["rate"]
+                for key, w in f["res"]:
+                    used[key] += f["rate"] * w
         # 2) TCP — max-min adolat (progressive filling) qolgan sig'imda
         tcp = [f for f in flows if f.get("active") and f["ok"] and f["app"]["type"] == "tcp"]
         for f in tcp:
             f["rate"] = 0.0
+            f["res"] = resources(f["path"], tcp=True)
+            f["spd"] = speed(f["path"])
             f["cap"] = parse_rate(f["app"]["rate"]) if f["app"].get("rate") else float("inf")
             loss_p = 1 - math.prod(1 - float((proj["links"][lid].get("params") or {}).get("loss", 0)) / 100
                                    for lid, _d in f["path"])
@@ -138,22 +172,23 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 break
             cnt = {}
             for f in live:
-                for hop in f["path"]:
-                    cnt[hop] = cnt.get(hop, 0) + 1
-            inc = min([remaining[h] / c for h, c in cnt.items()] + [f["cap"] - f["rate"] for f in live])
+                for key, w in f["res"]:
+                    cnt[key] = cnt.get(key, 0) + w * f["spd"]
+            inc = min([remaining[k2] / c for k2, c in cnt.items()] + [(f["cap"] - f["rate"]) / f["spd"] for f in live])
             if inc <= 1e-6:
                 inc = 0
             for f in live:
-                f["rate"] += inc
-                for hop in f["path"]:
-                    remaining[hop] -= inc
+                f["rate"] += inc * f["spd"]
+                for key, w in f["res"]:
+                    remaining[key] -= inc * f["spd"] * w
             for f in live:
-                if f["rate"] >= f["cap"] - 1e-6 or any(remaining[h] <= 1e-3 for h in f["path"]):
+                if f["rate"] >= f["cap"] - 1e-6 or any(remaining[key] <= 1e-6 * cap[key] for key, _w in f["res"]):
                     frozen.add(id(f))
         for f in tcp:
-            for hop in f["path"]:
-                used[hop] += f["rate"]
+            for key, w in f["res"]:
+                used[key] += f["rate"] * w
         tcp_on = {h for f in tcp for h in f["path"] if f["rate"] > 0 and f["cap"] == float("inf")}
+        air_sat = {k2[1] for k2 in cap if k2[0] == "air" and used[k2] >= 0.97}
 
         # 3) kechikish / yo'qotish
         def hop_delay(h, pkt_bits):
@@ -163,6 +198,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             tx = pkt_bits / c
             rho = min(used[h] / c, 0.999)
             qmax = int(p.get("queue", 1000)) * 12000 / c
+            if lid in wifi_of and wifi_of[lid][0] in air_sat:   # efir to'yingan — navbat o'sadi
+                return _ms(p.get("delay", "1ms")) / 1000 + tx + 0.25 * qmax, 0.25 * qmax
             if scale.get(h, 1) < 1 or h in tcp_on:          # to'yingan: navbat to'la (UDP) / yarim (TCP)
                 q = qmax if scale.get(h, 1) < 1 else 0.25 * qmax   # TCP: taxminiy turg'un navbat
             else:
@@ -212,4 +249,5 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             "flows": flows_out, "links": link_series, "events": applied, "wall_s": round(time.time() - t_wall, 3),
             "notes": ["oqim darajasidagi taxmin: UDP qat'iy, TCP max-min adolat + Mathis, navbat M/M/1",
                       "dinamik routing: demo modeli (dinamik daemonli routerlar o'zaro barcha subnetlarni biladi)",
-                      "RIP: kabel uzilgandan keyin rip_convergence_s (standart 15s) davomida eski yo'llar"]}
+                      "RIP: kabel uzilgandan keyin rip_convergence_s (standart 15s) davomida eski yo'llar",
+                      "Wi-Fi: SNR→MCS (ns-3 ga kalibrlangan), AP efir vaqti bo'yicha adolat (A-MPDU), TCP ACK efiri ~9%"]}

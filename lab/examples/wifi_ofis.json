@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "name": "wifi_ofis",
+  "meters_per_px": 0.25,
+  "notes": "Wi-Fi AP (802.11ax) va turli masofadagi 3 noutbuk. Masofa = kanvas * meters_per_px. lap3 uzoqda — past MCS. Uni sudrab ko'ring: kabel yorlig'ida taxminiy tezlik o'zgaradi.",
+  "devices": {
+    "ap1": {
+      "id": 1,
+      "type": "wifiap",
+      "x": 400,
+      "y": 300,
+      "config": {
+        "standard": "80211ax",
+        "band": 5,
+        "width": 20,
+        "tx_power": 20,
+        "ssid": "ofis"
+      }
+    },
+    "srv1": {
+      "id": 2,
+      "type": "server",
+      "x": 400,
+      "y": 520,
+      "config": {
+        "interfaces": {
+          "srv1-eth1": {
+            "ip": "10.0.0.10/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "lap1": {
+      "id": 3,
+      "type": "host",
+      "x": 330,
+      "y": 360,
+      "config": {
+        "interfaces": {
+          "lap1-eth1": {
+            "ip": "10.0.0.21/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "lap2": {
+      "id": 4,
+      "type": "host",
+      "x": 560,
+      "y": 180,
+      "config": {
+        "interfaces": {
+          "lap2-eth1": {
+            "ip": "10.0.0.22/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "lap3": {
+      "id": 5,
+      "type": "host",
+      "x": 180,
+      "y": 170,
+      "config": {
+        "interfaces": {
+          "lap3-eth1": {
+            "ip": "10.0.0.23/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "srv1",
+        "port": 1
+      },
+      "b": {
+        "dev": "ap1",
+        "port": 1
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000,
+        "medium": "wire"
+      },
+      "up": true
+    },
+    "w1": {
+      "a": {
+        "dev": "lap1",
+        "port": 1
+      },
+      "b": {
+        "dev": "ap1",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000,
+        "medium": "wifi"
+      },
+      "up": true
+    },
+    "w2": {
+      "a": {
+        "dev": "lap2",
+        "port": 1
+      },
+      "b": {
+        "dev": "ap1",
+        "port": 3
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000,
+        "medium": "wifi"
+      },
+      "up": true
+    },
+    "w3": {
+      "a": {
+        "dev": "lap3",
+        "port": 1
+      },
+      "b": {
+        "dev": "ap1",
+        "port": 4
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000,
+        "medium": "wifi"
+      },
+      "up": true
+    }
+  },
+  "p4_programs": {},
+  "controllers": {},
+  "scenarios": {
+    "yuklama": {
+      "duration": 20,
+      "apps": [
+        {
+          "id": "d1",
+          "type": "tcp",
+          "src": "srv1",
+          "dst": "lap1",
+          "start": 1,
+          "stop": 19,
+          "label": "yuklash srv1→lap1 (yaqin)"
+        },
+        {
+          "id": "d3",
+          "type": "tcp",
+          "src": "srv1",
+          "dst": "lap3",
+          "start": 1,
+          "stop": 19,
+          "label": "yuklash srv1→lap3 (uzoq)"
+        },
+        {
+          "id": "v2",
+          "type": "udp",
+          "src": "lap2",
+          "dst": "srv1",
+          "rate": "4Mbps",
+          "size": 1200,
+          "start": 1,
+          "stop": 19,
+          "label": "video lap2→srv1"
+        }
+      ],
+      "events": [],
+      "notes": "Ikki TCP yuklash + video: uzoqdagi sekin stansiya efirni ko'p egallaydi (performance anomaly)"
+    },
+    "yolgiz": {
+      "duration": 10,
+      "apps": [
+        {
+          "id": "d1",
+          "type": "tcp",
+          "src": "srv1",
+          "dst": "lap1",
+          "start": 1,
+          "stop": 9,
+          "label": "yuklash srv1→lap1"
+        }
+      ],
+      "events": []
+    }
+  }
+}

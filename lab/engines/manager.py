@@ -184,13 +184,20 @@ class RunManager:
                     app["rate"] = str(v) if not isinstance(v, (int, float)) else f"{v}Mbps"
                 else:
                     app["size"] = int(v)
+            elif kind == "ap":
+                ap = param.get("ap")
+                if (p2["devices"].get(ap) or {}).get("type") != "wifiap" or field != "tx_power":
+                    raise ValueError("Wi-Fi AP yoki maydon noto'g'ri")
+                if engine == "mininet":
+                    raise ValueError("AP quvvati tadqiqoti Mininet dvigatelida qo'llab-quvvatlanmaydi (radio yo'q)")
+                p2["devices"][ap].setdefault("config", {})["tx_power"] = float(v)
             else:
-                raise ValueError("param.kind: link | app")
+                raise ValueError("param.kind: link | app | ap")
             variants.append((v, p2, sc2))
         pname = project.get("name") or "untitled"
         self._dir(pname)
         study_id = re.sub(r"[^A-Za-z0-9_\-]", "_", time.strftime("%Y%m%d-%H%M%S") + f"-study-{scenario_name}"[:40])
-        pdesc = {**param, "label": (f"{param.get('link')}.{field}" if kind == "link" else f"{param.get('app')}.{field}")}
+        pdesc = {**param, "label": f"{param.get('link') or param.get('app') or param.get('ap')}.{field}"}
 
         def go():
             n = len(variants)

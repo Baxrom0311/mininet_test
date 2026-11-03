@@ -30,7 +30,9 @@ import sys
 import time
 
 L3 = {"host", "server", "router", "sdnrouter"}
-L2 = {"switch", "p4switch"}
+L2 = {"switch", "p4switch", "wifiap"}
+WIFI_STD = {"80211g": "WIFI_STANDARD_80211g", "80211n": "WIFI_STANDARD_80211n",
+            "80211ac": "WIFI_STANDARD_80211ac", "80211ax": "WIFI_STANDARD_80211ax"}
 
 
 def emit(**kw):
@@ -106,9 +108,13 @@ def main(inp_path, out_path):
     link_objs = {}         # lid -> {"devs": [d1, d2], "errs": [e1, e2], "ends": [...], "chan": ch}
     sw_ports = {n: ns.NetDeviceContainer() for n, d in devs.items() if d["type"] in L2}
     jitter_warn = False
+    wifi_links = []
     for lid, l in project["links"].items():
         a, b = l["a"], l["b"]
         p = l.get("params") or {}
+        if p.get("medium") == "wifi":
+            wifi_links.append((lid, l))
+            continue
         rate, delay = rate_str(p.get("bw", 100)), time_str(p.get("delay", "1ms"))
         q = f"{int(p.get('queue', 1000))}p"
         if str(p.get("jitter", "0ms")) not in ("0ms", "0", "0us", "0s", ""):
@@ -150,6 +156,65 @@ def main(inp_path, out_path):
                           "chan": d1.GetChannel()}
     if jitter_warn:
         emit(log="eslatma: jitter ns-3 kanal modelida yo'q — e'tiborsiz qoldirildi")
+
+    # ---- Wi-Fi: har AP — o'z kanali (YansWifi + LogDistance n=3), IdealWifiManager,
+    # joylashuv = kanvas koordinatasi * meters_per_px. Model lab/wifi.py bilan bir xil.
+    if wifi_links:
+        from lab.wifi import REF_LOSS, ap_config, meters_per_px
+        mpp = meters_per_px(project)
+        by_ap = {}
+        for lid, l in wifi_links:
+            ap_end, sta_end = (l["a"], l["b"]) if devs[l["a"]["dev"]]["type"] == "wifiap" else (l["b"], l["a"])
+            by_ap.setdefault(ap_end["dev"], []).append((lid, ap_end, sta_end))
+        mob_nodes, mob_pos = ns.NodeContainer(), ns.ListPositionAllocator()
+        placed = set()
+
+        def place(n):
+            if n in placed:
+                return
+            placed.add(n)
+            mob_nodes.Add(nodes[n])
+            mob_pos.Add(ns.Vector(float(devs[n].get("x", 0)) * mpp, float(devs[n].get("y", 0)) * mpp, 1.5))
+
+        for ap, members in by_ap.items():
+            cfg = ap_config(devs[ap])
+            ch = ns.YansWifiChannelHelper()
+            ch.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel")
+            ch.AddPropagationLoss("ns3::LogDistancePropagationLossModel", "Exponent", ns.DoubleValue(3.0),
+                                  "ReferenceLoss", ns.DoubleValue(REF_LOSS[cfg["band"]]))
+            phy = ns.YansWifiPhyHelper()
+            phy.SetChannel(ch.Create())
+            band = "BAND_5GHZ" if cfg["band"] == 5 else "BAND_2_4GHZ"
+            phy.Set("ChannelSettings", ns.StringValue(f"{{0, {cfg['width']}, {band}, 0}}"))
+            phy.Set("TxPowerStart", ns.DoubleValue(cfg["tx_power"]))
+            phy.Set("TxPowerEnd", ns.DoubleValue(cfg["tx_power"]))
+            wifi = ns.WifiHelper()
+            wifi.SetStandard(getattr(ns, WIFI_STD[cfg["standard"]]))
+            wifi.SetRemoteStationManager("ns3::IdealWifiManager")
+            mac = ns.WifiMacHelper()
+            ssid = ns.Ssid(cfg["ssid"] or f"netlab-{ap}")
+            stas = ns.NodeContainer()
+            for _lid, _ae, se in members:
+                stas.Add(nodes[se["dev"]])
+            mac.SetType("ns3::StaWifiMac", "Ssid", ns.SsidValue(ssid))
+            sdevs = wifi.Install(phy, mac, stas)
+            mac.SetType("ns3::ApWifiMac", "Ssid", ns.SsidValue(ssid))
+            ap_dev = wifi.Install(phy, mac, ns.NodeContainer(nodes[ap])).Get(0)
+            sw_ports[ap].Add(ap_dev)
+            place(ap)
+            for i, (lid, ae, se) in enumerate(members):
+                sd = sdevs.Get(i)
+                port_dev[(se["dev"], se["port"])] = sd
+                port_dev[(ae["dev"], ae["port"])] = ap_dev
+                place(se["dev"])
+                link_objs[lid] = {"devs": [sd, ap_dev], "errs": [], "ends": [se], "loss": 0.0,
+                                  "chan": None, "wifi": True}
+            emit(log=f"Wi-Fi {ap}: {cfg['standard']} {cfg['band']} GHz {cfg['width']} MHz, "
+                     f"{cfg['tx_power']:.0f} dBm, {len(members)} stansiya")
+        mob = ns.MobilityHelper()
+        mob.SetPositionAllocator(mob_pos)
+        mob.SetMobilityModel("ns3::ConstantPositionMobilityModel")
+        mob.Install(mob_nodes)
 
     emit(log=f"kabellar: {len(link_objs)}")
     bridge = ns.BridgeHelper()
@@ -269,7 +334,7 @@ def main(inp_path, out_path):
         lo = link_objs.get(lid)
         if not lo:
             return
-        if params:
+        if params and not lo.get("wifi"):       # Wi-Fi: tezlik radio modelidan, o'zgarmaydi
             if "bw" in params:
                 r = ns.StringValue(rate_str(params["bw"]))
                 for dv in lo["devs"]:
@@ -377,6 +442,7 @@ def main(inp_path, out_path):
            "wall_s": round(time.time() - t_wall, 2),
            "notes": ["dinamik routing: ripd → ns-3 RIPv2 (haqiqiy konvergensiya); ospfd/isisd va boshqalar → Ipv4GlobalRouting (SPF, darhol)",
                      "TCP: Cubic, MSS 1448, bufer 4/6 MB (Linux'ga yaqin)",
+                     "Wi-Fi: YansWifi + LogDistance(n=3), IdealWifiManager; joylashuv = kanvas * meters_per_px",
                      "jitter parametri modellashtirilmaydi", "P4/SDN mantiqi: switch L2 bridge, SDN router — L3 router sifatida"]}
     with open(out_path, "w") as f:
         json.dump(out, f)

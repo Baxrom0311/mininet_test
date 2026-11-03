@@ -155,11 +155,13 @@
 
     // --- parametrik tadqiqot: bitta parametr, bir nechta qiymat -> har biri alohida ishga tushirish
     const PARAM_DEFAULTS = { bw: '1,2,5,10,20,50,100', delay: '1,5,10,20,50,100', loss: '0,0.5,1,2,5,10',
-      queue: '10,50,100,500,1000', rate: '1Mbps,2Mbps,5Mbps,10Mbps,20Mbps', size: '200,500,1000,1400' };
-    const FIELD_LABEL = { bw: 'tezlik (Mbit/s)', delay: 'kechikish (ms)', loss: 'yo\'qotish (%)', queue: 'navbat (paket)', rate: 'tezlik', size: 'paket (B)' };
+      queue: '10,50,100,500,1000', rate: '1Mbps,2Mbps,5Mbps,10Mbps,20Mbps', size: '200,500,1000,1400', tx_power: '5,10,15,20,25' };
+    const FIELD_LABEL = { tx_power: 'quvvat (dBm)', bw: 'tezlik (Mbit/s)', delay: 'kechikish (ms)', loss: 'yo\'qotish (%)', queue: 'navbat (paket)', rate: 'tezlik', size: 'paket (B)' };
     const opts = [];
     Object.entries(S.project.links).forEach(([lid, l]) => ['bw', 'delay', 'loss', 'queue'].forEach(f =>
       opts.push([`link|${lid}|${f}`, `kabel ${lid} (${l.a.dev}↔${l.b.dev}) · ${FIELD_LABEL[f]}`])));
+    Object.entries(S.project.devices).filter(([, d]) => d.type === 'wifiap').forEach(([n]) =>
+      opts.push([`ap|${n}|tx_power`, `Wi-Fi ${n} · uzatish quvvati (dBm)`]));
     sc.apps.forEach(a => (a.type === 'tcp' ? ['rate'] : a.type === 'udp' ? ['rate', 'size'] : []).forEach(f =>
       opts.push([`app|${a.id}|${f}`, `ilova ${a.id} · ${FIELD_LABEL[f]}`])));
     const pSel = F().sel(opts, NL.storage.get('netlab.studyParam', opts[0] ? opts[0][0] : ''));
@@ -189,7 +191,7 @@
       if (!kind) { NL.toast('Parametr tanlang', 'warn'); return; }
       try {
         const r = await NL.api.post('/api/studies', { project: S.project, scenario: name, engine: engSel.value,
-          param: kind === 'link' ? { kind, link: target, field } : { kind, app: target, field }, values });
+          param: kind === 'link' ? { kind, link: target, field } : kind === 'ap' ? { kind, ap: target, field } : { kind, app: target, field }, values });
         study = { id: r.study_id, n: r.runs, i: 0 }; stBtn.disabled = true; stBar.style.width = '0'; stInfo.textContent = `0/${r.runs}`;
       } catch (e) { NL.toast(e.message, 'error'); }
     }
@@ -302,7 +304,7 @@
         series = flowIds.slice(0, SERIES_N).map((fid, k) => ({ name: (data[0].flows[fid] || {}).label || fid, color: seriesColor(k),
           points: data.map((r, i) => ({ x: xs[i], y: ((r.flows[fid] || {}).summary || {})[M.sum] ?? null })) }));
       }
-      const fieldName = { bw: 'kabel tezligi, Mbit/s', delay: 'kechikish, ms', loss: 'loss, %', queue: 'navbat, paket', rate: 'ilova tezligi', size: 'paket, B' }[P.field] || P.field;
+      const fieldName = { tx_power: 'AP quvvati, dBm', bw: 'kabel tezligi, Mbit/s', delay: 'kechikish, ms', loss: 'loss, %', queue: 'navbat, paket', rate: 'ilova tezligi', size: 'paket, B' }[P.field] || P.field;
       const box = h('div', { class: 'chart-card' });
       main.append(box);
       NL.lineChart(box, { series, fmt: M.fmt, markers: true, xTicks: xs, xFmt: (x) => String(x),

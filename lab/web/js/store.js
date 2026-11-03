@@ -15,7 +15,7 @@
     dirty: false,
   };
 
-  const TYPE_PREFIX = { host: 'pc', server: 'srv', switch: 's', p4switch: 'p', router: 'r', sdnrouter: 'sr' };
+  const TYPE_PREFIX = { host: 'pc', server: 'srv', switch: 's', p4switch: 'p', router: 'r', sdnrouter: 'sr', wifiap: 'ap' };
 
   S.empty = (name) => ({ version: 1, name: name || 'untitled', devices: {}, links: {}, p4_programs: {}, controllers: {}, scenarios: {}, notes: '' });
 
@@ -67,6 +67,7 @@
       }
       case 'router': return { interfaces: {}, daemons: ['ospfd'], startup: '', routes: [] };
       case 'sdnrouter': return { interfaces: {}, controller: Object.keys(S.project.controllers)[0] || '', routes: [] };
+      case 'wifiap': return { standard: '80211ax', band: 5, width: 20, tx_power: 20, ssid: '' };
       default: return {};
     }
   };
@@ -140,8 +141,13 @@
   S.addLink = async function (a, b) {
     if (a === b) return null;
     const lid = S.newLinkId();
+    // Wi-Fi AP <-> host/server/router: simsiz (qurilma allaqachon boshqa AP'ga ulanmagan bo'lsa)
+    const ta = S.dev(a).type, tb = S.dev(b).type, L3 = ['host', 'server', 'router'];
+    const sta = ta === 'wifiap' && L3.includes(tb) ? b : tb === 'wifiap' && L3.includes(ta) ? a : null;
+    const hasWifi = sta && Object.values(S.project.links).some(x => x.params && x.params.medium === 'wifi' && (x.a.dev === sta || x.b.dev === sta));
+    const medium = sta && !hasWifi ? 'wifi' : 'wire';
     const l = { a: { dev: a, port: S.freePort(a) }, b: { dev: b, port: S.freePort(b) },
-      params: { bw: 100, delay: '1ms', jitter: '0ms', loss: 0, queue: 1000 }, up: true };
+      params: { bw: 100, delay: '1ms', jitter: '0ms', loss: 0, queue: 1000, medium }, up: true };
     S.project.links[lid] = l;
     S.selection = { kind: 'link', id: lid };
     S.touch();
