@@ -26,6 +26,7 @@ import signal
 import socket
 import struct
 import subprocess
+import sys
 import termios
 import threading
 import time
@@ -70,6 +71,66 @@ def _wait_port(port, timeout=10.0):
         except OSError:
             time.sleep(0.2)
     return False
+
+
+_KCAPS = None
+
+
+def kernel_caps():
+    """Kernel imkoniyatlari (bir marta aniqlanadi):
+      ovs_datapath — "kernel" (openvswitch moduli bor) yoki "user" (userspace/netdev datapath).
+          WSL2 va ko'p konteyner kernellarida openvswitch moduli yo'q — shunda OVS faqat
+          userspace datapath bilan ishlaydi (sekinroq, lekin to'liq funksional).
+          NETLAB_OVS_DATAPATH=kernel|user bilan majburlash mumkin.
+      netem — sch_netem bormi (kechikish/jitter/loss/navbat emulyatsiyasi uchun). Yo'q bo'lsa
+          kabellar faqat tezlik (HTB) bilan cheklanadi."""
+    global _KCAPS
+    if _KCAPS is not None:
+        return _KCAPS
+    forced = os.environ.get("NETLAB_OVS_DATAPATH", "").strip().lower()
+    if forced in ("kernel", "user"):
+        dp = forced
+    else:
+        dp = "kernel" if os.path.isdir("/sys/module/openvswitch") else "user"
+    netem = False
+    a, b = "nlprobe0", "nlprobe1"
+    try:
+        if subprocess.run(["ip", "link", "add", a, "type", "veth", "peer", "name", b], capture_output=True).returncode == 0:
+            netem = subprocess.run(["tc", "qdisc", "add", "dev", a, "root", "netem", "delay", "1ms"],
+                                   capture_output=True).returncode == 0
+            subprocess.run(["ip", "link", "del", a], capture_output=True)
+    except FileNotFoundError:
+        pass
+    _KCAPS = {"ovs_datapath": dp, "netem": netem}
+    return _KCAPS
+
+
+_CTRL_CMD = None
+
+
+def controller_cmd():
+    """os-ken/ryu manager buyrug'i. Skript shebang'idagi python paketlarni
+    ko'tara olmasligi mumkin (masalan, /usr/bin/python3 -> 3.13, Debian
+    paketlari 3.12 uchun) — shuning uchun import ishlaydigan interpreter tanlanadi."""
+    global _CTRL_CMD
+    if _CTRL_CMD is not None:
+        return _CTRL_CMD
+    cands = [("os_ken.cmd.manager", "osken-manager"), ("ryu.cmd.manager", "ryu-manager")]
+    pys = [sys.executable, "python3", "python3.12", "python3.11", "python3.10"]
+    for mod, script in cands:
+        for py in pys:
+            exe = shutil.which(py) if not os.path.isabs(py) else py
+            if not exe:
+                continue
+            r = subprocess.run([exe, "-c", f"import {mod}"], capture_output=True, timeout=30)
+            if r.returncode == 0:
+                _CTRL_CMD = [exe, "-m", mod]
+                return _CTRL_CMD
+        if _which(script):
+            _CTRL_CMD = [_which(script)]
+            return _CTRL_CMD
+    _CTRL_CMD = []
+    return _CTRL_CMD
 
 
 def _read_net_dev(pid):
@@ -238,6 +299,8 @@ class MininetDriver(BaseDriver):
         self._cap_procs = {}    # owner key ('root' | node name) -> Popen
         self._intf_map = {}     # ifname -> (link_id, 'ab'|'ba')
         self._pkt_budget = {}   # link_id -> (second, count)
+        self._netem_warned = False
+        self._datapath = "kernel"
 
     # ─────────────────────────── imkoniyatlar ───────────────────────────
     def capabilities(self):
@@ -252,9 +315,12 @@ class MininetDriver(BaseDriver):
             "ovs": bool(_which("ovs-vsctl")),
             "frr": os.path.exists(os.path.join(FRR_BIN, "zebra")),
             "p4": bool(_which("simple_switch")),
+            "sdn": bool(controller_cmd()),
             "p4c": bool(_which("p4c-bm2-ss", "p4c")),
-            "sdn": bool(_which("osken-manager", "ryu-manager")),
             "tcpdump": bool(_which("tcpdump")),
+            "ethtool": bool(_which("ethtool")),
+            "iperf3": bool(_which("iperf3")),
+            **(kernel_caps() if os.geteuid() == 0 else {}),
         }
 
     def _preflight(self, project):
@@ -288,6 +354,14 @@ class MininetDriver(BaseDriver):
             from mininet.log import setLogLevel
             from mininet.net import Mininet
             setLogLevel("warning")
+            kc = kernel_caps()
+            self._datapath = kc["ovs_datapath"]
+            self._netem_warned = False
+            if self._datapath == "user":
+                self.bus.log("info", "OVS kernel moduli yo'q — userspace datapath (netdev) ishlatiladi")
+                if not _which("ethtool"):
+                    self.bus.log("warn", "ethtool yo'q — userspace OVS'da TCP/UDP ishlamasligi mumkin "
+                                         "(apt install ethtool)")
             self.bus.log("info", "Oldingi sessiya tozalanmoqda (mn -c)...")
             cleanup()
             shutil.rmtree(RUN_DIR, ignore_errors=True)
@@ -373,16 +447,16 @@ class MininetDriver(BaseDriver):
             self.net.addHost(name, cls=FRRRouter, ip=None)
         elif t == "switch":
             sdn = cfg.get("mode") == "sdn"
-            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13",
+            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13", datapath=self._datapath,
                                failMode="secure" if sdn else "standalone",
                                stp=bool(cfg.get("stp")) and not sdn)
         elif t == "sdnrouter":
-            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13",
+            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13", datapath=self._datapath,
                                failMode="secure")
         elif t == "wifiap":
             # Mininet'da radio yo'q: AP = OVS L2 switch, Wi-Fi kabellari radio modelidan
             # hisoblangan tezlikdagi TCLink (umumiy efir emulyatsiya qilinmaydi).
-            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13",
+            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13", datapath=self._datapath,
                                failMode="standalone")
         elif t == "p4switch":
             self.net.addSwitch(name, cls=P4Switch, dpid=f"{did:016x}",
@@ -432,6 +506,10 @@ class MininetDriver(BaseDriver):
             if ip:
                 cmds.append(f"ip addr add {ip} dev {ifn}")
             cmds.append(f"ip link set {ifn} up")
+            if self._datapath == "user":
+                # userspace (netdev) OVS veth'dagi "partial" checksum'ni to'ldirmaydi —
+                # TX offload o'chirilmasa TCP/UDP paketlar tashlanadi (ICMP o'tadi)
+                cmds.append(f"ethtool -K {ifn} tx off >/dev/null")
         gw = cfg.get("gateway")
         if gw and d["type"] in ("host", "server"):
             cmds.append(f"ip route replace default via {gw}")
@@ -526,11 +604,20 @@ class MininetDriver(BaseDriver):
         opts = {"bw": p["bw"], "delay": p["delay"], "loss": p["loss"] or None, "max_queue_size": p["queue"]}
         if p["jitter"] not in ("0ms", "0us", "0s", "0"):
             opts["jitter"] = p["jitter"]
+        ok = True
         if p.get("medium") == "wifi":
             est = wifi_link_estimate(self.project, lid)
             opts.update(bw=max(est["thr_mbps"], 0.1), delay="1ms", jitter="0.5ms", loss=None)
-            return opts, est["ok"]
-        return opts, True
+            ok = est["ok"]
+        if not kernel_caps()["netem"]:
+            # sch_netem yo'q: Mininet TCIntf delay/jitter/loss VA navbat (limit) uchun netem ishlatadi
+            for k in ("delay", "jitter", "loss", "max_queue_size"):
+                opts.pop(k, None)
+            if not self._netem_warned:
+                self._netem_warned = True
+                self.bus.log("warn", "Kernelda netem yo'q: kabellarda faqat tezlik (HTB) emulyatsiya qilinadi — "
+                                     "kechikish, jitter, loss va navbat uzunligi e'tiborsiz qoldiriladi")
+        return opts, ok
 
     def _add_link_obj(self, lid, l):
         from mininet.link import TCLink
@@ -749,12 +836,12 @@ class MininetDriver(BaseDriver):
         with open(os.path.join(d, "app.py"), "w") as f:
             f.write(c.get("code", ""))
         self._write_ctrl_configs()
-        mgr = _which("osken-manager", "ryu-manager")
+        mgr = controller_cmd()
         if not mgr:
             raise DriverError("osken-manager/ryu-manager topilmadi")
         logf = open(os.path.join(d, "controller.log"), "ab")
         env = dict(os.environ, NETLAB_CONFIG=os.path.join(d, "config.json"))
-        p = subprocess.Popen([mgr, "--ofp-listen-host", "127.0.0.1",
+        p = subprocess.Popen([*mgr, "--ofp-listen-host", "127.0.0.1",
                               "--ofp-tcp-listen-port", str(c["port"]), os.path.join(d, "app.py")],
                              stdout=logf, stderr=subprocess.STDOUT, env=env, cwd=d,
                              start_new_session=True)

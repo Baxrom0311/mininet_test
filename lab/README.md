@@ -29,6 +29,22 @@ ham shu manzil ishlaydi (WSL localhost forwarding). Agar ishlamasa,
 `--host 0.0.0.0` bilan ishga tushiring: server avtomatik token yaratib, kirish
 URL'ini ekranga chiqaradi.
 
+**Yadro imkoniyatlari avtomatik aniqlanadi** (`/api/info` → `capabilities`):
+
+| Holat | Nima qilinadi |
+|---|---|
+| `openvswitch` yadro moduli yo'q (WSL2 standart yadrosi, konteynerlar) | OVS **userspace datapath** (`datapath=netdev`) ishlatiladi; veth'larda TX checksum offload `ethtool -K … tx off` bilan o'chiriladi (aks holda TCP/UDP o'tmaydi, faqat ping o'tadi) |
+| `sch_netem` yo'q | kabel `bw` (HTB) ishlaydi, `delay/jitter/loss` e'tiborsiz qoldiriladi va bir marta ogohlantiriladi |
+| os-ken skripti boshqa Python versiyasiga tegishli | import qila oladigan interpreter (`python3.12 -m os_ken.cmd.manager` …) avtomatik tanlanadi |
+
+Majburlash: `NETLAB_OVS_DATAPATH=kernel|user`.
+
+Haqiqiy tarmoq integratsiya testi (root kerak; FRR/os-ken/BMv2 bo'lmasa tegishli qism o'tkazib yuboriladi):
+
+```bash
+sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu sdn p4
+```
+
 ### Istalgan kompyuter (demo rejim, Mininet'siz)
 
 ```bash
