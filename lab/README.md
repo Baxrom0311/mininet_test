@@ -326,8 +326,17 @@ masalan `5,10,15,20,25` dBm qiymatlarida uzoqdagi stansiya tezligini ko'ring.
 ## Klaviatura
 
 `V` — tanlash, `C` — kabel, `D` — o'chirish, `Del` — tanlanganni o'chirish,
-`Enter` — qurilmaga kirish, `F` — hammasini ko'rsatish, `Esc` — bekor qilish,
+`Enter` — qurilmaga kirish, `F` — hammasini ko'rsatish, `Esc` — rejimni bekor qilish,
 `Ctrl+S` — saqlash. Qurilmaga ikki marta bosish — ichiga kirish.
+
+- **`Ctrl+K` — buyruqlar palitrasi.** Qurilma (nomi yoki IP bo'yicha), ssenariy, P4/SDN
+  dastur va namuna loyihalarni qidiradi. Undan qurilma qo'shish, tarmoqni ishga
+  tushirish/to'xtatish, saqlash, mavzuni almashtirish mumkin. `↑↓` — tanlash, `Enter` —
+  bajarish.
+- **`Ctrl+Z` / `Ctrl+Shift+Z` (yoki `Ctrl+Y`) — bekor qilish / qaytarish** (100 qadamgacha).
+  Qurilma va kabel qo'shish/o'chirish, ko'chirish, sozlamalar, ssenariy tahrirlari tarixga
+  yoziladi. Tez ketma-ket yozish bitta qadamga birlashtiriladi. Tarmoq ishlayotganda
+  o'chirilgan, chunki jonli tarmoq holati bilan farqlanib qoladi.
 
 ## Xavfsizlik
 

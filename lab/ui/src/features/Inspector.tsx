@@ -66,7 +66,7 @@ function ProjectInsp() {
         <div className="text-[11px] leading-5 text-muted-foreground">
           <b className="text-foreground">Klaviatura:</b> <span className="kbd">V</span> tanlash, <span className="kbd">C</span> kabel, <span className="kbd">D</span> o'chirish,
           <span className="kbd">Del</span> tanlanganni o'chirish, <span className="kbd">Enter</span> qurilmaga kirish, <span className="kbd">F</span> hammasini ko'rsatish,
-          <span className="kbd">Esc</span> bekor, <span className="kbd">Ctrl+S</span> saqlash.<br />
+          <span className="kbd">Esc</span> bekor, <span className="kbd">Ctrl+S</span> saqlash, <span className="kbd">Ctrl+Z</span> bekor qilish, <span className="kbd">Ctrl+Shift+Z</span> qaytarish, <span className="kbd">Ctrl+K</span> qidiruv.<br />
           <b className="text-foreground">Sichqoncha:</b> bo'sh joyni sudrash — siljitish, g'ildirak — zoom, Alt — panjarasiz ko'chirish, ikki marta bosish — qurilmaga kirish.
         </div>
       </div>

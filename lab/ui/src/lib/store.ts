@@ -37,22 +37,70 @@ interface State {
   wins: Win[]
   zTop: number
   theme: 'dark' | 'light'
+  canUndo: boolean
+  canRedo: boolean
 }
 
 export const useStore = create<State>(() => ({
   info: null, templates: { p4: {}, sdn: {} }, status: { running: false }, project: emptyProject(), selection: null, dirty: false,
   stats: {}, history: {}, mode: 'select', placeType: null, linkSrc: null, overlay: [], pickCb: null, busy: null, wsOk: false, wins: [], zTop: 10,
   theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+  canUndo: false, canRedo: false,
 }))
 
 const S = () => useStore.getState()
 const set = useStore.setState
 const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x))
 
-/** Loyihani o'zgartirish: draft (nusxa) ustida ishlaydi va dirty belgisini qo'yadi. */
-export function mutate(fn: (p: Project) => void) {
-  const p = clone(S().project)
+// ---------------- bekor qilish / qaytarish ----------------
+// Har mutate() dan oldingi loyiha holati saqlanadi. Tez ketma-ket o'zgarishlar (yozish, 700 ms ichida)
+// bitta qadamga birlashtiriladi. Tarmoq ishlayotganda o'chirilgan: backend holati bilan farqlanib qoladi.
+const undoStack: Project[] = [], redoStack: Project[] = []
+let lastPush = 0
+const HISTORY_MAX = 100
+const syncFlags = () => set({ canUndo: undoStack.length > 0, canRedo: redoStack.length > 0 })
+
+export function pushHistory(prev: Project, coalesce = true) {
+  const now = Date.now()
+  if (!(coalesce && now - lastPush < 700 && undoStack.length)) {
+    undoStack.push(prev)
+    if (undoStack.length > HISTORY_MAX) undoStack.shift()
+  }
+  lastPush = now
+  redoStack.length = 0
+  syncFlags()
+}
+
+function restore(p: Project) {
+  set((s) => ({
+    project: p, dirty: true,
+    selection: s.selection && (s.selection.kind === 'device' ? p.devices[s.selection.id] : p.links[s.selection.id]) ? s.selection : null,
+    wins: s.wins.filter((w) => w.kind === 'results' || (w.kind === 'device' ? p.devices[w.ref] : w.kind === 'p4' ? p.p4_programs[w.ref] != null
+      : w.kind === 'sdn' ? p.controllers[w.ref] : p.scenarios?.[w.ref])),
+  }))
+  storage.set('netlab.draft', p)
+}
+
+export function undo() {
+  if (running()) return toast("Tarmoq ishlayotganda bekor qilib bo'lmaydi — avval to'xtating", 'warn')
+  const prev = undoStack.pop(); if (!prev) return
+  redoStack.push(S().project); lastPush = 0
+  restore(prev); syncFlags()
+}
+export function redo() {
+  if (running()) return toast("Tarmoq ishlayotganda qaytarib bo'lmaydi — avval to'xtating", 'warn')
+  const next = redoStack.pop(); if (!next) return
+  undoStack.push(S().project); lastPush = 0
+  restore(next); syncFlags()
+}
+const clearHistory = () => { undoStack.length = 0; redoStack.length = 0; lastPush = 0; syncFlags() }
+
+/** Loyihani o'zgartirish: draft (nusxa) ustida ishlaydi, tarixga yozadi va dirty belgisini qo'yadi. */
+export function mutate(fn: (p: Project) => void, opts: { history?: boolean } = {}) {
+  const before = S().project
+  const p = clone(before)
   fn(p)
+  if (opts.history !== false) pushHistory(before)
   set({ project: p, dirty: true })
   storage.set('netlab.draft', p)
   return p
@@ -69,6 +117,7 @@ export function loadProject(p: Project, dirty = false) {
   const q = clone(p)
   for (const k of ['devices', 'links', 'p4_programs', 'controllers', 'scenarios'] as const) (q as any)[k] ||= {}
   set({ project: q, selection: null, dirty, wins: [], overlay: [] })
+  clearHistory()
 }
 
 export const portsOf = (p: Project, dev: string) => {
@@ -210,7 +259,7 @@ export async function stopNet() {
 }
 export async function saveProject(name?: string) {
   const n = name || S().project.name
-  const p = mutate((p) => { p.name = n })
+  const p = mutate((p) => { p.name = n }, { history: false })
   const r = await api.put<{ warnings: string[] }>('/api/projects/' + encodeURIComponent(n), p)
   set({ dirty: false })
   toast(`Saqlandi: ${n}` + (r.warnings?.length ? `\n(${r.warnings.length} ogohlantirish)` : ''), 'ok')
@@ -255,6 +304,13 @@ on('ev:link', (ev: { link: string; up: boolean; params?: LinkParams }) => {
   const nl: Link = { ...l, up: ev.up, params: ev.params || l.params }
   set({ project: { ...S().project, links: { ...S().project.links, [ev.link]: nl } } })
 })
+
+export function toggleTheme() {
+  const dark = S().theme !== 'dark'
+  document.documentElement.classList.toggle('dark', dark)
+  storage.set('netlab.theme', dark ? 'dark' : 'light')
+  set({ theme: dark ? 'dark' : 'light' })      // grafiklar CSS ranglarini qayta o'qiydi
+}
 
 export const devLabel = (t: string) => S().info?.device_types[t]?.label || t
 export type { Device }

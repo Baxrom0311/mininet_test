@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Download, FilePlus2, FolderOpen, Moon, Play, Radio, Save, Square, Sun, Upload } from 'lucide-react'
+import { Download, FilePlus2, FolderOpen, Moon, Play, Radio, Redo2, Save, Search, Square, Sun, Undo2, Upload } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -7,20 +7,11 @@ import { Input } from '@/components/ui/input'
 import { Tip } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
-import { storage } from '@/lib/format'
-import { emptyProject, loadProject, mutate, running, saveProject, startNet, stopNet, useStore } from '@/lib/store'
+import { emptyProject, loadProject, mutate, redo, running, saveProject, startNet, stopNet, toggleTheme, undo, useStore } from '@/lib/store'
 import type { Project } from '@/lib/types'
 import { canvasApi } from './Canvas'
+import { paletteState } from './CommandPalette'
 import { cn } from '@/lib/utils'
-
-export function useTheme() {
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
-  useEffect(() => {
-    document.documentElement.classList.toggle('dark', dark); storage.set('netlab.theme', dark ? 'dark' : 'light')
-    useStore.setState({ theme: dark ? 'dark' : 'light' })   // grafiklar CSS ranglarini qayta o'qisin
-  }, [dark])
-  return [dark, setDark] as const
-}
 
 export function Topbar() {
   const project = useStore((s) => s.project)
@@ -29,7 +20,8 @@ export function Topbar() {
   const info = useStore((s) => s.info)
   const busy = useStore((s) => s.busy)
   const wsOk = useStore((s) => s.wsOk)
-  const [dark, setDark] = useTheme()
+  const dark = useStore((s) => s.theme) === 'dark'
+  const canUndo = useStore((s) => s.canUndo), canRedo = useStore((s) => s.canRedo)
   const [openDlg, setOpenDlg] = useState(false)
   const [name, setName] = useState(project.name)
   useEffect(() => setName(project.name), [project.name])
@@ -68,6 +60,12 @@ export function Topbar() {
       <Button variant="ghost" size="sm" onClick={() => saveProject().catch((e) => toast(e.message, 'error'))}><Save /> Saqlash</Button>
       <Button variant="ghost" size="sm" onClick={exportJson}><Download /> Eksport</Button>
       <Button variant="ghost" size="sm" onClick={importJson}><Upload /> Import</Button>
+      <div className="mx-1 h-5 w-px bg-border" />
+      <Tip content="Bekor qilish (Ctrl+Z)"><Button variant="ghost" size="icon" disabled={!canUndo} onClick={undo}><Undo2 /></Button></Tip>
+      <Tip content="Qaytarish (Ctrl+Shift+Z)"><Button variant="ghost" size="icon" disabled={!canRedo} onClick={redo}><Redo2 /></Button></Tip>
+      <Button variant="outline" size="sm" className="ml-1 w-44 justify-start text-muted-foreground" onClick={() => paletteState.open(true)}>
+        <Search /> Qidirish… <span className="kbd ml-auto">Ctrl K</span>
+      </Button>
       <div className="flex-1" />
       {busy && <span className="text-xs text-muted-foreground">{busy}</span>}
       <div className="hidden max-w-[360px] flex-wrap gap-1 xl:flex">
@@ -84,7 +82,7 @@ export function Topbar() {
       <Button size="sm" variant={status.running ? 'destructive' : 'default'} disabled={!!busy} onClick={() => (status.running ? stopNet() : startNet())}>
         {status.running ? <><Square /> To'xtatish</> : <><Play /> Ishga tushirish</>}
       </Button>
-      <Button variant="ghost" size="icon" onClick={() => setDark(!dark)} title="Kun / tun">{dark ? <Sun /> : <Moon />}</Button>
+      <Button variant="ghost" size="icon" onClick={toggleTheme} title="Kun / tun">{dark ? <Sun /> : <Moon />}</Button>
       <OpenProjectDialog open={openDlg} onClose={() => setOpenDlg(false)} confirmDirty={confirmDirty} />
     </header>
   )

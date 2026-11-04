@@ -4,9 +4,10 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 import { connectEvents } from '@/lib/bus'
 import { storage } from '@/lib/format'
-import { emptyProject, loadProject, openWin, removeDevice, removeLink, saveProject, setMode, useStore } from '@/lib/store'
+import { emptyProject, loadProject, openWin, redo, removeDevice, removeLink, saveProject, setMode, toggleTheme, undo, useStore } from '@/lib/store'
 import type { Info, Project } from '@/lib/types'
 import { Canvas, canvasApi } from '@/features/Canvas'
+import { CommandPalette, paletteState } from '@/features/CommandPalette'
 import { P4Window, SdnWindow } from '@/features/CodeWindows'
 import { DeviceWindow } from '@/features/DeviceWindow'
 import { Dock, logLocal } from '@/features/Dock'
@@ -34,10 +35,13 @@ function useKeys() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const st = useStore.getState()
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); paletteState.open(true); return }
       if (e.key === 'Escape' && st.mode !== 'select') { setMode('select'); return }
       const t = e.target as Element
       if (t.closest?.('input,textarea,select,[role=combobox],.xterm,[data-win],[role=dialog]')) return
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); saveProject().catch((er) => toast(er.message, 'error')); return }
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) { e.preventDefault(); redo(); return }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return }
       if (e.ctrlKey || e.metaKey || e.altKey) return
       const k = e.key.toLowerCase()
       if (k === 'v') setMode('select')
@@ -85,6 +89,7 @@ export default function App() {
         <div style={{ gridArea: 'dock' }} className="flex min-h-0 flex-col"><Dock collapsed={dockCollapsed} onToggle={() => setDockCollapsed(!dockCollapsed)} /></div>
       </div>
       <Windows />
+      <CommandPalette onToggleTheme={toggleTheme} />
       <Toaster />
     </TooltipProvider>
   )

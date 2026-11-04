@@ -6,8 +6,8 @@ import { ICON_PATHS } from '@/components/DeviceIcon'
 import { Button } from '@/components/ui/button'
 import { on } from '@/lib/bus'
 import { PROTO_COLORS, fmtBps } from '@/lib/format'
-import { addDevice, addLink, devLabel, moveDevice, openWin, removeDevice, removeLink, select, setMode, useStore } from '@/lib/store'
-import type { DeviceType } from '@/lib/types'
+import { addDevice, addLink, devLabel, moveDevice, openWin, pushHistory, removeDevice, removeLink, select, setMode, useStore } from '@/lib/store'
+import type { DeviceType, Project } from '@/lib/types'
 import { apConfig, linkEstimate, mpp as mppOf, range, rangeForSnr } from '@/lib/wifi'
 import { cn } from '@/lib/utils'
 
@@ -33,7 +33,7 @@ export function Canvas() {
   const [view, setView] = useState({ tx: 0, ty: 0, k: 1 })
   const viewRef = useRef(view); viewRef.current = view
   const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null)
-  const drag = useRef<{ name?: string; dx?: number; dy?: number; pan?: { x: number; y: number; tx: number; ty: number }; moved?: boolean } | null>(null)
+  const drag = useRef<{ name?: string; dx?: number; dy?: number; pan?: { x: number; y: number; tx: number; ty: number }; moved?: boolean; before?: Project } | null>(null)
   const lastClick = useRef({ name: '', t: 0 })
 
   // ---- kabel geometriyasi (parallel kabellar ajratiladi) ----
@@ -130,7 +130,7 @@ export function Canvas() {
       lastClick.current = { name, t: now }
       select({ kind: 'device', id: name })
       const d = st.project.devices[name]
-      drag.current = { name, dx: w.x - d.x, dy: w.y - d.y, moved: false }
+      drag.current = { name, dx: w.x - d.x, dy: w.y - d.y, moved: false, before: st.project }
       svgRef.current!.setPointerCapture(ev.pointerId)
       return
     }
@@ -159,7 +159,7 @@ export function Canvas() {
   }
   const onPointerUp = () => {
     const dr = drag.current
-    if (dr?.name && dr.moved) { const d = useStore.getState().project.devices[dr.name]; moveDevice(dr.name, d.x, d.y, true) }
+    if (dr?.name && dr.moved) { const d = useStore.getState().project.devices[dr.name]; pushHistory(dr.before!, false); moveDevice(dr.name, d.x, d.y, true) }
     if (dr?.pan && !dr.moved && useStore.getState().selection) select(null)
     drag.current = null
   }
