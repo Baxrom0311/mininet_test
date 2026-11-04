@@ -86,13 +86,19 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
         procs.append(p)
         return p
 
-    def reader(p, fn):
+    def reader(p, fn, on_eof=None):
         def go():
             for line in p.stdout:
                 try:
                     fn(line.rstrip())
                 except Exception:  # noqa: BLE001
                     pass
+            if on_eof:
+                try:
+                    p.wait(timeout=5)
+                except Exception:  # noqa: BLE001
+                    pass
+                on_eof()
         t = threading.Thread(target=go, daemon=True); t.start(); threads.append(t)
 
     def at(t_rel, fn):
@@ -109,7 +115,9 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
         rec = {"thr": {}, "rtt": {}, "loss": {}, "jit": {}, "retr": {}}
         raw[aid] = rec
         apps.append({"id": aid, "type": a["type"], "src": a["src"], "dst": a["dst"], "start": start, "stop": stop,
-                     "label": a.get("label") or f"{a['type']} {a['src']}→{a['dst']}"})
+                     "label": a.get("label") or f"{a['type']} {a['src']}→{a['dst']}",
+                     **({"bytes": int(a["bytes"])} if a.get("bytes") else {}),
+                     **({"group": a["group"], "role": a.get("role")} if a.get("group") else {})})
         if not dip:
             log(f"{aid}: {a['dst']} da IP yo'q — o'tkazib yuborildi")
             continue
@@ -127,12 +135,17 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
         interval = float(a.get("interval", 0.2 if a["type"] == "ping" else 0.5))
         ping_argv = ["ping", "-D", "-n", "-i", str(max(interval, 0.2)), "-w", str(dur), "-s",
                      str(max(int(a.get("size", 56)) - 8, 8) if a["type"] == "ping" else 56), dip]
-        at(start, lambda a=a, argv=ping_argv, rec=rec: reader(spawn(a["src"], argv), ping_parser(rec)))
+        if not (a["type"] == "tcp" and a.get("bytes")):     # qisqa uzatishlarga parallel ping shart emas
+            at(start, lambda a=a, argv=ping_argv, rec=rec: reader(spawn(a["src"], argv), ping_parser(rec)))
         if a["type"] == "ping":
             rec["expected_per_s"] = 1.0 / max(interval, 0.2)
             continue
         srv = spawn(a["dst"], ["iperf3", "-s", "-1", "-p", str(port), "-i", "1", "--forceflush"])
-        cli = ["iperf3", "-c", dip, "-p", str(port), "-t", str(dur), "-i", "1", "--forceflush"]
+        nbytes = int(a.get("bytes") or 0) if a["type"] == "tcp" else 0
+        cli = ["iperf3", "-c", dip, "-p", str(port), "-i", "1", "--forceflush"] + (
+            ["-n", str(nbytes)] if nbytes else ["-t", str(dur)])
+        if nbytes:
+            rec["bytes"] = nbytes
         if a["type"] == "udp":
             cli += ["-u", "-b", str(a.get("rate", "1M")).replace("bps", ""), "-l", str(int(a.get("size", 1000)))]
 
@@ -159,7 +172,13 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
                     tail = m.group(5).split()
                     if tail and tail[0].isdigit():
                         rec["retr"][sec] = int(tail[0])
-            at(start, lambda a=a, cli=cli, f=cli_parser: reader(spawn(a["src"], cli), f))
+                if m and "receiver" in line:
+                    rec["recv_ok"] = True
+
+            def eof(rec=rec, t_start=start):
+                if rec.get("bytes") and rec.get("recv_ok"):
+                    rec["done_t"] = round(time.time() - T0, 3)
+            at(start, lambda a=a, cli=cli, f=cli_parser, e=eof: reader(spawn(a["src"], cli), f, e))
             continue
         # klient chiqishi ham o'qilishi shart — aks holda pipe to'lib iperf3 bloklanadi
         at(start, lambda a=a, cli=cli: reader(spawn(a["src"], cli), lambda _l: None))
@@ -274,6 +293,8 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
         if a["type"] == "ping" or val("rtt_ms"):
             summ["avg_rtt_ms"] = avg(val("rtt_ms"))
         flows[a["id"]] = {**a, "series": series, "summary": summ}
+        if a.get("bytes"):
+            flows[a["id"]]["done_t"] = rec.get("done_t")
     return {"engine": "mininet", "engine_label": "Mininet (real emulyatsiya)", "duration": duration,
             "flows": flows, "links": link_series, "events": applied,
             "nodes": node_series, "route_events": rtrack.events,

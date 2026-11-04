@@ -69,6 +69,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     stale = None   # (eski loyiha nusxasi, qachongacha)
     movers = has_moves(sc)
     handover = {}   # stansiya -> aloqa uzilgan vaqt (roaming kutilmoqda)
+    # cheklangan TCP uzatishlar (FTP fayl / HTTP sahifa): qolgan bayt, tugash vaqti, ulanish+slow start
+    remaining = {a["id"]: int(a["bytes"]) for a in apps if a.get("type") == "tcp" and a.get("bytes")}
+    done_at, setup_left = {}, {}
     node_series = {dv: [] for dv, d in proj["devices"].items() if d["type"] in L3_NS}
     rtrack = RouteTracker()
     steps = int(math.ceil(duration))
@@ -197,7 +200,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         flows = []   # har aktiv ilova uchun holat
         for a in apps:
             st = {"app": a, "ok": False, "path": [], "back": [], "rate": 0.0}
-            if a["start"] <= t0 + 1e-9 < a["stop"]:
+            if a["start"] <= t0 + 1e-9 < a["stop"] and a["id"] not in done_at:
                 dip = a.get("dst_ip") or (str(n.ip_of(a["dst"]).ip) if n.ip_of(a["dst"]) else None)
                 sip = n.ip_of(a["src"])
                 if dip and sip:
@@ -243,27 +246,75 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 rtt = 2 * sum(max(_ms((proj["links"][lid].get("params") or {}).get("delay", "1ms")), 0.05) / 1000
                               for lid, _d in f["path"])
                 f["cap"] = min(f["cap"], MSS_BITS * 1.22 / (max(rtt, 1e-4) * math.sqrt(loss_p)))
-        remaining = {k2: max(cap[k2] - used[k2], 0.0) for k2 in cap}
-        active = [f for f in tcp if f["path"]]
-        frozen = set()
-        for _ in range(64):
-            live = [f for f in active if id(f) not in frozen]
-            if not live:
+        def alloc(live_tcp):
+            """max-min progressive filling qolgan (UDP'dan keyingi) sig'imda."""
+            for f in live_tcp:
+                f["rate"] = 0.0
+            remaining_c = {k2: max(cap[k2] - used[k2], 0.0) for k2 in cap}
+            active_ = [f for f in live_tcp if f["path"]]
+            frozen = set()
+            for _ in range(64):
+                live = [f for f in active_ if id(f) not in frozen]
+                if not live:
+                    break
+                cnt = {}
+                for f in live:
+                    for key, w in f["res"]:
+                        cnt[key] = cnt.get(key, 0) + w * f["spd"]
+                inc = min([remaining_c[k2] / c for k2, c in cnt.items()] + [(f["cap"] - f["rate"]) / f["spd"] for f in live])
+                if inc <= 1e-6:
+                    inc = 0
+                for f in live:
+                    f["rate"] += inc * f["spd"]
+                    for key, w in f["res"]:
+                        remaining_c[key] -= inc * f["spd"] * w
+                for f in live:
+                    if f["rate"] >= f["cap"] - 1e-6 or any(remaining_c[key] <= 1e-6 * cap[key] for key, _w in f["res"]):
+                        frozen.add(id(f))
+
+        # Qadam ichida hodisaga asoslangan: cheklangan uzatish (FTP/HTTP) tugasa, uning ulushi
+        # qolgan oqimlarga o'tadi (taqsimlash qayta hisoblanadi). rate = qadam bo'yicha o'rtacha.
+        dt_ = t1 - t0
+        live = [f for f in tcp if f["path"]]
+        acc = {id(f): 0.0 for f in tcp}
+        got = {id(f): 0.0 for f in tcp}
+        for f in live:
+            aid = f["app"]["id"]
+            if aid in remaining and aid not in setup_left:
+                # 3-way handshake (1 RTT) + slow start (initcwnd 10 MSS, har RTT x2) — tarqalish RTT bo'yicha
+                rtt0 = sum(2 * _ms((proj["links"][lid].get("params") or {}).get("delay", "1ms")) / 1000
+                           + 12000 / cap[(lid, d)] for lid, d in f["path"])
+                rounds = math.ceil(math.log2(1 + remaining[aid] / (10 * 1448)))
+                setup_left[aid] = rtt0 * (1 + rounds)
+        t_left = dt_
+        for _ in range(32):
+            if t_left <= 1e-9 or not live:
                 break
-            cnt = {}
+            alloc(live)
+            step = t_left
             for f in live:
-                for key, w in f["res"]:
-                    cnt[key] = cnt.get(key, 0) + w * f["spd"]
-            inc = min([remaining[k2] / c for k2, c in cnt.items()] + [(f["cap"] - f["rate"]) / f["spd"] for f in live])
-            if inc <= 1e-6:
-                inc = 0
-            for f in live:
-                f["rate"] += inc * f["spd"]
-                for key, w in f["res"]:
-                    remaining[key] -= inc * f["spd"] * w
-            for f in live:
-                if f["rate"] >= f["cap"] - 1e-6 or any(remaining[key] <= 1e-6 * cap[key] for key, _w in f["res"]):
-                    frozen.add(id(f))
+                aid = f["app"]["id"]
+                if aid in remaining and f["rate"] > 0:
+                    step = min(step, setup_left[aid] + remaining[aid] * 8 / f["rate"])
+            step = max(step, 1e-6)
+            for f in list(live):
+                aid = f["app"]["id"]
+                acc[id(f)] += f["rate"] * step
+                if aid in remaining:
+                    su = min(setup_left[aid], step)
+                    setup_left[aid] -= su
+                    bits = f["rate"] * (step - su)
+                    got[id(f)] += bits
+                    remaining[aid] -= bits / 8
+                    if remaining[aid] <= 1e-3:
+                        remaining[aid] = 0
+                        done_at[aid] = t0 + (dt_ - t_left) + step
+                        live.remove(f)
+            t_left -= step
+        for f in tcp:
+            f["rate"] = acc[id(f)] / dt_ if dt_ > 0 else 0.0
+            if f["app"]["id"] in remaining:
+                f["thr_fixed"] = got[id(f)] / dt_ if dt_ > 0 else 0.0
         for f in tcp:
             for key, w in f["res"]:
                 used[key] += f["rate"] * w
@@ -306,6 +357,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 if a["type"] == "ping":
                     d_back = sum(hop_delay(h, bits)[0] for h in f["back"])
                     pt["rtt_ms"] = round((d_fwd + d_back) * 1000, 3)
+                if "thr_fixed" in f:
+                    pt["thr_bps"] = round(f["thr_fixed"])
             series[a["id"]].append(pt)
         for lid in proj["links"]:
             ab, ba = used[(lid, "ab")], used[(lid, "ba")]
@@ -355,6 +408,10 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             summ["avg_rtt_ms"] = mean("rtt_ms", [p for p in ok if p.get("rtt_ms") is not None])
         flows_out[a["id"]] = {"id": a["id"], "label": a["label"], "type": a["type"], "src": a["src"], "dst": a["dst"],
                               "start": a["start"], "stop": a["stop"], "series": s, "summary": summ}
+        if a["id"] in remaining:
+            flows_out[a["id"]].update(bytes=int(a["bytes"]), done_t=round(done_at[a["id"]], 3) if a["id"] in done_at else None)
+        if a.get("group"):
+            flows_out[a["id"]].update(group=a["group"], role=a.get("role"))
     return {"engine": "analytic", "engine_label": "Analitik (oqim modeli)", "duration": duration,
             "flows": flows_out, "links": link_series, "events": applied,
             "nodes": node_series, "route_events": rtrack.events,

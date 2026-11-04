@@ -62,6 +62,22 @@ void Attach(Ptr<Node> n) {
   ip->TraceConnectWithoutContext("Tx", MakeBoundCallback(&OnTx, id));
   ip->TraceConnectWithoutContext("Drop", MakeBoundCallback(&OnDrop, id));
 }
+// cheklangan uzatish (FTP/HTTP): PacketSink Rx -> maqsad baytga yetgan aniq vaqt
+static std::map<uint32_t, std::pair<uint64_t, uint64_t>> g_sink;
+static std::map<uint32_t, double> g_done;
+static void OnSinkRx(uint32_t key, Ptr<const Packet> p, const Address&) {
+  auto& e = g_sink[key];
+  e.first += p->GetSize();
+  if (e.first >= e.second && !g_done.count(key)) g_done[key] = Simulator::Now().GetSeconds();
+}
+void WatchSink(Ptr<Application> a, uint32_t key, uint64_t target) {
+  g_sink[key] = {0, target};
+  a->TraceConnectWithoutContext("Rx", MakeBoundCallback(&OnSinkRx, key));
+}
+double DoneAt(uint32_t key) {
+  auto it = g_done.find(key);
+  return it == g_done.end() ? -1.0 : it->second;
+}
 std::vector<uint64_t> Get(uint32_t id) {
   Cnt& c = g_cnt[id];
   return {c.fwd, c.rx, c.tx, c.noroute, c.drop};
@@ -467,16 +483,20 @@ def main(inp_path, out_path):
             sa = sink.Install(nodes[dst]); sa.Start(ns.Seconds(0.0))
             if typ == "tcp" and not app.get("rate"):
                 bs = ns.BulkSendHelper(proto, addr)
-                bs.SetAttribute("MaxBytes", ns.UintegerValue(0))
+                bs.SetAttribute("MaxBytes", ns.UintegerValue(int(app.get("bytes") or 0)))   # 0 = cheksiz
                 ca = bs.Install(nodes[src])
             else:
                 oo = ns.OnOffHelper(proto, addr)
                 oo.SetConstantRate(ns.DataRate(rate_str(app.get("rate", "1Mbps"))), int(app.get("size", 1000)))
                 ca = oo.Install(nodes[src])
         ca.Start(ns.Seconds(start)); ca.Stop(ns.Seconds(stop))
+        if typ == "tcp" and app.get("bytes"):
+            nl.WatchSink(sa.Get(0), i, int(app["bytes"]))
         apps.append({"id": app.get("id") or f"a{i + 1}", "type": typ, "src": src, "dst": dst, "port": port,
                      "label": app.get("label") or f"{typ} {src}→{dst}",
-                     "start": start, "stop": min(stop, duration)})
+                     "start": start, "stop": min(stop, duration),
+                     **({"bytes": int(app["bytes"]), "sink_key": i} if app.get("bytes") and typ == "tcp" else {}),
+                     **({"group": app["group"], "role": app.get("role")} if app.get("group") else {})})
 
     fmh = ns.FlowMonitorHelper()
     mon = fmh.InstallAll()
@@ -703,7 +723,11 @@ def main(inp_path, out_path):
                 "loss_pct": round((tx - rx) / tx * 100, 2) if tx else None}
         if app["type"] == "ping" and rx and rrx:
             summ["avg_rtt_ms"] = round((dl / rx + rdl / rrx) * 1000, 3)
-        flows[app["id"]] = {**app, "series": series[app["id"]], "summary": summ}
+        flows[app["id"]] = {**{k: v for k, v in app.items() if k != "sink_key"},
+                            "series": series[app["id"]], "summary": summ}
+        if "sink_key" in app:
+            dt_ = float(nl.DoneAt(app["sink_key"]))
+            flows[app["id"]]["done_t"] = round(dt_, 4) if dt_ >= 0 else None
     ns.Simulator.Destroy()
     out = {"engine": "ns3", "engine_label": "ns-3 (diskret-hodisali simulyatsiya)",
            "duration": duration, "flows": flows, "links": link_series, "events": applied,

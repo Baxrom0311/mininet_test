@@ -198,6 +198,30 @@ tomonda `PfifoFastQueueDisc(MaxSize=queue)`, Mininet'da netem `limit` yoki (nete
 bo'lmasa) HTB ostidagi `pfifo limit`. Jonli tarmoqda `stats` hodisasi ham
 `queue_ab/queue_ba/qdrops` maydonlarini beradi.
 
+### Ilova modellari: VoIP, HTTP, FTP (OPNET "Application Config")
+
+| Tur | Maydonlar | Natija (`apps.<id>` va `flows.<id>`) |
+|---|---|---|
+| `voip` | `codec`: `g711` / `g729` | ikki yo'nalishli RTP (50 paket/s); har soniya **MOS** (ITU-T G.107 E-model: kechikish + 2×jitter bufer + kodek, yo'qotish → Ie_eff), `avg_mos`, `min_mos`, `quality` |
+| `http` | `page` (masalan `500KB`), `think` (s) | har `think` soniyada sahifa (server→mijoz TCP); `pages_done/pages`, `avg_page_s`, `max_page_s`, `items[]` |
+| `ftp` | `file` (`20MB`), `direction` (`download`/`upload`) | `transfer_s`, `avg_rate_bps`, `completed` |
+
+`src` — mijoz, `dst` — server. Ilovalar dvigatelga oddiy udp/tcp ga yoyilib beriladi
+(`lab/apps.py`); tcp `bytes` (cheklangan uzatish) uchala dvigatelda bor: analitikda
+qadam ichida hodisaga asoslangan (uzatish tugasa ulushi boshqalarga o'tadi, ulanish +
+slow start RTT'lari), ns-3'da `BulkSend MaxBytes` + PacketSink trace (aniq tugash vaqti),
+Mininet'da `iperf3 -n`.
+
+`ospf_lab` (10 Mbit/s r1-r2), VoIP + HTTP (500 KB / 3 s) + FTP (5 MB) birga:
+
+| | VoIP MOS | HTTP sahifa | FTP 5 MB |
+|---|---|---|---|
+| Analitik | 3.29 (TCP navbatni to'ldiradi) | 0.75 s | 5.5 s |
+| ns-3 | 4.08 | 0.76 s | 4.7 s |
+| Mininet (real, netem'siz) | 4.39 | 1.05 s (iperf3 boshqaruv ulanishi ham) | 5.1 s |
+
+Tadqiqot maydonlari: `app.codec`, `app.page`, `app.think`, `app.file`.
+
 ### Ikki parametrli tadqiqot (issiqlik xaritasi)
 
 Tadqiqot bo'limida ikkinchi parametr ham tanlanishi mumkin. Shunda ikki parametr

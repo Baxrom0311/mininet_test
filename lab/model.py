@@ -355,8 +355,17 @@ def validate_scenario(project, sc):
         if a.get("id") in ids:
             errors.append(f"{w}: id takrorlangan")
         ids.add(a.get("id"))
-        if a.get("type") not in APP_TYPES:
-            errors.append(f"{w}: tur {APP_TYPES} dan biri")
+        from lab.apps import MODEL_TYPES, validate_app
+        if a.get("type") not in APP_TYPES + MODEL_TYPES:
+            errors.append(f"{w}: tur {APP_TYPES + MODEL_TYPES} dan biri")
+        elif a.get("type") in MODEL_TYPES:
+            errors += [f"{w}: {e}" for e in validate_app(a, dur)]
+        if a.get("bytes") is not None:
+            try:
+                if int(a["bytes"]) <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(f"{w}: bytes musbat butun son")
         for k in ("src", "dst"):
             d = devs.get(a.get(k))
             if not d:

@@ -23,7 +23,7 @@ import time
 from lab.model import normalize_link_params, parse_rate, validate_project, validate_scenario
 
 STUDY_LINK_FIELDS = ("bw", "delay", "loss", "queue")
-STUDY_APP_FIELDS = ("rate", "size")
+STUDY_APP_FIELDS = ("rate", "size", "codec", "page", "think", "file")
 MAX_STUDY_VALUES = 25
 
 LAB_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -168,8 +168,14 @@ class RunManager:
             if field == "rate":
                 parse_rate(v)
                 app["rate"] = str(v) if not isinstance(v, (int, float)) else f"{v}Mbps"
-            else:
+            elif field == "size":
                 app["size"] = int(v)
+            elif field == "think":
+                app["think"] = float(v)
+            elif field in ("page", "file"):
+                app[field] = str(v) if not isinstance(v, (int, float)) else f"{v}MB"
+            else:
+                app["codec"] = str(v)
         elif kind == "ap":
             ap = param.get("ap")
             if (p2["devices"].get(ap) or {}).get("type") != "wifiap" or field not in ("tx_power", "channel"):
@@ -265,6 +271,8 @@ class RunManager:
         prog = lambda f: self._pub(run_id, progress=round(f, 3))  # noqa: E731
         log = lambda m: self._pub(run_id, log=m)                  # noqa: E731
         t0 = time.time()
+        from lab import apps as appmodels
+        sc_user, sc = sc, appmodels.expand(sc)      # voip/http/ftp -> udp/tcp
         try:
             if engine == "analytic":
                 from lab.engines import analytic
@@ -275,10 +283,11 @@ class RunManager:
                 from lab.engines import emulation
                 res = emulation.run(self.driver, sc, prog, log)
             res.update(status="done")
+            res = appmodels.postprocess(res, sc_user)     # MOS, sahifa/fayl vaqti
         except Exception as e:  # noqa: BLE001
             res = {"engine": engine, "status": "error", "error": f"{type(e).__name__}: {e}", "flows": {}}
             log(f"XATO: {e}")
-        res.update(run_id=run_id, project=pname, scenario_name=sc_name, scenario=sc, created=t0,
+        res.update(run_id=run_id, project=pname, scenario_name=sc_name, scenario=sc_user, created=t0,
                    topology={"devices": len(project["devices"]), "links": len(project["links"])})
         res.setdefault("wall_s", round(time.time() - t0, 2))
         if extra:

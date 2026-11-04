@@ -339,7 +339,32 @@ def t_natdhcp(drv, caps):
         check((f["kirish"]["summary"].get("loss_pct") or 0) > 90, "emulyatsiya: srv1 -> pc1 ping o'tmaydi")
 
 
-TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "vlan": t_vlan, "natdhcp": t_natdhcp, "sdn": t_sdn, "p4": t_p4}
+def t_apps(drv, caps):
+    """Ilova modellari (VoIP MOS, HTTP sahifa vaqti, FTP fayl vaqti) — Mininet dvigateli."""
+    import shutil
+    from lab import apps as am
+    from lab.engines import emulation
+    if not caps["frr"] or not shutil.which("iperf3"):
+        print("  skip (FRR/iperf3 yo'q)")
+        return
+    proj = load("ospf_lab")
+    drv.start(proj)
+    check(wait_ping(drv, "pc1", "10.0.2.11", 60) is not None, "OSPF tayyor")
+    sc = {"duration": 20, "apps": [
+        {"id": "tel", "type": "voip", "src": "pc1", "dst": "srv2", "codec": "g711", "start": 1, "stop": 19},
+        {"id": "web", "type": "http", "src": "pc2", "dst": "srv1", "page": "500KB", "think": 3, "start": 1, "stop": 19},
+        {"id": "fayl", "type": "ftp", "src": "pc1", "dst": "srv1", "file": "5MB", "start": 3, "stop": 19}], "events": []}
+    res = am.postprocess(emulation.run(drv, am.expand(sc)), sc)
+    ap = res["apps"]
+    print("   ", json.dumps(ap, ensure_ascii=False))
+    check(ap["tel"]["avg_mos"] and ap["tel"]["avg_mos"] > 3.0, f"VoIP MOS {ap['tel']['avg_mos']} ({ap['tel']['quality']})")
+    check(ap["web"]["pages_done"] >= ap["web"]["pages"] - 1 and (ap["web"]["avg_page_s"] or 9) < 3,
+          f"HTTP: {ap['web']['pages_done']}/{ap['web']['pages']} sahifa, o'rtacha {ap['web']['avg_page_s']} s")
+    check(ap["fayl"]["completed"] and 3 < ap["fayl"]["transfer_s"] < 12,
+          f"FTP 5 MB 10 Mbit/s kabelda {ap['fayl']['transfer_s']} s")
+
+
+TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "vlan": t_vlan, "natdhcp": t_natdhcp, "apps": t_apps, "sdn": t_sdn, "p4": t_p4}
 
 
 def main(argv):
