@@ -200,7 +200,22 @@ def main(inp_path, out_path):
 
     port_dev = {}          # (dev, port) -> NetDevice
     link_objs = {}         # lid -> {"devs": [d1, d2], "errs": [e1, e2], "ends": [...], "chan": ch}
-    sw_ports = {n: ns.NetDeviceContainer() for n, d in devs.items() if d["type"] in L2}
+    # VLAN: ns-3 BridgeNetDevice 802.1Q tegini bilmaydi — access portlar har VLAN uchun
+    # alohida bridge bilan modellanadi; trunk/subinterfeys qo'llab-quvvatlanmaydi.
+    from lab.model import parse_ifname, switch_port_cfg
+    for n, d in devs.items():
+        for pk in ((d.get("config") or {}).get("ports") or {}):
+            if switch_port_cfg(d, int(pk))["mode"] == "trunk":
+                raise RuntimeError(f"ns-3: {n} port {pk} — VLAN trunk ns-3 dvigatelida qo'llab-quvvatlanmaydi "
+                                   "(analitik yoki Mininet dvigatelidan foydalaning)")
+        for ifn in ((d.get("config") or {}).get("interfaces") or {}):
+            if parse_ifname(ifn)[2] is not None:
+                raise RuntimeError(f"ns-3: {n}/{ifn} — VLAN subinterfeys ns-3 dvigatelida qo'llab-quvvatlanmaydi")
+
+    def port_vlan(dev, port):
+        pc = switch_port_cfg(devs[dev], port)
+        return pc["vlan"] if pc["mode"] == "access" else 0
+    sw_ports = {n: {} for n, d in devs.items() if d["type"] in L2}
     jitter_warn = False
     wifi_links = []
     port_q = {}       # (dev, port) -> navbat hajmi ("1000p") — L3 tomonda qdisc uchun
@@ -247,7 +262,7 @@ def main(inp_path, out_path):
         port_q[(a["dev"], a["port"])] = port_q[(b["dev"], b["port"])] = q
         for side, dv in ((a, d1), (b, d2)):
             if side["dev"] in sw_ports:
-                sw_ports[side["dev"]].Add(dv)
+                sw_ports[side["dev"]].setdefault(port_vlan(side["dev"], side["port"]), ns.NetDeviceContainer()).Add(dv)
         link_objs[lid] = {"devs": [d1, d2], "errs": errs, "ends": [a, b], "loss": float(p.get("loss", 0)) / 100.0,
                           "chan": d1.GetChannel()}
     if jitter_warn:
@@ -306,7 +321,7 @@ def main(inp_path, out_path):
             sdevs = wifi.Install(phy, mac, stas) if members else None
             mac.SetType("ns3::ApWifiMac", "Ssid", ns.SsidValue(ssid))
             ap_dev = wifi.Install(phy, mac, ns.NodeContainer(nodes[ap])).Get(0)
-            sw_ports[ap].Add(ap_dev)
+            sw_ports[ap].setdefault(0, ns.NetDeviceContainer()).Add(ap_dev)
             ap_macs.append((ns.Mac48Address.ConvertFrom(ap_dev.GetAddress()), ap))
             place(ap)
             for i, (lid, ae, se) in enumerate(members):
@@ -326,9 +341,10 @@ def main(inp_path, out_path):
 
     emit(log=f"kabellar: {len(link_objs)}")
     bridge = ns.BridgeHelper()
-    for n, cont in sw_ports.items():
-        if cont.GetN():
-            bridge.Install(nodes[n], cont)
+    for n, by_vlan in sw_ports.items():
+        for _vl, cont in sorted(by_vlan.items()):
+            if cont.GetN():
+                bridge.Install(nodes[n], cont)
 
     # IP manzillar
     emit(log="IP manzillar")
@@ -397,7 +413,7 @@ def main(inp_path, out_path):
             for net, via, ifn, proto in n.routes(name):
                 if via is None or (name in rip_nodes and proto != "static"):
                     continue
-                k = (name, int(ifn.rsplit("eth", 1)[1]))
+                k = (name, parse_ifname(ifn)[1])
                 if k not in iface:
                     continue
                 sr.AddNetworkRouteTo(ns.Ipv4Address(str(net.network_address)), ns.Ipv4Mask(str(net.netmask)),

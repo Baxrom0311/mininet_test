@@ -210,6 +210,34 @@ with TestClient(create_app("demo")) as c:
               f"{eng}: roaming ap1->ap2 t={roams[0]['t'] if roams else '?'}s, video {v.get(10, 0):.0f} -> {v.get(40, 0):.0f} Mbit/s")
         c.delete(f"/api/runs/wifi_roaming/{rid}")
 
+    # ---- VLAN: access/trunk, router-on-a-stick, izolyatsiya ----
+    vp = c.get("/api/projects/vlan_lab?example=true").json()
+    check(c.post("/api/validate", json=vp).json()["errors"] == [], "vlan_lab: validatsiya")
+    c.post("/api/net/start", json={"project": vp})
+    check("0% packet loss" in ping(c, "pc1", "10.0.10.13"), "vlan: pc1 -> pc3 (VLAN10, trunk)")
+    check("0% packet loss" in ping(c, "pc1", "10.0.20.14"), "vlan: pc1 -> pc4 (inter-VLAN r1 orqali)")
+    check("100% packet loss" in ping(c, "pc1", "10.0.10.15", 1), "vlan: pc5 (boshqa VLAN) izolyatsiya")
+    c.post("/api/net/stop")
+    bad_v = json.loads(json.dumps(vp))
+    bad_v["devices"]["s1"]["config"]["ports"]["1"] = {"mode": "access", "vlan": 5000}
+    check(any("VLAN" in e for e in c.post("/api/validate", json=bad_v).json()["errors"]), "vlan: noto'g'ri VLAN id rad etiladi")
+    for eng in want:
+        rid = c.post("/api/runs", json={"project": vp, "scenario": "vlanlar", "engine": eng}).json()["run_id"]
+        t0 = time.time()
+        while time.time() - t0 < 120:
+            if not any(r.get("status") == "running" for r in c.get("/api/runs/vlan_lab").json()["runs"]):
+                break
+            time.sleep(0.3)
+        r = c.get(f"/api/runs/vlan_lab/{rid}").json()
+        if eng == "ns3":
+            check(r["status"] == "error" and "trunk" in (r.get("error") or ""), f"ns3: VLAN trunk — tushunarli xato ({r.get('error', '')[:60]})")
+        else:
+            l4 = [x for x in r["links"]["l4"] if 3 <= x["t"] <= 18]
+            inter = r["flows"]["inter"]["summary"]["avg_thr_bps"]
+            check(l4 and min(x["ab_bps"] for x in l4) > 11e6 and min(x["ba_bps"] for x in l4) > 11e6 and inter > 11e6,
+                  f"{eng}: inter-VLAN 12 Mbit/s trunk kabelidan (l4) ikki yo'nalishda o'tadi")
+        c.delete(f"/api/runs/vlan_lab/{rid}")
+
     if "ns3" not in want:
         print("  --   ns-3 o'rnatilmagan (pip install ns3) — ns-3 testi o'tkazib yuborildi")
 

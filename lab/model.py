@@ -56,6 +56,64 @@ def ifname(dev, port):
     return f"{dev}-eth{port}"
 
 
+_IFN_RE = re.compile(r"^(.+)-eth(\d+)(?:\.(\d+))?$")
+IFNAMSIZ = 15
+
+
+def parse_ifname(ifn):
+    """'r1-eth2' -> ('r1', 2, None); 'r1-eth2.10' -> ('r1', 2, 10); boshqa -> (None, None, None)."""
+    m = _IFN_RE.match(ifn or "")
+    if not m:
+        return None, None, None
+    return m.group(1), int(m.group(2)), (int(m.group(3)) if m.group(3) else None)
+
+
+# ───── VLAN (802.1Q) ─────
+# switch config.ports = {"<port>": {"mode": "access", "vlan": 10}
+#                                 | {"mode": "trunk", "allowed": [10, 20], "native": 1}}
+# Sozlanmagan port — OVS standarti: barcha VLAN'lar tegli o'tadi, tegsiz kadr = ichki VLAN 0.
+# Trunk: allowed bo'sh/yo'q = hammasi; native berilsa tegsiz kadrlar shu VLAN'ga, aks holda tashlanadi.
+VLAN_TYPES = ("switch",)
+
+
+def switch_port_cfg(dev, port):
+    if dev.get("type") not in VLAN_TYPES:
+        return {"mode": "none"}
+    pc = ((dev.get("config") or {}).get("ports") or {}).get(str(port)) or {}
+    mode = pc.get("mode") or "none"
+    if mode == "access":
+        return {"mode": "access", "vlan": int(pc.get("vlan") or 1)}
+    if mode == "trunk":
+        allowed = pc.get("allowed")
+        return {"mode": "trunk", "allowed": {int(v) for v in allowed} if allowed else None,
+                "native": int(pc["native"]) if pc.get("native") not in (None, "", 0) else None}
+    return {"mode": "none"}
+
+
+def vlan_ingress(pc, tag):
+    """Kirgan kadr (wire tag: None=tegsiz) -> ichki VLAN yoki None (tashlanadi)."""
+    m = pc["mode"]
+    if m == "access":
+        return pc["vlan"] if tag is None else None
+    if m == "trunk":
+        if tag is None:
+            return pc["native"]
+        return tag if pc["allowed"] is None or tag in pc["allowed"] or tag == pc["native"] else None
+    return 0 if tag is None else tag
+
+
+def vlan_egress(pc, v):
+    """Ichki VLAN v portdan chiqadimi: (ok, wire_tag)."""
+    m = pc["mode"]
+    if m == "access":
+        return (v == pc["vlan"], None)
+    if m == "trunk":
+        if pc["native"] is not None and v == pc["native"]:
+            return True, None
+        return (pc["allowed"] is None or v in pc["allowed"]) and v != 0, v
+    return True, (None if v == 0 else v)
+
+
 def device_mac(dev_id, port):
     """Deterministik MAC (namespace'li qurilmalar interfeyslari uchun):
     00:00:00:<id hi>:<id lo>:<port> — P4/SDN jadvallarini qo'lda yozish oson bo'lsin."""
@@ -122,7 +180,35 @@ def validate_project(p):
             ids[did] = name
         cfg = d.get("config") or {}
         for ifn, ic in (cfg.get("interfaces") or {}).items():
-            _check_ip(ic.get("ip"), f"{name}/{ifn}", errors)
+            if (ic.get("ip") or "").lower() == "dhcp":
+                if d["type"] not in ("host", "server", "router"):
+                    errors.append(f"{name}/{ifn}: DHCP mijoz faqat host/server/router'da")
+            else:
+                _check_ip(ic.get("ip"), f"{name}/{ifn}", errors)
+            dn, _pt, vl = parse_ifname(ifn)
+            if vl is not None:
+                if dn != name or not 1 <= vl <= 4094:
+                    errors.append(f"{name}/{ifn}: subinterfeys nomi <qurilma>-eth<port>.<vlan 1..4094>")
+                elif len(ifn) > IFNAMSIZ:
+                    errors.append(f"{name}/{ifn}: interfeys nomi {IFNAMSIZ} belgidan uzun (Linux cheklovi)")
+        for pk, pc in (cfg.get("ports") or {}).items():
+            if d["type"] not in VLAN_TYPES:
+                errors.append(f"{name}: VLAN port sozlamasi faqat switch'da")
+                break
+            try:
+                int(pk)
+                if pc.get("mode") == "access":
+                    if not 1 <= int(pc.get("vlan")) <= 4094:
+                        raise ValueError
+                elif pc.get("mode") == "trunk":
+                    if any(not 1 <= int(v) <= 4094 for v in pc.get("allowed") or []):
+                        raise ValueError
+                    if pc.get("native") not in (None, "", 0) and not 1 <= int(pc["native"]) <= 4094:
+                        raise ValueError
+                elif pc.get("mode") not in (None, "", "none"):
+                    raise ValueError
+            except (ValueError, TypeError):
+                errors.append(f"{name}: port {pk} VLAN sozlamasi noto'g'ri (access vlan / trunk allowed, native 1..4094)")
         gw = cfg.get("gateway")
         if gw:
             try:

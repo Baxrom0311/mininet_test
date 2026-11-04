@@ -266,7 +266,33 @@ def t_conv(drv, caps):
     check(after and min(after) > 1.5e6, "konvergensiyadan keyin video r3 orqali tiklandi")
 
 
-TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "sdn": t_sdn, "p4": t_p4}
+def t_vlan(drv, caps):
+    """802.1Q: access/trunk (OVS tag/trunks), router-on-a-stick subinterfeyslar, izolyatsiya."""
+    proj = load("vlan_lab")
+    if not caps.get("vlan"):
+        # kernelda 8021q yo'q: router-on-a-stick o'rniga r1 ikki access portga (VLAN10/VLAN20)
+        print("    (8021q yo'q — r1 subinterfeyslari o'rniga s1 port4=VLAN10, port5=VLAN20)")
+        r1 = proj["devices"]["r1"]["config"]
+        r1["interfaces"] = {"r1-eth1": {"ip": "10.0.10.1/24"}, "r1-eth2": {"ip": "10.0.20.1/24"}}
+        proj["devices"]["s1"]["config"]["ports"]["4"] = {"mode": "access", "vlan": 10}
+        proj["devices"]["s1"]["config"]["ports"]["5"] = {"mode": "access", "vlan": 20}
+        proj["links"]["l8"] = link("s1", 5, "r1", 2, bw=20)
+    drv.start(proj)
+    check(wait_ping(drv, "pc1", "10.0.10.13", 15) is not None, "VLAN10: pc1 -> pc3 (s1-s2 trunk orqali)")
+    check(wait_ping(drv, "pc1", "10.0.20.14", 15) is not None, "inter-VLAN: pc1 -> pc4 (r1-eth1.10 -> r1-eth1.20)")
+    check(not ping(drv, "pc1", "10.0.10.15", count=2, wait=1)[0], "izolyatsiya: pc5 (VLAN20 portida) javob bermaydi")
+    tr = drv.net.get("pc1").cmd("traceroute -n -w 1 -q 1 10.0.20.14")
+    check("10.0.10.1" in tr, f"traceroute r1 orqali: {' | '.join(tr.strip().splitlines()[1:3])}")
+    show = drv.net.get("s1").cmd("ovs-vsctl --columns=name,tag,trunks,vlan_mode list port s1-eth1 s1-eth3")
+    check("10" in show and "trunk" in show, "OVS port tag/trunks o'rnatilgan")
+    # jonli: pc5 portini VLAN10 ga o'tkazamiz -> endi yetadi
+    p2 = copy.deepcopy(drv.project)
+    p2["devices"]["s2"]["config"]["ports"]["4"] = {"mode": "access", "vlan": 10}
+    drv.apply_device_config(p2, "s2")
+    check(wait_ping(drv, "pc1", "10.0.10.15", 10) is not None, "jonli: s2 port4 -> VLAN10, pc5 endi yetadi")
+
+
+TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "vlan": t_vlan, "sdn": t_sdn, "p4": t_p4}
 
 
 def main(argv):

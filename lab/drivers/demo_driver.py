@@ -5,7 +5,7 @@ qurilmaga kirish, ping/traceroute bilan yo'lni ko'rish va paket animatsiyasini
 sinash. Haqiqiy tarmoq emas — o'lchovlar uchun real driverdan foydalaning.
 
 Soddalashtirishlar:
-  * L2 domen: switch / P4 switch / SDN switch orqali BFS (STP/VLAN yo'q).
+  * L2 domen: switch / P4 switch / SDN switch orqali BFS (802.1Q VLAN access/trunk; STP yo'q).
   * Host: ulangan subnet + default gateway (+ statik marshrutlar).
   * Router (FRR): ulangan + statik; dinamik daemon (ospfd/bgpd/ripd/isisd/...)
     yoqilgan routerlar bir-biridan barcha subnetlarni "o'rganadi" (hop soni).
@@ -21,7 +21,8 @@ import time
 from collections import deque
 
 from lab.model import (DEVICE_TYPES, device_mac, ifname, link_ports,
-                       normalize_link_params, validate_project)
+                       normalize_link_params, parse_ifname, switch_port_cfg, validate_project,
+                       vlan_egress, vlan_ingress)
 from lab.wifi import link_estimate as wifi_link_estimate
 from .base import BaseDriver, DriverError, Terminal
 
@@ -43,18 +44,27 @@ class Net:
     def __init__(self, project):
         self.p = project
         self.devs = project["devices"]
+        self._if_cache = {}
 
     def ifaces(self, dev):
-        """[(port, ifname, ipaddress.IPv4Interface | None)]"""
+        """[(port, ifname, ipaddress.IPv4Interface | None)] — fizik port + uning VLAN
+        subinterfeyslari (`<dev>-eth<port>.<vlan>`, config.interfaces'da IP bilan)."""
+        if dev in self._if_cache:
+            return self._if_cache[dev]
         cfg = self.devs[dev].get("config") or {}
+        ics = cfg.get("interfaces") or {}
         out = []
         for port in sorted(link_ports(self.p, dev)):
-            ifn = ifname(dev, port)
-            ip = ((cfg.get("interfaces") or {}).get(ifn) or {}).get("ip")
-            try:
-                out.append((port, ifn, ipaddress.ip_interface(ip) if ip else None))
-            except ValueError:
-                out.append((port, ifn, None))
+            base = ifname(dev, port)
+            names = [base] + sorted((k for k in ics if k.startswith(base + ".")),
+                                    key=lambda k: parse_ifname(k)[2] or 0)
+            for ifn in names:
+                ip = (ics.get(ifn) or {}).get("ip")
+                try:
+                    out.append((port, ifn, ipaddress.ip_interface(ip) if ip and ip != "dhcp" else None))
+                except ValueError:
+                    out.append((port, ifn, None))
+        self._if_cache[dev] = out
         return out
 
     def owner_of(self, ip):
@@ -86,29 +96,35 @@ class Net:
             return bool(est and est["ok"])
         return True
 
-    def l2_reach(self, dev, port):
-        """dev:port'dan chiqib L2 domendagi L3 so'nggi nuqtalar:
-        {(dev, port): [(link_id, dir), ...]}"""
+    def l2_reach(self, dev, port, tag=None):
+        """dev:port'dan (802.1Q teg `tag`, None = tegsiz) chiqqan kadr L2 domenda yetadigan
+        L3 so'nggi nuqtalar: {(dev, port, tag_kelganda): [(link_id, dir), ...]}.
+        Switch portlari access/trunk qoidalari bo'yicha (model.vlan_ingress/egress)."""
         out = {}
         first = self.link_on(dev, port)
         if not first or not self.link_ok(first[0]):
             return out
-        q = deque([(first[1], first[2], [(first[0], first[3])])])
-        seen = {dev}
+        q = deque([(first[1], first[2], tag, [(first[0], first[3])])])
+        seen = set()
         while q:
-            cur, inport, path = q.popleft()
+            cur, inport, wtag, path = q.popleft()
             if not self.is_l2(cur):
-                out.setdefault((cur, inport), path)
+                out.setdefault((cur, inport, wtag), path)
                 continue
-            if cur in seen:
+            cd = self.devs[cur]
+            v = vlan_ingress(switch_port_cfg(cd, inport), wtag)
+            if v is None or (cur, v) in seen:
                 continue
-            seen.add(cur)
+            seen.add((cur, v))
             for p2 in link_ports(self.p, cur):
                 if p2 == inport:
                     continue
+                ok, etag = vlan_egress(switch_port_cfg(cd, p2), v)
+                if not ok:
+                    continue
                 nxt = self.link_on(cur, p2)
                 if nxt and self.link_ok(nxt[0]):
-                    q.append((nxt[1], nxt[2], path + [(nxt[0], nxt[3])]))
+                    q.append((nxt[1], nxt[2], etag, path + [(nxt[0], nxt[3])]))
         return out
 
     def dyn_daemons(self, dev):
@@ -123,9 +139,9 @@ class Net:
         for port, ifn, ipi in self.ifaces(dev):
             if not ipi:
                 continue
-            for (nd, np), path in self.l2_reach(dev, port).items():
+            for (nd, np, tg), path in self.l2_reach(dev, port, parse_ifname(ifn)[2]).items():
                 for pp, nifn, nip in self.ifaces(nd):
-                    if pp == np and nip and nip.network == ipi.network:
+                    if pp == np and parse_ifname(nifn)[2] == tg and nip and nip.network == ipi.network:
                         out.append((port, ifn, ipi, nd, nip, path))
         return out
 
@@ -200,12 +216,12 @@ class Net:
                 return False, f"{cur}: marshrut yo'q (Destination Net Unreachable)", hops, links, delay
             net, via, ifn, proto = r
             nh = via or dst
-            port = int(ifn.rsplit("eth", 1)[1])
-            reach = self.l2_reach(cur, port)
+            _d, port, vl = parse_ifname(ifn)
+            reach = self.l2_reach(cur, port, vl)
             target = None
-            for (nd, np), path in reach.items():
+            for (nd, np, tg), path in reach.items():
                 for pp, nifn, nip in self.ifaces(nd):
-                    if pp == np and nip and nip.ip == nh:
+                    if pp == np and parse_ifname(nifn)[2] == tg and nip and nip.ip == nh:
                         target = (nd, path, nip.ip)
             if not target:
                 return False, f"{cur}: {nh} ARP javob bermadi (Destination Host Unreachable)", hops, links, delay

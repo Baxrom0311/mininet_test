@@ -32,7 +32,8 @@ import threading
 import time
 
 from lab.wifi import link_estimate as wifi_link_estimate
-from lab.model import (DEVICE_TYPES, FRR_DAEMONS, controller_config, device_mac, rip_timers,
+from lab.model import (DEVICE_TYPES, FRR_DAEMONS, VLAN_TYPES, controller_config, device_mac,
+                       parse_ifname, rip_timers, switch_port_cfg,
                        ifname, link_ports, normalize_link_params, validate_project)
 from .base import (BaseDriver, DriverError, Terminal, p4_compile_standalone,
                    p4_pipeline_from_json)
@@ -83,7 +84,9 @@ def kernel_caps():
           userspace datapath bilan ishlaydi (sekinroq, lekin to'liq funksional).
           NETLAB_OVS_DATAPATH=kernel|user bilan majburlash mumkin.
       netem — sch_netem bormi (kechikish/jitter/loss/navbat emulyatsiyasi uchun). Yo'q bo'lsa
-          kabellar faqat tezlik (HTB) bilan cheklanadi."""
+          kabellar faqat tezlik (HTB) bilan cheklanadi.
+      vlan — 8021q (Linux VLAN subinterfeyslari, router-on-a-stick). Switch access/trunk
+          portlari OVS'da bo'lgani uchun ularga bu shart emas."""
     global _KCAPS
     if _KCAPS is not None:
         return _KCAPS
@@ -92,16 +95,18 @@ def kernel_caps():
         dp = forced
     else:
         dp = "kernel" if os.path.isdir("/sys/module/openvswitch") else "user"
-    netem = False
+    netem = vlan = False
     a, b = "nlprobe0", "nlprobe1"
     try:
         if subprocess.run(["ip", "link", "add", a, "type", "veth", "peer", "name", b], capture_output=True).returncode == 0:
             netem = subprocess.run(["tc", "qdisc", "add", "dev", a, "root", "netem", "delay", "1ms"],
                                    capture_output=True).returncode == 0
+            vlan = subprocess.run(["ip", "link", "add", "link", a, "name", a + ".9", "type", "vlan", "id", "9"],
+                                  capture_output=True).returncode == 0
             subprocess.run(["ip", "link", "del", a], capture_output=True)
     except FileNotFoundError:
         pass
-    _KCAPS = {"ovs_datapath": dp, "netem": netem}
+    _KCAPS = {"ovs_datapath": dp, "netem": netem, "vlan": vlan}
     return _KCAPS
 
 
@@ -443,6 +448,12 @@ class MininetDriver(BaseDriver):
             raise DriverError("Real driver root talab qiladi: sudo python3 -m lab.netlab")
         if not caps["mininet"] or not caps["ovs"]:
             raise DriverError("Mininet/Open vSwitch o'rnatilmagan (sudo bash lab/install_lab.sh)")
+        subifs = [f"{n}/{k}" for n, d in project["devices"].items()
+                  for k in ((d.get("config") or {}).get("interfaces") or {}) if parse_ifname(k)[2]]
+        if subifs and not kernel_caps()["vlan"]:
+            raise DriverError("Kernelda 802.1Q (8021q) yo'q — VLAN subinterfeyslar ishlamaydi: "
+                              f"{', '.join(subifs[:4])}. `modprobe 8021q` yoki subinterfeys o'rniga "
+                              "router'ni har VLAN uchun alohida access portga ulang")
         if not ensure_ovs():
             raise DriverError("Open vSwitch ishga tushmadi (ovsdb-server/ovs-vswitchd): "
                               "sudo /usr/share/openvswitch/scripts/ovs-ctl start")
@@ -604,6 +615,7 @@ class MininetDriver(BaseDriver):
         t = d["type"]
         if t in ("switch", "sdnrouter", "wifiap"):
             node.start(self._ctrls_for(d))
+            self._apply_vlans(name)
         elif t == "p4switch":
             node.start([])
             if (d.get("config") or {}).get("program"):
@@ -625,19 +637,35 @@ class MininetDriver(BaseDriver):
         cmds = []
         if d["type"] in ("host", "server"):
             cmds.append("sysctl -qw net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1")
+        ics = cfg.get("interfaces") or {}
+        want_sub = set()
         for port in sorted(link_ports(self.project, name)):
-            ifn = ifname(name, port)
-            if ifn not in node.nameToIntf:
+            base = ifname(name, port)
+            if base not in node.nameToIntf:
                 continue
-            ip = ((cfg.get("interfaces") or {}).get(ifn) or {}).get("ip", "")
-            cmds.append(f"ip addr flush dev {ifn}")
-            if ip:
-                cmds.append(f"ip addr add {ip} dev {ifn}")
-            cmds.append(f"ip link set {ifn} up")
-            if self._datapath == "user":
-                # userspace (netdev) OVS veth'dagi "partial" checksum'ni to'ldirmaydi —
-                # TX offload o'chirilmasa TCP/UDP paketlar tashlanadi (ICMP o'tadi)
-                cmds.append(f"ethtool -K {ifn} tx off >/dev/null")
+            subs = sorted(k for k in ics if k.startswith(base + ".") and parse_ifname(k)[2])
+            want_sub.update(subs)
+            for ifn in [base] + subs:
+                vl = parse_ifname(ifn)[2]
+                if vl:      # 802.1Q subinterfeys (router-on-a-stick)
+                    cmds.append(f"ip link show {ifn} >/dev/null 2>&1 || "
+                                f"ip link add link {base} name {ifn} type vlan id {vl}")
+                ip = (ics.get(ifn) or {}).get("ip", "")
+                cmds.append(f"ip addr flush dev {ifn}")
+                if ip and ip.lower() != "dhcp":
+                    cmds.append(f"ip addr add {ip} dev {ifn}")
+                cmds.append(f"ip link set {ifn} up")
+                if self._datapath == "user":
+                    # userspace (netdev) OVS veth'dagi "partial" checksum'ni to'ldirmaydi —
+                    # TX offload o'chirilmasa TCP/UDP paketlar tashlanadi (ICMP o'tadi)
+                    cmds.append(f"ethtool -K {ifn} tx off >/dev/null")
+        # konfiguratsiyadan olib tashlangan subinterfeyslar
+        for line in node.cmd("ip -o link show type vlan").splitlines():
+            m = re.match(r"\d+:\s+([^@:]+)", line)
+            if m and m.group(1) not in want_sub:
+                cmds.append(f"ip link del {m.group(1)}")
+        if d["type"] == "router":
+            cmds += self._nat_cmds(cfg)
         gw = cfg.get("gateway")
         if gw and d["type"] in ("host", "server"):
             cmds.append(f"ip route replace default via {gw}")
@@ -646,6 +674,42 @@ class MininetDriver(BaseDriver):
                 cmds.append(f"ip route replace {r['prefix']} via {r['via']}")
         if cmds:
             node.cmd(" ; ".join(c + " 2>&1" for c in cmds))
+
+    @staticmethod
+    def _nat_cmds(cfg):
+        """NAT (masquerade): config.nat = {"outside": "r1-eth2"} — ichki tarmoqlar shu
+        interfeys IP'si ostida chiqadi (iptables, router namespace'ida)."""
+        cmds = ["iptables -t nat -F POSTROUTING >/dev/null 2>&1 || true"]
+        out = (cfg.get("nat") or {}).get("outside")
+        if out:
+            cmds.append(f"iptables -t nat -A POSTROUTING -o {out} -j MASQUERADE")
+        return cmds
+
+    def _apply_vlans(self, name):
+        """Switch portlari VLAN rejimi -> OVS (tag / trunks / vlan_mode)."""
+        d = self.project["devices"][name]
+        if d["type"] not in VLAN_TYPES:
+            return
+        node = self.net.get(name)
+        cmds = []
+        for port in sorted(link_ports(self.project, name)):
+            ifn = ifname(name, port)
+            pc = switch_port_cfg(d, port)
+            cmds.append(f"ovs-vsctl clear port {ifn} tag trunks vlan_mode")
+            if pc["mode"] == "access":
+                cmds.append(f"ovs-vsctl set port {ifn} vlan_mode=access tag={pc['vlan']}")
+            elif pc["mode"] == "trunk":
+                allowed = sorted(pc["allowed"] or [])
+                if pc["native"]:
+                    tr = sorted(set(allowed) | {pc["native"]}) if allowed else []
+                    cmds.append(f"ovs-vsctl set port {ifn} vlan_mode=native-untagged tag={pc['native']}"
+                                + (f" trunks={','.join(map(str, tr))}" if tr else ""))
+                else:
+                    cmds.append(f"ovs-vsctl set port {ifn} vlan_mode=trunk"
+                                + (f" trunks={','.join(map(str, allowed))}" if allowed else ""))
+        out = node.cmd(" ; ".join(c + " 2>&1" for c in cmds))
+        if out.strip():
+            self.bus.log("warn", f"VLAN: {out.strip()[-300:]}", name)
 
     def add_device(self, project, name):
         with self.lock:
@@ -706,6 +770,7 @@ class MininetDriver(BaseDriver):
                             intf.ifconfig("up" if ok and l_.get("up") is not False else "down")
             elif t in ("switch", "sdnrouter"):
                 node = self.net.get(name)
+                self._apply_vlans(name)
                 oc = (old or {}).get("config") or {}
                 nc = d.get("config") or {}
                 if (oc.get("mode"), oc.get("controller"), oc.get("stp")) != (nc.get("mode"), nc.get("controller"), nc.get("stp")):
@@ -797,6 +862,7 @@ class MininetDriver(BaseDriver):
             node.cmd(f"ovs-vsctl add-port {dev} {intf.name} -- set Interface {intf.name} ofport_request={port}")
             node.cmd(f"ip link set {intf.name} up")
             node.TCReapply(intf)   # OVS port qo'shganda tc qdisc'ni tozalashi mumkin
+            self._apply_vlans(dev)
         elif t == "p4switch":
             node.cmd(f"ip link set {intf.name} up")
             self._p4_cli(dev, f"port_add {intf.name} {port}")
