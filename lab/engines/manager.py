@@ -75,7 +75,8 @@ class RunManager:
                     r = json.load(fh)
                 out.append({k: r.get(k) for k in ("run_id", "scenario_name", "engine", "engine_label", "created",
                                                    "duration", "wall_s", "status", "label", "study_id",
-                                                   "study_param", "study_value", "study_index")})
+                                                   "study_param", "study_value", "study_index",
+                                                   "study_param2", "study_value2", "study_index2")})
             except (OSError, ValueError):
                 continue
         for rid, a in self.active.items():
@@ -146,10 +147,47 @@ class RunManager:
                           "engine": a.get("engine"), **kw})
 
     # ---------- parametrik tadqiqot (OPNET "parametric study") ----------
-    def start_study(self, project, scenario_name, engine, param, values):
-        """Bitta parametrni qiymatlar ro'yxati bo'yicha o'zgartirib, har biri uchun alohida
-        ishga tushirish (ketma-ket). param: {"kind": "link", "link", "field": bw|delay|loss|queue}
-        yoki {"kind": "app", "app", "field": rate|size}."""
+    MAX_STUDY_RUNS = 49
+
+    @staticmethod
+    def _apply_param(p2, sc2, param, v, engine):
+        """Bitta parametr qiymatini loyiha/ssenariy nusxasiga qo'llaydi (joyida)."""
+        kind, field = param.get("kind"), param.get("field")
+        if kind == "link":
+            lid = param.get("link")
+            if lid not in p2["links"] or field not in STUDY_LINK_FIELDS:
+                raise ValueError("kabel yoki maydon noto'g'ri")
+            newp = normalize_link_params({**(p2["links"][lid].get("params") or {}), field: v})
+            p2["links"][lid]["params"] = newp
+            if engine == "mininet":   # jonli tarmoqda — t=0 hodisasi bilan qo'llanadi
+                sc2["events"] = [{"t": 0, "action": "link_params", "link": lid, "params": {field: newp[field]}}] + list(sc2.get("events") or [])
+        elif kind == "app":
+            app = next((a for a in sc2.get("apps") or [] if a.get("id") == param.get("app")), None)
+            if not app or field not in STUDY_APP_FIELDS:
+                raise ValueError("ilova yoki maydon noto'g'ri")
+            if field == "rate":
+                parse_rate(v)
+                app["rate"] = str(v) if not isinstance(v, (int, float)) else f"{v}Mbps"
+            else:
+                app["size"] = int(v)
+        elif kind == "ap":
+            ap = param.get("ap")
+            if (p2["devices"].get(ap) or {}).get("type") != "wifiap" or field not in ("tx_power", "channel"):
+                raise ValueError("Wi-Fi AP yoki maydon noto'g'ri")
+            if engine == "mininet":
+                raise ValueError("AP radio tadqiqoti Mininet dvigatelida qo'llab-quvvatlanmaydi (radio yo'q)")
+            p2["devices"][ap].setdefault("config", {})[field] = float(v) if field == "tx_power" else int(v)
+        else:
+            raise ValueError("param.kind: link | app | ap")
+
+    @staticmethod
+    def _param_label(param):
+        return f"{param.get('link') or param.get('app') or param.get('ap')}.{param.get('field')}"
+
+    def start_study(self, project, scenario_name, engine, param, values, param2=None, values2=None):
+        """Parametrik tadqiqot (ketma-ket ishga tushirishlar). Bitta parametr — chiziqli grafik;
+        ikkinchi parametr (param2/values2) berilsa — barcha kombinatsiyalar (to'r), natija issiqlik
+        xaritasi. param: {"kind": "link"|"app"|"ap", "link"|"app"|"ap": nom, "field": ...}."""
         project = copy.deepcopy(project)
         sc = (project.get("scenarios") or {}).get(scenario_name)
         if not sc:
@@ -163,55 +201,43 @@ class RunManager:
         values = list(values or [])
         if not (2 <= len(values) <= MAX_STUDY_VALUES):
             raise ValueError(f"qiymatlar soni 2..{MAX_STUDY_VALUES}")
-        kind, field = param.get("kind"), param.get("field")
+        two_d = bool(param2)
+        values2 = list(values2 or []) if two_d else [None]
+        if two_d:
+            if len(values2) < 2:
+                raise ValueError("ikkinchi parametr uchun kamida 2 qiymat")
+            if self._param_label(param) == self._param_label(param2):
+                raise ValueError("ikki parametr bir xil bo'lmasin")
+            if len(values) * len(values2) > self.MAX_STUDY_RUNS:
+                raise ValueError(f"kombinatsiyalar soni {len(values) * len(values2)} > {self.MAX_STUDY_RUNS}")
         variants = []
-        for v in values:
-            p2, sc2 = copy.deepcopy(project), copy.deepcopy(sc)
-            if kind == "link":
-                lid = param.get("link")
-                if lid not in p2["links"] or field not in STUDY_LINK_FIELDS:
-                    raise ValueError("kabel yoki maydon noto'g'ri")
-                newp = normalize_link_params({**(p2["links"][lid].get("params") or {}), field: v})
-                p2["links"][lid]["params"] = newp
-                if engine == "mininet":   # jonli tarmoqda — t=0 hodisasi bilan qo'llanadi
-                    sc2["events"] = [{"t": 0, "action": "link_params", "link": lid, "params": {field: newp[field]}}] + list(sc2.get("events") or [])
-            elif kind == "app":
-                app = next((a for a in sc2.get("apps") or [] if a.get("id") == param.get("app")), None)
-                if not app or field not in STUDY_APP_FIELDS:
-                    raise ValueError("ilova yoki maydon noto'g'ri")
-                if field == "rate":
-                    parse_rate(v)
-                    app["rate"] = str(v) if not isinstance(v, (int, float)) else f"{v}Mbps"
-                else:
-                    app["size"] = int(v)
-            elif kind == "ap":
-                ap = param.get("ap")
-                if (p2["devices"].get(ap) or {}).get("type") != "wifiap" or field not in ("tx_power", "channel"):
-                    raise ValueError("Wi-Fi AP yoki maydon noto'g'ri")
-                if engine == "mininet":
-                    raise ValueError("AP radio tadqiqoti Mininet dvigatelida qo'llab-quvvatlanmaydi (radio yo'q)")
-                p2["devices"][ap].setdefault("config", {})[field] = float(v) if field == "tx_power" else int(v)
-            else:
-                raise ValueError("param.kind: link | app | ap")
-            variants.append((v, p2, sc2))
+        for j, v2 in enumerate(values2):
+            for i, v in enumerate(values):
+                p2, sc2 = copy.deepcopy(project), copy.deepcopy(sc)
+                self._apply_param(p2, sc2, param, v, engine)
+                if two_d:
+                    self._apply_param(p2, sc2, param2, v2, engine)
+                variants.append((i, j, v, v2, p2, sc2))
         pname = project.get("name") or "untitled"
         self._dir(pname)
         study_id = re.sub(r"[^A-Za-z0-9_\-]", "_", time.strftime("%Y%m%d-%H%M%S") + f"-study-{scenario_name}"[:40])
-        pdesc = {**param, "label": f"{param.get('link') or param.get('app') or param.get('ap')}.{field}"}
+        pdesc = {**param, "label": self._param_label(param)}
+        pdesc2 = {**param2, "label": self._param_label(param2)} if two_d else None
 
         def go():
             n = len(variants)
-            for i, (v, p2, sc2) in enumerate(variants):
-                rid = f"{study_id}-v{i + 1:02d}"
+            for k, (i, j, v, v2, p2, sc2) in enumerate(variants):
+                rid = f"{study_id}-v{k + 1:02d}"
+                label = f"{pdesc['label']}={v}" + (f", {pdesc2['label']}={v2}" if two_d else "")
                 with self._lock:
                     self.active[rid] = {"project": pname, "scenario_name": scenario_name, "engine": engine,
-                                        "progress": 0.0, "created": time.time(), "study_id": study_id,
-                                        "label": f"{pdesc['label']}={v}"}
-                self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "index": i, "total": n,
-                                  "value": v, "run_id": rid})
-                self._worker(rid, pname, p2, scenario_name, sc2, engine,
-                             extra={"study_id": study_id, "study_param": pdesc, "study_value": v, "study_index": i,
-                                    "label": f"{pdesc['label']}={v}"})
+                                        "progress": 0.0, "created": time.time(), "study_id": study_id, "label": label}
+                self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "index": k, "total": n,
+                                  "value": label, "run_id": rid})
+                extra = {"study_id": study_id, "study_param": pdesc, "study_value": v, "study_index": i, "label": label}
+                if two_d:
+                    extra.update(study_param2=pdesc2, study_value2=v2, study_index2=j)
+                self._worker(rid, pname, p2, scenario_name, sc2, engine, extra=extra)
             self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "done": True, "total": n})
 
         threading.Thread(target=go, daemon=True).start()

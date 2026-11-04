@@ -273,7 +273,8 @@ def create_app(driver_name="demo", token=None):
     @app.post("/api/studies")
     def study_start(body: dict = Body(...)):
         return runs.start_study(body.get("project") or {}, body.get("scenario"), body.get("engine", "analytic"),
-                                body.get("param") or {}, body.get("values") or [])
+                                body.get("param") or {}, body.get("values") or [],
+                                body.get("param2") or None, body.get("values2") or None)
 
     @app.get("/api/runs/{project}")
     def run_list(project: str):
