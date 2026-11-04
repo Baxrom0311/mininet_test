@@ -25,6 +25,7 @@ from lab.mobility import apply_positions, has_moves, positions_at
 from lab.wifi import ap_config, channels_overlap, ess_key, max_range_m, meters_per_px
 from lab.wifi import estimate as wifi_estimate
 from lab.wifi import link_estimate as wifi_link_estimate
+from lab.engines.nodestats import L3_NS, RouteTracker, convergence, route_key
 
 MSS_BITS = 1448 * 8
 
@@ -64,6 +65,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     stale = None   # (eski loyiha nusxasi, qachongacha)
     movers = has_moves(sc)
     handover = {}   # stansiya -> aloqa uzilgan vaqt (roaming kutilmoqda)
+    node_series = {dv: [] for dv, d in proj["devices"].items() if d["type"] in L3_NS}
+    rtrack = RouteTracker()
     steps = int(math.ceil(duration))
     for k in range(steps):
         t0, t1 = float(k), float(min(k + 1, duration))
@@ -309,6 +312,30 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 pt[f"queue_{d}"] = round(q_s * cap[h] / 12000, 1)          # navbatdagi paketlar (1500 B)
                 pt[f"drops_{d}"] = round(max(load[h] - cap[h], 0) / 8000 * (t1 - t0))   # ortiqcha UDP (1000 B)
             link_series[lid].append(pt)
+        # qurilma statistikasi: marshrutlar (joriy/eski RIP jadvali), forwarding pps, egress drops
+        cnt = {dv: {"fwd": 0.0, "rx": 0.0, "tx": 0.0} for dv in node_series}
+        for f in flows:
+            if not f.get("active") or not f["ok"] or not f["path"] or f["rate"] <= 0:
+                continue
+            a = f["app"]
+            pps = f["rate"] / (int(a.get("size", 1000 if a["type"] != "ping" else 64)) * 8 if a["type"] != "tcp" else 12000)
+            hops = [(proj["links"][lid]["a" if d == "ab" else "b"]["dev"], proj["links"][lid]["b" if d == "ab" else "a"]["dev"])
+                    for lid, d in f["path"]]
+            for i_, (src_, dst_) in enumerate(hops):
+                if src_ in cnt:
+                    cnt[src_]["tx"] += pps
+                if dst_ in cnt:
+                    cnt[dst_]["rx"] += pps
+                    if i_ < len(hops) - 1:
+                        cnt[dst_]["fwd"] += pps
+        for dv in node_series:
+            rts = {route_key(r[0], r[1], r[2]) for r in n.routes(dv)}
+            rtrack.update(t0, dv, rts)
+            disc = sum(link_series[lid][-1][f"drops_{d}"] for lid, l in proj["links"].items()
+                       for side, d in (("a", "ab"), ("b", "ba")) if l[side]["dev"] == dv)
+            node_series[dv].append({"t": t1, "routes": len(rts), "fwd_pps": round(cnt[dv]["fwd"], 1),
+                                    "rx_pps": round(cnt[dv]["rx"], 1), "tx_pps": round(cnt[dv]["tx"], 1),
+                                    "noroute": 0, "discards": disc})
         progress((k + 1) / steps)
 
     flows_out = {}
@@ -324,7 +351,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         flows_out[a["id"]] = {"id": a["id"], "label": a["label"], "type": a["type"], "src": a["src"], "dst": a["dst"],
                               "start": a["start"], "stop": a["stop"], "series": s, "summary": summ}
     return {"engine": "analytic", "engine_label": "Analitik (oqim modeli)", "duration": duration,
-            "flows": flows_out, "links": link_series, "events": applied, "wall_s": round(time.time() - t_wall, 3),
+            "flows": flows_out, "links": link_series, "events": applied,
+            "nodes": node_series, "route_events": rtrack.events,
+            "convergence": convergence(applied, rtrack.events, duration), "wall_s": round(time.time() - t_wall, 3),
             "notes": ["oqim darajasidagi taxmin: UDP qat'iy, TCP max-min adolat + Mathis, navbat M/M/1",
                       "dinamik routing: demo modeli (dinamik daemonli routerlar o'zaro barcha subnetlarni biladi)",
                       "RIP: kabel uzilgandan keyin rip_convergence_s (standart 15s) davomida eski yo'llar",

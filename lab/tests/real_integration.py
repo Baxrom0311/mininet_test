@@ -233,7 +233,36 @@ def t_queue(drv, caps):
     check(bool(m) and 5 < float(m[-1]) < 9, f"update_link(bw=8) dan keyin TCP ishlaydi: {m}")
 
 
-TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "sdn": t_sdn, "p4": t_p4}
+def t_conv(drv, caps):
+    """Qurilma statistikasi + routing konvergensiyasi (FRR RIP halqa, Mininet dvigateli)."""
+    import shutil
+    from lab.engines import emulation
+    if not caps["frr"] or not shutil.which("iperf3"):
+        print("  skip (FRR/iperf3 yo'q)")
+        return
+    proj = load("rip_ring")
+    drv.start(proj)
+    ip = next(iter(proj["devices"]["srv1"]["config"]["interfaces"].values()))["ip"].split("/")[0]
+    check(wait_ping(drv, "pc1", ip, 90) is not None, "RIP yo'llari tayyor")
+    # RIP: muqobil yo'l keyingi periodik update'da (30 s gacha) — shuning uchun 45 s
+    sc = {"duration": 45, "apps": [
+        {"id": "v", "type": "udp", "src": "pc1", "dst": "srv1", "rate": "2Mbps", "size": 1000, "start": 1, "stop": 44},
+        {"id": "p", "type": "ping", "src": "pc1", "dst": "srv1", "interval": 0.2, "start": 1, "stop": 44}],
+        "events": [{"t": 8, "action": "link_down", "link": "l2"}]}
+    res = emulation.run(drv, sc)
+    r1 = [x for x in res["nodes"]["r1"] if 3 <= x["t"] <= 7]
+    print("    r1", r1[:2])
+    check(r1 and min(x["fwd_pps"] for x in r1) > 200, "r1 forwarding ~250 pkt/s (2 Mbit/s video + ping)")
+    print("    route_events", [(e["t"], e["dev"], len(e["added"]), len(e["removed"])) for e in res["route_events"]])
+    cv = res["convergence"]
+    print("    convergence", cv)
+    check(cv and cv[0]["converged_s"] is not None and 0 <= cv[0]["converged_s"] <= 35,
+          f"l2 uzilishidan keyin RIP konvergensiyasi o'lchandi: {cv and cv[0]['converged_s']} s")
+    after = [x["thr_bps"] for x in res["flows"]["v"]["series"] if 41 <= x["t"] <= 43]
+    check(after and min(after) > 1.5e6, "konvergensiyadan keyin video r3 orqali tiklandi")
+
+
+TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "sdn": t_sdn, "p4": t_p4}
 
 
 def main(argv):

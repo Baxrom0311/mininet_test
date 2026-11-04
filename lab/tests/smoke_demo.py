@@ -133,6 +133,12 @@ with TestClient(create_app("demo")) as c:
         v = {int(x["t"]): x["thr_bps"] for x in r["flows"]["video"]["series"]}
         gap = sum(1 for t in range(11, 50) if v.get(t, 0) < 1e5)
         check(3 <= gap <= 40 and v.get(55, 0) > 3e6, f"{eng}: RIP uzilish {gap}s, keyin zaxira yo'l (r3) orqali tiklanadi")
+        if eng == "analytic":
+            cv = r.get("convergence") or [{}]
+            r1 = [x for x in (r.get("nodes") or {}).get("r1", []) if 3 <= x["t"] <= 9]
+            check(cv[0].get("converged_s") == 15 and {"r1", "r2"} <= set(cv[0].get("devices", [])),
+                  f"analytic: konvergensiya vaqti {cv[0].get('converged_s')} s (rip_convergence_s=15)")
+            check(r1 and min(x["fwd_pps"] for x in r1) > 400, "analytic: r1 forwarding pps (qurilma statistikasi)")
         c.delete(f"/api/runs/rip_ring/{rid}")
 
     # ---- Wi-Fi: radio modeli, ping, qamrovdan tashqari, analitik/ns-3 o'tkazuvchanlik ----

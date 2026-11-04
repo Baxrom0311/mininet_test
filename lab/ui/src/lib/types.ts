@@ -23,7 +23,13 @@ export interface Info {
   driver: 'demo' | 'real'; capabilities: Record<string, boolean>; device_types: Record<string, { label: string; ns: boolean; l3: boolean }>
   frr_daemons: string[]; wifi: WifiModel; status: Status
 }
-export interface LinkStats { ab_bps: number; ba_bps: number; ab_pps?: number; ba_pps?: number; util: number; drops?: number }
+export interface LinkStats { ab_bps: number; ba_bps: number; ab_pps?: number; ba_pps?: number; util: number; drops?: number; queue_ab?: number; queue_ba?: number; qdrops?: number }
+/** natijadagi kabel nuqtasi (soniyalik) */
+export interface LinkPoint { t: number; util: number; ab_bps: number; ba_bps: number; queue_ab?: number; queue_ba?: number; drops_ab?: number; drops_ba?: number }
+/** qurilma nuqtasi (L3: host/server/router) */
+export interface NodePoint { t: number; routes: number; fwd_pps: number; rx_pps: number; tx_pps: number; noroute: number; discards: number }
+export interface RouteEvent { t: number; dev: string; added: string[]; removed: string[] }
+export interface Convergence { t: number; action: string; link: string; converged_s: number | null; last_change: number | null; devices: string[] }
 export type Selection = { kind: 'device' | 'link'; id: string } | null
 export interface InspectSection { title: string; kind: 'table' | 'text' | 'pipeline'; columns?: string[]; rows?: any[][]; text?: string; data?: Pipeline; hint?: string }
 export interface Pipeline {
@@ -35,7 +41,8 @@ export interface FlowPoint { t: number; thr_bps: number; delay_ms: number | null
 export interface FlowResult { id: string; label: string; type: string; src: string; dst: string; series: FlowPoint[]; summary: Record<string, number | null> }
 export interface RunResult {
   run_id: string; scenario_name: string; engine: string; engine_label?: string; created: number; duration: number; wall_s?: number
-  status: string; error?: string; label?: string; flows: Record<string, FlowResult>; links?: Record<string, { t: number; util: number; ab_bps: number; ba_bps: number }[]>
+  status: string; error?: string; label?: string; flows: Record<string, FlowResult>; links?: Record<string, LinkPoint[]>
+  nodes?: Record<string, NodePoint[]>; route_events?: RouteEvent[]; convergence?: Convergence[]
   events?: ScenarioEvent[]; notes?: string[]
   study_id?: string; study_param?: any; study_value?: any; study_index?: number; study_param2?: any; study_value2?: any; study_index2?: number
 }

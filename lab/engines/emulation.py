@@ -188,6 +188,13 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
     from lab.mobility import has_moves, positions_at
     movers = has_moves(sc)
     k = 0
+    from lab.engines.nodestats import L3_NS, RouteTracker, SnmpSampler, convergence, read_proc_routes, read_proc_snmp
+    l3 = [n for n, d in project["devices"].items() if d["type"] in L3_NS]
+    node_series = {n: [] for n in l3}
+    rtrack, snmp_s = RouteTracker(), SnmpSampler()
+    for n in l3:            # boshlang'ich holat (t=0) — keyingi o'zgarishlar route_events'ga
+        rtrack.update(0, n, read_proc_routes(pid[n]))
+        snmp_s.point(0, n, read_proc_snmp(pid[n]), set())
     while k < int(duration):
         k += 1
         if stop_ev.wait(max(T0 + k - time.time(), 0)):
@@ -221,6 +228,10 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
             sw_pk[lid] = (ia[1], ia[4], ib[1], ib[4])     # rx/tx paketlar (a, b tomon)
         if userspace:
             _fix_userspace_drops(project, link_series, sw_pk, sw_prev)
+        for n in l3:
+            rts = read_proc_routes(pid[n])
+            rtrack.update(time.time() - T0, n, rts)
+            node_series[n].append(snmp_s.point(k, n, read_proc_snmp(pid[n]), rts))
         progress(k / duration)
 
     time.sleep(2.0)    # oxirgi iperf3 intervallari
@@ -261,6 +272,8 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
             summ["avg_rtt_ms"] = avg(val("rtt_ms"))
         flows[a["id"]] = {**a, "series": series, "summary": summ}
     return {"engine": "mininet", "engine_label": "Mininet (real emulyatsiya)", "duration": duration,
-            "flows": flows, "links": link_series, "events": applied, "wall_s": round(time.time() - t_wall, 2),
+            "flows": flows, "links": link_series, "events": applied,
+            "nodes": node_series, "route_events": rtrack.events,
+            "convergence": convergence(applied, rtrack.events, duration), "wall_s": round(time.time() - t_wall, 2),
             "notes": ["real vaqt, haqiqiy Linux TCP/UDP/FRR/OVS — natijalar host CPU yuklamasiga bog'liq",
                       "delay_ms = parallel ping RTT/2 (bir tomonlama kechikish taxmini)"]}

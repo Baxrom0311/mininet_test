@@ -44,7 +44,7 @@ Majburlash: `NETLAB_OVS_DATAPATH=kernel|user`.
 Haqiqiy tarmoq integratsiya testi (root kerak; FRR/os-ken/BMv2 bo'lmasa tegishli qism o'tkazib yuboriladi):
 
 ```bash
-sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue sdn p4
+sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv sdn p4
 ```
 
 ### Istalgan kompyuter (demo rejim, Mininet'siz)
@@ -159,6 +159,22 @@ NetLab'da ham xuddi shunday:
 | `util` | max(ab, ba) / bw | ✓ | ✓ | ✓ |
 | `queue_ab` / `queue_ba` | jo'natuvchi tomondagi navbat (paket) | M/M/1 (1500 B) | pfifo qdisc + qurilma navbati | `tc -s qdisc` root qlen |
 | `drops_ab` / `drops_ba` | shu soniyada navbat to'lib tashlangan paketlar | ortiqcha UDP / 1000 B | qdisc + qurilma drops | `tc` drops (userspace OVS'da switch kirdi-chiqdi bo'yicha tuzatilgan) |
+
+**Qurilma statistikasi va konvergensiya** (OPNET *node statistics*, *convergence
+duration*) — analitik va Mininet dvigatellarida:
+
+- `nodes.<qurilma>` — har L3 qurilma (host/server/router) uchun soniyalik nuqtalar:
+  `routes` (jadvaldagi marshrutlar soni), `fwd_pps` (tranzit paketlar), `rx_pps`/`tx_pps`,
+  `noroute` (marshrut topilmay tashlangan), `discards` (IP/navbat tashlanishlari).
+  Mininet'da `/proc/<pid>/net/{route,snmp,netstat}` dan o'qiladi (subprocess'siz).
+- `route_events` — `{t, dev, added, removed}`: qaysi router qachon qaysi marshrutni
+  oldi yoki yo'qotdi.
+- `convergence` — har topologiya hodisasi uchun `converged_s`: hodisadan keyingi oxirgi
+  marshrut o'zgarishigacha bo'lgan vaqt va qatnashgan qurilmalar.
+
+Masalan, `rip_ring` da r1-r2 kabeli uzilganda: analitik model 15 s (`rip_convergence_s`),
+real FRR RIP esa 19 s (keyingi periodik update) ko'rsatdi; OSPF (`ospf_lab`,
+hello=1 s) — soniya ichida.
 
 Kabelning `queue` parametri (paket) uchala dvigatelda navbat chegarasi: ns-3'da L3
 tomonda `PfifoFastQueueDisc(MaxSize=queue)`, Mininet'da netem `limit` yoki (netem
