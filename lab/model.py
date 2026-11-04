@@ -383,6 +383,12 @@ def validate_scenario(project, sc):
                     raise ValueError
             except (TypeError, ValueError):
                 errors.append(f"{w}: dscp 0..63 (EF=46)")
+        if a.get("dport") not in (None, ""):
+            try:
+                if not 1 <= int(a["dport"]) <= 65535:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(f"{w}: dport 1..65535")
         if a.get("bytes") is not None:
             try:
                 if int(a["bytes"]) <= 0:

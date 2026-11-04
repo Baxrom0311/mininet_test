@@ -499,6 +499,17 @@ class DemoDriver(BaseDriver):
                     secs.append({"title": "NAT", "kind": "text",
                                  "text": f"MASQUERADE: ichki interfeyslar -> {cfg['nat'].get('outside')} "
                                          f"({next((str(i.ip) for _p, f, i in n.ifaces(name) if f == cfg['nat'].get('outside') and i), '?')})"})
+                if cfg.get("firewall"):
+                    from lab.firewall import chain_policy
+                    fw = cfg["firewall"]
+                    rows = [[i + 1, r.get("chain", "forward"), r.get("action"), r.get("proto") or "any",
+                             r.get("src") or "*", r.get("dst") or "*", r.get("dport") or "", r.get("in") or "*",
+                             r.get("out") or "*", r.get("state") or ""] for i, r in enumerate(fw.get("rules") or [])]
+                    rows += [["siyosat", ch, chain_policy(d, ch), "", "", "", "", "", "", ""]
+                             for ch in ("input", "forward", "output")]
+                    secs.append({"title": "Firewall (ACL)", "kind": "table",
+                                 "columns": ["#", "Zanjir", "Amal", "Proto", "Manba", "Manzil", "dport", "in", "out",
+                                             "Holat"], "rows": rows})
                 rt = n.routes(name)
                 secs.append({"title": "Routing jadvali", "kind": "table",
                              "columns": ["Manzil", "Gateway", "Interfeys", "Protokol", "Metric"],
@@ -695,6 +706,21 @@ class DemoDriver(BaseDriver):
             sent += 1
             src_ip = n.ip_of(name)
             ok, why, hops, links, d1 = n.forward(name, dst)
+            if ok and src_ip:
+                from lab.firewall import check_roundtrip
+                dst_dev, _ = n.owner_of(dst)
+                okf, whyf, verdict = check_roundtrip(n, name, src_ip.ip, dst_dev, dst, hops,
+                                                     {"proto": "icmp", "src": str(src_ip.ip), "dst": str(dst)})
+                if not okf:
+                    self._emit_path(links, "ICMP", f"IP {src_ip.ip} > {dst}: ICMP echo request, seq {seq}")
+                    time.sleep(1.0)
+                    if verdict == "reject":
+                        sh.out(f"From {whyf.split(':')[0]} icmp_seq={seq} Destination Host Prohibited ({whyf})\n")
+                    else:
+                        sh.out(f"Request timeout for icmp_seq {seq} ({whyf})\n")
+                    if seq < count:
+                        stop.wait(0.4)
+                    continue
             if ok:
                 dst_dev, _ = n.owner_of(dst)
                 ok2, why2, hops2, back, d2 = n.reply(name, src_ip.ip if src_ip else dst, dst_dev, dst, hops)

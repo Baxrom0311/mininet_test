@@ -71,6 +71,8 @@ def validate_services(project):
                 errors.append(f"{name}: NAT faqat router'da")
             elif out not in (cfg.get("interfaces") or {}) or not ((cfg["interfaces"][out] or {}).get("ip")):
                 errors.append(f"{name}: NAT outside interfeysi '{out}' IP bilan sozlanmagan")
+    from lab.firewall import validate_firewall
+    errors += validate_firewall(project)
     return errors
 
 

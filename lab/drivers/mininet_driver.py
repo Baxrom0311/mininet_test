@@ -701,6 +701,8 @@ class MininetDriver(BaseDriver):
                 cmds.append(f"ip link del {m.group(1)}")
         if d["type"] == "router":
             cmds += self._nat_cmds(cfg)
+        if d["type"] in ("host", "server", "router"):
+            self._apply_firewall(name, d)
         gw = cfg.get("gateway")
         if gw and d["type"] in ("host", "server"):
             cmds.append(f"ip route replace default via {gw}")
@@ -820,6 +822,31 @@ exit 0
                         rows.append([v[1], v[2], v[3], time.strftime("%H:%M:%S", time.localtime(int(v[0])))])
         except OSError:
             pass
+        return rows
+
+    def _apply_firewall(self, name, d):
+        """config.firewall -> iptables (o'z zanjirlari NETLAB-IN/FWD/OUT; nat jadvali alohida)."""
+        from lab.firewall import iptables_cmds
+        node = self.net.get(name)
+        fw = (d.get("config") or {}).get("firewall")
+        out = node.cmd(" ; ".join(c + " 2>&1" for c in iptables_cmds(d)))
+        if fw and out.strip():
+            msg = out.strip()[-400:]
+            if "conntrack" in msg.lower() or "match" in msg.lower():
+                msg = "conntrack/state moduli yo'q — 'state' qoidalari ishlamaydi: " + msg
+            self.bus.log("warn", f"firewall: {msg}", name)
+        elif fw:
+            n_r = len(fw.get("rules") or [])
+            self.bus.log("ok", f"firewall: {n_r} qoida, default {fw.get('default', 'accept')}", name)
+
+    def firewall_counters(self, name):
+        """[[zanjir, #, paketlar, baytlar, target, proto, in, out, manba, manzil, qo'shimcha]]"""
+        from lab.firewall import CHAINS, IPT_CHAIN, parse_counters
+        node = self.net.get(name)
+        rows = []
+        for ch in CHAINS:
+            for r in parse_counters(node.cmd(f"iptables -L {IPT_CHAIN[ch]} -n -v -x --line-numbers 2>/dev/null")):
+                rows.append([ch] + r)
         return rows
 
     @staticmethod
@@ -1349,6 +1376,11 @@ exit 0
                 if cfg_.get("dhcp_server"):
                     secs.append(self._table("DHCP lizinglari (dnsmasq)", ["MAC", "IP", "Mijoz", "Tugaydi"],
                                             self.dhcp_leases(name)))
+                if cfg_.get("firewall"):
+                    secs.append(self._table("Firewall (iptables, hisoblagichlar)",
+                                            ["Zanjir", "#", "Paketlar", "Baytlar", "Amal", "Proto", "in", "out",
+                                             "Manba", "Manzil", "Shart"], self.firewall_counters(name),
+                                            hint="Har qoida necha paketga mos kelgani (iptables -L -v)"))
                 if cfg_.get("nat"):
                     secs.append(self._text("NAT (iptables -t nat)", node.cmd("iptables -t nat -L POSTROUTING -n -v 2>&1")))
                     secs.append(self._text("NAT ulanishlari (conntrack)",
