@@ -180,6 +180,74 @@ only written if their source JSONL has at least one row, so a topology without N
 where NAT translation logging didn't produce output — see limitations below) simply won't have
 a `nat_translations.csv`.
 
+## NetLab (`lab/`) — interactive visual lab
+
+A separate, self-contained app (does **not** touch the dataset pipeline above): a
+Packet-Tracer/OPNET-style UI where the user builds a topology and runs it live on a
+*real* Linux stack. See `lab/README.md` (Uzbek) for usage.
+
+- `lab/netlab.py` — CLI entry (`python3 -m lab.netlab [--driver demo|real] [--host] [--window]`).
+- `lab/server.py` — FastAPI REST + `/ws/events` (packet/stats/log/state events) + `/ws/term/<dev>` (PTY).
+  Binds 127.0.0.1 by default; any other host forces a token (real driver gives root shells).
+- `lab/model.py` — project JSON model + `validate_project()`. Invariants: device names `^[a-z][a-z0-9]{0,7}$`
+  (Linux ifname limit), interface `<dev>-eth<N>` == OpenFlow/BMv2 port N, deterministic MACs
+  `00:00:00:<id hi>:<id lo>:<port>` on namespace devices, dpid == device `id`.
+- `lab/drivers/mininet_driver.py` — real driver. Network is kept alive; devices/links/link params/IPs are
+  applied **live** (no restart). Switches are started individually with *their own* controller (never
+  `net.start()`, which would attach every switch to every controller). FRR daemons run per router with
+  `-N <name>` pathspace (`vtysh -N <name>`). P4 switches start `--no-p4` and load programs via
+  `load_new_config_file`+`swap_configs`. Capture = one `tcpdump -i any` per netns (+root), keep only
+  `Out` lines → each packet maps to exactly one link/direction. Stats from `/proc/<pid>/net/dev`.
+  All Mininet ops hold `driver.lock` (Node.cmd is not thread-safe). Mininet imports are lazy.
+- `lab/drivers/demo_driver.py` — Mininet-free simulation (BFS L2 domains, LPM, dynamic-routing
+  approximation) used for UI work, Windows, and CI (`lab/tests/smoke_demo.py`).
+- `lab/ui/` — the main UI: Vite + React 18 + TypeScript + Tailwind + hand-written shadcn/ui components
+  (Radix). State in `src/lib/store.ts` (zustand; project model is the source of truth, ops sync live to the
+  backend when running), backend events via `src/lib/bus.ts` (packet animation is imperative, outside
+  React). Built output `lab/web-react/` IS committed (users need no Node); server serves it at `/` and the
+  legacy vanilla UI (`lab/web/`) at `/classic`. CI rebuilds and fails if `lab/web-react` is stale — run
+  `cd lab/ui && npm run build` after UI changes. Chart colours read CSS vars; components subscribe to
+  `store.theme` so they re-read on theme switch.
+- `lab/web/` — legacy vanilla JS UI (`/classic`); reuses `studio/web/css` via `/shared`; vendored xterm.
+- Scenarios (`project.scenarios`: apps udp/tcp/ping + timed link events) run on three engines via
+  `lab/engines/manager.py` → `lab/results/<project>/<run_id>.json` (gitignored): `analytic.py` (flow
+  model, in-process), `ns3_runner.py` (ns-3 DES via the `ns3` PyPI wheel, **separate process** — the
+  Simulator is a global singleton and NS_FATAL aborts the process; use `SetAttributeFailSafe` for any
+  attribute that may not exist), `emulation.py` (iperf3/ping on the live real-driver network). Switch
+  links in ns-3 use SimpleNetDevice/SimpleChannel, not CSMA: CSMA is half-duplex and holds the channel
+  for the propagation delay, capping throughput at ms-scale delays. ns-3 TCP is set to Linux-like
+  defaults (Cubic, MSS 1448, 4/6 MB buffers) so engines are comparable.
+- Parametric studies (`POST /api/studies`, `RunManager.start_study`): optional `param2`/`values2` runs the
+  full grid (<= 49, results carry `study_param2/study_value2/study_index2`, UI draws a heatmap); one param (link bw/delay/loss/queue
+  or app rate/size) × N values, run sequentially; each run stores `study_id/study_param/study_value`.
+  Link params are baked into the project copy (analytic/ns-3) or injected as a t=0 `link_params` event
+  (mininet, live network). ns-3: routers with `ripd` (and no ospfd/isisd) get ns-3 RipHelper; others use
+  global SPF. Don't set `IpForward=false` on single-homed hosts — ns-3.44 global routing segfaults on a
+  P2P-attached non-forwarding host. Analytic engine models RIP convergence as stale pre-failure routes
+  for `rip_convergence_s` (default 15).
+- Wi-Fi: device type `wifiap` (L2) + links with `params.medium == "wifi"` (AP <-> host/server/router, one
+  per station). Radio model in `lab/wifi.py` (log-distance n=3, SNR->MCS tables calibrated to ns-3, link if
+  RSSI >= -82 dBm); the UI re-implements the formula in `lab/web/js/wifi.js` from tables served in
+  `/api/info.wifi` — keep them in sync. Distances = canvas px * `project.meters_per_px`. ns-3: one
+  YansWifi channel per AP, IdealWifiManager, AP device bridged with its wired ports. Analytic: per-station
+  capacity from the model + per-AP airtime resource with airtime-fair TCP sharing. Mininet: AP = OVS
+  switch, Wi-Fi link = TCLink at the modelled rate (no shared medium).
+- ns-3 routing no longer uses Ipv4GlobalRouting (segfaults on IpForward=false P2P hosts; aborts with "L2
+  forwarding loop" when several APs share one YansWifiChannel and are bridged to the same LAN). Instead
+  `install_routes()` installs `Net.routes()` (same model as analytic) as static routes, re-run on link
+  events and when a moving station's Wi-Fi link goes in/out of range. RIP routers keep ns-3 RIP.
+- Wi-Fi multi-AP: all APs of a band share ONE YansWifiChannel; per-AP `channel` (validated against
+  `wifi.CHANNELS`) separates them at the PHY. Analytic: co-channel APs within link range form one airtime
+  pool (union-find). Mobility: `move` events (`lab/mobility.py`, canvas px, linear) — ns-3 updates
+  positions every 0.5 s (samples stay 1 s; rate uses time since last sample), analytic per step,
+  mininet via `MininetDriver.wifi_refresh()` each second.
+- Roaming: ESS = same (SSID, band, channel) (`wifi.ess_key`). ns-3 StaWifiMac re-associates by itself;
+  the runner polls `GetBssid(0)` each sample and emits `roam` events. APs without stations are still
+  installed (beacons). Analytic: sticky client — best AP at t=0, then 1 step outage after the current
+  link fails, then re-point the link to the strongest ESS AP. Mininet: no roaming.
+- The real driver could not be executed in CI/this repo's sandbox (no Mininet/OVS/root netns); it was
+  checked against Mininet 2.3 sources only. Treat first real runs as integration testing.
+
 ## Known limitations
 
 - **NAT translations are unreliable inside Docker.** `NATMonitor` reads

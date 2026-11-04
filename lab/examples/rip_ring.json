@@ -1,0 +1,236 @@
+{
+  "version": 1,
+  "name": "rip_ring",
+  "notes": "Uchburchak: r1-r2 to'g'ridan-to'g'ri (asosiy) va r1-r3-r2 (zaxira). RIP va OSPF konvergensiyasini solishtiring: ssenariy 'uzilish' — t=10s da r1-r2 uziladi.",
+  "devices": {
+    "pc1": {
+      "id": 1,
+      "type": "host",
+      "x": 120,
+      "y": 300,
+      "config": {
+        "interfaces": {
+          "pc1-eth1": {
+            "ip": "10.1.0.10/24"
+          }
+        },
+        "gateway": "10.1.0.1",
+        "routes": []
+      }
+    },
+    "r1": {
+      "id": 2,
+      "type": "router",
+      "x": 340,
+      "y": 300,
+      "config": {
+        "daemons": [
+          "ripd"
+        ],
+        "interfaces": {
+          "r1-eth1": {
+            "ip": "10.1.0.1/24"
+          },
+          "r1-eth2": {
+            "ip": "10.12.0.1/30"
+          },
+          "r1-eth3": {
+            "ip": "10.13.0.1/30"
+          }
+        },
+        "startup": "hostname r1\n!\nrouter rip\n version 2\n network 10.1.0.0/24\n network 10.12.0.0/30\n network 10.13.0.0/30\n!",
+        "routes": []
+      }
+    },
+    "r2": {
+      "id": 3,
+      "type": "router",
+      "x": 700,
+      "y": 300,
+      "config": {
+        "daemons": [
+          "ripd"
+        ],
+        "interfaces": {
+          "r2-eth1": {
+            "ip": "10.12.0.2/30"
+          },
+          "r2-eth2": {
+            "ip": "10.23.0.1/30"
+          },
+          "r2-eth3": {
+            "ip": "10.2.0.1/24"
+          }
+        },
+        "startup": "hostname r2\n!\nrouter rip\n version 2\n network 10.2.0.0/24\n network 10.12.0.0/30\n network 10.23.0.0/30\n!",
+        "routes": []
+      }
+    },
+    "r3": {
+      "id": 4,
+      "type": "router",
+      "x": 520,
+      "y": 130,
+      "config": {
+        "daemons": [
+          "ripd"
+        ],
+        "interfaces": {
+          "r3-eth1": {
+            "ip": "10.13.0.2/30"
+          },
+          "r3-eth2": {
+            "ip": "10.23.0.2/30"
+          }
+        },
+        "startup": "hostname r3\n!\nrouter rip\n version 2\n network 10.13.0.0/30\n network 10.23.0.0/30\n!",
+        "routes": []
+      }
+    },
+    "srv1": {
+      "id": 5,
+      "type": "server",
+      "x": 920,
+      "y": 300,
+      "config": {
+        "interfaces": {
+          "srv1-eth1": {
+            "ip": "10.2.0.10/24"
+          }
+        },
+        "gateway": "10.2.0.1",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "pc1",
+        "port": 1
+      },
+      "b": {
+        "dev": "r1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "2ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "r1",
+        "port": 2
+      },
+      "b": {
+        "dev": "r2",
+        "port": 1
+      },
+      "params": {
+        "bw": 50,
+        "delay": "2ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "r1",
+        "port": 3
+      },
+      "b": {
+        "dev": "r3",
+        "port": 1
+      },
+      "params": {
+        "bw": 20,
+        "delay": "5ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l4": {
+      "a": {
+        "dev": "r3",
+        "port": 2
+      },
+      "b": {
+        "dev": "r2",
+        "port": 2
+      },
+      "params": {
+        "bw": 20,
+        "delay": "5ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l5": {
+      "a": {
+        "dev": "r2",
+        "port": 3
+      },
+      "b": {
+        "dev": "srv1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "2ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "p4_programs": {},
+  "controllers": {},
+  "scenarios": {
+    "uzilish": {
+      "duration": 60,
+      "apps": [
+        {
+          "id": "video",
+          "type": "udp",
+          "src": "pc1",
+          "dst": "srv1",
+          "rate": "4Mbps",
+          "size": 1000,
+          "start": 1,
+          "stop": 59,
+          "label": "video pc1→srv1"
+        },
+        {
+          "id": "ping",
+          "type": "ping",
+          "src": "pc1",
+          "dst": "srv1",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 59,
+          "label": "ping pc1→srv1"
+        }
+      ],
+      "events": [
+        {
+          "t": 10,
+          "action": "link_down",
+          "link": "l2"
+        }
+      ],
+      "notes": "t=10s da asosiy r1-r2 kabeli uziladi — trafik r3 orqali o'tishi kerak"
+    }
+  }
+}

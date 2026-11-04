@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="uz" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NetLab</title>
+  <link rel="stylesheet" href="/shared/theme.css">
+  <link rel="stylesheet" href="/shared/components.css">
+  <link rel="stylesheet" href="vendor/xterm/xterm.css">
+  <link rel="stylesheet" href="css/lab.css">
+</head>
+<body>
+  <div class="aurora" aria-hidden="true">
+    <span class="aurora-blob b1"></span><span class="aurora-blob b2"></span><span class="aurora-blob b3"></span>
+  </div>
+  <div class="lab" id="lab">
+    <header class="panel lab-top"></header>
+    <aside class="panel lab-left"></aside>
+    <main class="panel lab-stage"></main>
+    <aside class="panel lab-right"></aside>
+    <section class="panel lab-dock"></section>
+  </div>
+  <div id="windows"></div>
+  <div class="toasts" id="toasts"></div>
+
+  <!-- xterm.js 5.3.0 + fit 0.8.0 (MIT, vendor/xterm/LICENSE) — internetsiz ham ishlashi uchun lokal -->
+  <script src="vendor/xterm/xterm.js"></script>
+  <script src="vendor/xterm/xterm-addon-fit.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/wifi.js"></script>
+  <script src="js/canvas.js"></script>
+  <script src="js/windows.js"></script>
+  <script src="js/inspector.js"></script>
+  <script src="js/results.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

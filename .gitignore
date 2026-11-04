@@ -23,3 +23,11 @@ custom_topologies/*.json
 
 # Studio ilova sozlamalari — SSH paroli bo'lishi mumkin, repo'ga YOZILMASIN
 studio/config.json
+# NetLab foydalanuvchi loyihalari (lab/examples/ — namunalar, repo'da)
+lab/projects/*.json
+lab/.venv/
+lab/results/
+
+# NetLab React UI: bog'liqliklar (yig'ilgan lab/web-react repo'da — Node.js'siz ishlashi uchun)
+lab/ui/node_modules/
+lab/ui/*.tsbuildinfo

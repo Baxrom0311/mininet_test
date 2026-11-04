@@ -1,0 +1,338 @@
+{
+  "version": 1,
+  "name": "vlan_lab",
+  "notes": "802.1Q VLAN: s1 va s2 orasida trunk (10,20), r1 — router-on-a-stick (r1-eth1.10 / r1-eth1.20). pc1/pc3 — VLAN 10, pc2/pc4 — VLAN 20. pc5 VLAN 20 portida, lekin VLAN 10 subnet IP'si bilan — izolyatsiya tufayli pc1 unga yetmaydi.",
+  "p4_programs": {},
+  "controllers": {},
+  "devices": {
+    "pc1": {
+      "id": 1,
+      "type": "host",
+      "x": 100,
+      "y": 140,
+      "config": {
+        "interfaces": {
+          "pc1-eth1": {
+            "ip": "10.0.10.11/24"
+          }
+        },
+        "gateway": "10.0.10.1",
+        "routes": []
+      }
+    },
+    "pc2": {
+      "id": 2,
+      "type": "host",
+      "x": 100,
+      "y": 320,
+      "config": {
+        "interfaces": {
+          "pc2-eth1": {
+            "ip": "10.0.20.12/24"
+          }
+        },
+        "gateway": "10.0.20.1",
+        "routes": []
+      }
+    },
+    "s1": {
+      "id": 3,
+      "type": "switch",
+      "x": 280,
+      "y": 230,
+      "config": {
+        "mode": "standalone",
+        "stp": false,
+        "ports": {
+          "1": {
+            "mode": "access",
+            "vlan": 10
+          },
+          "2": {
+            "mode": "access",
+            "vlan": 20
+          },
+          "3": {
+            "mode": "trunk",
+            "allowed": [
+              10,
+              20
+            ]
+          },
+          "4": {
+            "mode": "trunk",
+            "allowed": [
+              10,
+              20
+            ]
+          }
+        }
+      }
+    },
+    "r1": {
+      "id": 4,
+      "type": "router",
+      "x": 280,
+      "y": 60,
+      "config": {
+        "daemons": [],
+        "interfaces": {
+          "r1-eth1": {
+            "ip": ""
+          },
+          "r1-eth1.10": {
+            "ip": "10.0.10.1/24"
+          },
+          "r1-eth1.20": {
+            "ip": "10.0.20.1/24"
+          }
+        },
+        "startup": "hostname r1\n!",
+        "routes": []
+      }
+    },
+    "s2": {
+      "id": 5,
+      "type": "switch",
+      "x": 480,
+      "y": 230,
+      "config": {
+        "mode": "standalone",
+        "stp": false,
+        "ports": {
+          "1": {
+            "mode": "trunk",
+            "allowed": [
+              10,
+              20
+            ]
+          },
+          "2": {
+            "mode": "access",
+            "vlan": 10
+          },
+          "3": {
+            "mode": "access",
+            "vlan": 20
+          },
+          "4": {
+            "mode": "access",
+            "vlan": 20
+          }
+        }
+      }
+    },
+    "pc3": {
+      "id": 6,
+      "type": "host",
+      "x": 660,
+      "y": 140,
+      "config": {
+        "interfaces": {
+          "pc3-eth1": {
+            "ip": "10.0.10.13/24"
+          }
+        },
+        "gateway": "10.0.10.1",
+        "routes": []
+      }
+    },
+    "pc4": {
+      "id": 7,
+      "type": "host",
+      "x": 660,
+      "y": 260,
+      "config": {
+        "interfaces": {
+          "pc4-eth1": {
+            "ip": "10.0.20.14/24"
+          }
+        },
+        "gateway": "10.0.20.1",
+        "routes": []
+      }
+    },
+    "pc5": {
+      "id": 8,
+      "type": "host",
+      "x": 660,
+      "y": 380,
+      "config": {
+        "interfaces": {
+          "pc5-eth1": {
+            "ip": "10.0.10.15/24"
+          }
+        },
+        "gateway": "10.0.10.1",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "pc1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "pc2",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "s1",
+        "port": 3
+      },
+      "b": {
+        "dev": "s2",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l4": {
+      "a": {
+        "dev": "s1",
+        "port": 4
+      },
+      "b": {
+        "dev": "r1",
+        "port": 1
+      },
+      "params": {
+        "bw": 20,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l5": {
+      "a": {
+        "dev": "s2",
+        "port": 2
+      },
+      "b": {
+        "dev": "pc3",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l6": {
+      "a": {
+        "dev": "s2",
+        "port": 3
+      },
+      "b": {
+        "dev": "pc4",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l7": {
+      "a": {
+        "dev": "s2",
+        "port": 4
+      },
+      "b": {
+        "dev": "pc5",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "scenarios": {
+    "vlanlar": {
+      "duration": 20,
+      "apps": [
+        {
+          "id": "inter",
+          "type": "udp",
+          "src": "pc1",
+          "dst": "pc4",
+          "rate": "12Mbps",
+          "size": 1000,
+          "start": 1,
+          "stop": 19,
+          "label": "VLAN10→VLAN20 (r1 orqali)"
+        },
+        {
+          "id": "intra",
+          "type": "tcp",
+          "src": "pc3",
+          "dst": "pc1",
+          "start": 2,
+          "stop": 19,
+          "label": "VLAN10 ichida (trunk, r1'siz)"
+        },
+        {
+          "id": "ping",
+          "type": "ping",
+          "src": "pc2",
+          "dst": "pc3",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 19,
+          "label": "ping pc2→pc3"
+        }
+      ],
+      "events": [],
+      "notes": "inter-VLAN trafik r1 trunk kabelidan (20 Mbit/s) IKKI marta o'tadi (kirish VLAN10, chiqish VLAN20): 12 Mbit/s → l4 ab/ba har biri 12; VLAN ichidagi TCP r1'ga tegmaydi."
+    }
+  }
+}

@@ -7,6 +7,13 @@ Mininet + SDN (os-ken/Ryu) yordamida real internet trafikini simulyatsiya qilish
 > kun-tun mavzu). Batafsil: [`studio/README.md`](studio/README.md). Ishga tushirish:
 > `pip install -r studio/requirements.txt && python3 studio/studio.py`.
 
+> **Yangi: NetLab** — Packet Tracer / OPNET uslubidagi vizual laboratoriya: qurilmalarni
+> sudrab joylash, kabel ulash, har bir qurilmaga kirish (terminal, jadvallar, "hardware":
+> portlar, navbatlar, P4 pipeline). Router'larda haqiqiy FRRouting, switch'larda OVS yoki
+> o'zingiz yozgan P4 dastur, SDN qurilmalarda o'zingiz yozgan kontroller ishlaydi.
+> Batafsil: [`lab/README.md`](lab/README.md). Tez sinash (Mininet'siz):
+> `pip install -r lab/requirements.txt && python3 -m lab.netlab --open`.
+
 ## Xususiyatlari
 
 - **4 topologiya**: three_as (3 AS, 6 switch), five_as (5 AS, 9 switch), datacenter (Fat-tree, 6 switch), campus (7 switch)

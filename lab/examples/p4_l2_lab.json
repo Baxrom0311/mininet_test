@@ -1,0 +1,148 @@
+{
+  "version": 1,
+  "name": "p4_l2_lab",
+  "notes": "P4 L2 switch: dmac jadvalini o'zingiz to'ldirasiz. p1 → Sozlama → Runtime buyruqlari. Hardware bo'limida pipeline va BMv2 trace.",
+  "devices": {
+    "h1": {
+      "id": 1,
+      "type": "host",
+      "x": 200,
+      "y": 180,
+      "config": {
+        "interfaces": {
+          "h1-eth1": {
+            "ip": "10.0.0.1/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "h2": {
+      "id": 2,
+      "type": "host",
+      "x": 200,
+      "y": 440,
+      "config": {
+        "interfaces": {
+          "h2-eth1": {
+            "ip": "10.0.0.2/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "h3": {
+      "id": 3,
+      "type": "server",
+      "x": 720,
+      "y": 310,
+      "config": {
+        "interfaces": {
+          "h3-eth1": {
+            "ip": "10.0.0.3/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "p1": {
+      "id": 4,
+      "type": "p4switch",
+      "x": 460,
+      "y": 310,
+      "config": {
+        "program": "l2_switch",
+        "runtime": "table_add dmac forward 00:00:00:00:01:01 => 1\ntable_add dmac forward 00:00:00:00:02:01 => 2\ntable_add dmac forward 00:00:00:00:03:01 => 3"
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "h1",
+        "port": 1
+      },
+      "b": {
+        "dev": "p1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "h2",
+        "port": 1
+      },
+      "b": {
+        "dev": "p1",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "h3",
+        "port": 1
+      },
+      "b": {
+        "dev": "p1",
+        "port": 3
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "p4_programs": {
+    "l2_switch": "/* NetLab: L2 switch (P4_16, v1model / BMv2)\n *\n * Pipeline:  Parser(ethernet) -> Ingress[dmac jadvali] -> Egress[filtr] -> Deparser\n *\n * dmac jadvali — MAC manzil bo'yicha aniq (exact) moslik:\n *     table_add dmac forward 00:00:00:00:01:01 => 1\n * Topilmasa — broadcast(): 1-multicast guruh (NetLab switchning barcha\n * portlarini avtomatik shu guruhga qo'shadi). Egress kirgan portga qaytarmaydi.\n *\n * NetLab MAC'lari deterministik: 00:00:00:<id hi>:<id lo>:<port>\n */\n#include <core.p4>\n#include <v1model.p4>\n\nheader ethernet_t {\n    bit<48> dstAddr;\n    bit<48> srcAddr;\n    bit<16> etherType;\n}\n\nstruct headers_t  { ethernet_t ethernet; }\nstruct metadata_t { }\n\nparser MyParser(packet_in pkt, out headers_t hdr,\n                inout metadata_t meta, inout standard_metadata_t std) {\n    state start {\n        pkt.extract(hdr.ethernet);\n        transition accept;\n    }\n}\n\ncontrol MyVerifyChecksum(inout headers_t hdr, inout metadata_t meta) { apply { } }\n\ncontrol MyIngress(inout headers_t hdr, inout metadata_t meta,\n                  inout standard_metadata_t std) {\n    counter(512, CounterType.packets_and_bytes) port_rx;\n\n    action drop() { mark_to_drop(std); }\n    action forward(bit<9> port) { std.egress_spec = port; }\n    action broadcast() { std.mcast_grp = 1; }\n\n    table dmac {\n        key = { hdr.ethernet.dstAddr: exact; }\n        actions = { forward; broadcast; drop; }\n        size = 1024;\n        default_action = broadcast();\n    }\n\n    apply {\n        port_rx.count((bit<32>) std.ingress_port);\n        dmac.apply();\n    }\n}\n\ncontrol MyEgress(inout headers_t hdr, inout metadata_t meta,\n                 inout standard_metadata_t std) {\n    apply {\n        // Multicast nusxasini kelgan portga qaytarmaslik (L2 halqa oldini olish)\n        if (std.egress_port == std.ingress_port) {\n            mark_to_drop(std);\n        }\n    }\n}\n\ncontrol MyComputeChecksum(inout headers_t hdr, inout metadata_t meta) { apply { } }\n\ncontrol MyDeparser(packet_out pkt, in headers_t hdr) {\n    apply { pkt.emit(hdr.ethernet); }\n}\n\nV1Switch(MyParser(), MyVerifyChecksum(), MyIngress(), MyEgress(),\n         MyComputeChecksum(), MyDeparser()) main;\n"
+  },
+  "controllers": {},
+  "scenarios": {
+    "asosiy": {
+      "duration": 20,
+      "apps": [
+        {
+          "id": "u1",
+          "type": "udp",
+          "src": "h1",
+          "dst": "h3",
+          "rate": "20Mbps",
+          "size": 1200,
+          "start": 1,
+          "stop": 19
+        },
+        {
+          "id": "p1",
+          "type": "ping",
+          "src": "h2",
+          "dst": "h3",
+          "start": 1,
+          "stop": 19
+        }
+      ],
+      "events": []
+    }
+  }
+}
