@@ -160,6 +160,9 @@ def main(inp_path, out_path):
     if _leases:
         emit(log=f"DHCP: {len(_leases)} lizing (statik ekvivalent): "
                  + ", ".join(f"{x['client']}={x['ip']}" for x in _leases[:6]))
+    if any("bgpd" in ((d.get("config") or {}).get("daemons") or []) for d in devs.values()):
+        emit(log="eslatma: BGP ns-3 da yo'q — model (lab/bgp.py) hisoblagan BGP marshrutlari statik o'rnatiladi "
+                 "(hodisada darhol qayta hisoblanadi)")
     if any((d.get("config") or {}).get("nat") for d in devs.values()):
         emit(log="eslatma: NAT ns-3 da yo'q — manba manzil almashtirilmaydi (ichki subnet marshruti bo'lmasa javob yetmaydi)")
     nodes = {}

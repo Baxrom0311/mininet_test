@@ -34,13 +34,17 @@ class _StaleNet(Net):
     """Konvergensiya oynasi: RIP routerlar uzilishdan OLDINGI routing jadvalini ishlatadi
     (forwarding esa joriy kabel holati bo'yicha — uzilgan kabelga yuborilgan paket yo'qoladi)."""
 
-    def __init__(self, project, old_project, rip_set):
+    def __init__(self, project, old_project, rip_set, extra=()):
         super().__init__(project)
-        self._old = Net(old_project)
-        self._rip = rip_set
+        # [(eski Net, qurilmalar to'plami)] — RIP (uzilishdan oldingi) va BGP (tiklanishdan oldingi) oynalari
+        self._ov = ([(Net(old_project), rip_set)] if old_project is not None else []) + \
+                   [(Net(o), st) for o, st in extra]
 
     def routes(self, dev):
-        return self._old.routes(dev) if dev in self._rip else super().routes(dev)
+        for net_, st in self._ov:
+            if dev in st:
+                return net_.routes(dev)
+        return super().routes(dev)
 
 
 def run(project, sc, progress=lambda f: None, log=lambda m: None):
@@ -67,6 +71,13 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     rip_upd = max((rip_timers(proj["devices"][n])["update"] for n in rip_set), default=30)
     rip_conv = float(sc["rip_convergence_s"]) if sc.get("rip_convergence_s") not in (None, "") else rip_upd / 2
     stale = None   # (eski loyiha nusxasi, qachongacha)
+    # BGP: kabel uzilsa (interfeys DOWN) sessiya darhol tushadi va marshrut olib tashlanadi;
+    # tiklanganda sessiya qayta o'rnatilib e'lonlar kelguncha bgp_convergence_s (real FRR,
+    # `timers connect 5`: ~2 s) davomida BGP routerlar eski (kabelsiz) jadvalni ishlatadi.
+    from lab.bgp import bgp_cfg
+    bgp_set = {n for n, d in proj["devices"].items() if bgp_cfg(d)}
+    bgp_conv = float(sc["bgp_convergence_s"]) if sc.get("bgp_convergence_s") not in (None, "") else 2.0
+    bgp_stale = None
     movers = has_moves(sc)
     handover = {}   # stansiya -> aloqa uzilgan vaqt (roaming kutilmoqda)
     # cheklangan TCP uzatishlar (FTP fayl / HTTP sahifa): qolgan bayt, tugash vaqti, ulanish+slow start
@@ -83,6 +94,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             if l and e["action"] == "link_down" and rip_set and rip_conv > 0:
                 stale = (copy.deepcopy(proj), t0 + rip_conv)
                 log(f"RIP: {rip_conv:.0f}s konvergensiya (eski yo'llar)")
+            if l and e["action"] == "link_up" and bgp_set and bgp_conv > 0 and l.get("up") is False:
+                bgp_stale = (copy.deepcopy(proj), t0 + bgp_conv)
+                log(f"BGP: {bgp_conv:.0f}s sessiya qayta o'rnatilmoqda")
             if l:
                 if e["action"] == "link_down":
                     l["up"] = False
@@ -136,9 +150,15 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     applied.append({"t": t0, "action": "roam", "device": sta, "from": cur_ap, "to": b1})
                     log(f"t={t0:.0f}s: roaming {sta}: {cur_ap} -> {b1}")
                     handover.pop(sta, None)
+        bgp_ov = ()
+        if bgp_stale and t0 < bgp_stale[1]:
+            bgp_stale[0]["devices"] = proj["devices"]
+            bgp_ov = ((bgp_stale[0], bgp_set),)
         if stale and t0 < stale[1]:
             stale[0]["devices"] = proj["devices"]   # eski routing jadvali, lekin joriy pozitsiyalar
-            n = _StaleNet(proj, stale[0], rip_set)
+            n = _StaleNet(proj, stale[0], rip_set, bgp_ov)
+        elif bgp_ov:
+            n = _StaleNet(proj, None, set(), bgp_ov)
         else:
             n = Net(proj)
         cap = {}

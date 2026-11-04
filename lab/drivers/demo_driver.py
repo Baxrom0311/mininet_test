@@ -135,7 +135,8 @@ class Net:
         d = self.devs[dev]
         if d["type"] != "router":
             return set()
-        return {x for x in (d.get("config") or {}).get("daemons", []) if x in DYNAMIC}
+        # bgpd — IGP emas: alohida path-vector modeli (lab/bgp.py), faqat sozlangan qo'shnilar bilan
+        return {x for x in (d.get("config") or {}).get("daemons", []) if x in DYNAMIC and x != "bgpd"}
 
     def adjacency(self, dev):
         """L3 qo'shnilar: [(port, ifname, my_ip, neighbor, neighbor_ip, link_path)]"""
@@ -150,7 +151,23 @@ class Net:
         return out
 
     def routes(self, dev):
-        """[(network, via_ip|None, ifname, proto)] — kichik prefiksdan kattasiga emas, LPM bilan ishlatiladi."""
+        """[(network, via_ip|None, ifname, proto)] — kichik prefiksdan kattasiga emas, LPM bilan ishlatiladi.
+        connected/static/IGP + BGP (AD bo'yicha birlashtiriladi)."""
+        base = self._base_routes(dev)
+        b = self.bgp()[0].get(dev)
+        if not b:
+            return base
+        from lab.bgp import merge_routes
+        return merge_routes(base, b)
+
+    def bgp(self):
+        """(router -> BGP marshrutlari, router -> sessiyalar) — bir marta hisoblanadi (kesh)."""
+        if getattr(self, "_bgp_cache", None) is None:
+            from lab.bgp import compute
+            self._bgp_cache = compute(self)
+        return self._bgp_cache
+
+    def _base_routes(self, dev):
         d = self.devs[dev]
         cfg = d.get("config") or {}
         rt = []
@@ -191,11 +208,17 @@ class Net:
                             proto = DYNAMIC[sorted(mine)[0]]
                             rt.append((ipi.network, first_via, first_if, f"{proto} [{hops}]"))
                 for port, ifn, myip, nd, nip, _path in self.adjacency(cur):
-                    if nd in seen or not (self.dyn_daemons(nd) & mine):
+                    if nd in seen or not (self.dyn_daemons(nd) & mine) or self._other_as(cur, nd):
                         continue
                     seen.add(nd)
                     q.append((nd, first_via or nip.ip, first_if or ifn, hops + 1))
         return rt
+
+    def _other_as(self, a, b):
+        """IGP AS chegarasidan o'tmaydi (ikkalasida BGP asn bor va har xil)."""
+        from lab.bgp import bgp_cfg
+        x, y = bgp_cfg(self.devs[a]), bgp_cfg(self.devs[b])
+        return bool(x and y and x["asn"] != y["asn"])
 
     def lookup(self, dev, dst):
         best = None
@@ -486,6 +509,16 @@ class DemoDriver(BaseDriver):
                              "rows": [[ip, m, i, "REACHABLE"] for ip, (m, i) in arp.items()]})
                 if t == "router":
                     secs.append({"title": "FRR: show ip route", "kind": "text", "text": self._show_ip_route(n, name)})
+                    rows_b, sess = n.bgp()
+                    if name in sess:
+                        secs.append({"title": "FRR: show bgp summary", "kind": "table",
+                                     "columns": ["Qo'shni", "AS", "Tur", "Holat", "PfxRcd"],
+                                     "rows": [[x["neighbor"], x["remote_as"], x["type"], x["state"],
+                                               x.get("prefixes", 0) if x["state"] == "Established" else "—"]
+                                              for x in sess[name]]})
+                        secs.append({"title": "FRR: show ip bgp", "kind": "table",
+                                     "columns": ["Prefiks", "Next hop", "Interfeys", "AS_PATH / tur"],
+                                     "rows": [[str(r[0]), str(r[1]), r[2], r[3]] for r in rows_b.get(name, [])]})
             if t == "wifiap":
                 rows = []
                 for p_, (lid_, peer_, _pp) in sorted(ports.items()):
@@ -568,6 +601,16 @@ class DemoDriver(BaseDriver):
             return ("\n".join(out) or "(bo'sh)") + "\n"
         if line.startswith("show ip route"):
             return self._show_ip_route(n, name) + "\n"
+        if line.startswith(("show bgp summary", "show ip bgp summary", "show ip bgp", "show bgp")):
+            rows_b, sess = n.bgp()
+            if name not in sess:
+                return "% BGP sozlanmagan\n"
+            if "summary" in line:
+                return "Neighbor        V   AS   State/PfxRcd\n" + "".join(
+                    f"{x['neighbor']:<15} 4 {x['remote_as']:>6}   "
+                    f"{x.get('prefixes', 0) if x['state'] == 'Established' else x['state']}\n" for x in sess[name])
+            return "   Network          Next Hop         Path\n" + "".join(
+                f"*> {str(r[0]):<16} {str(r[1]):<16} {r[3]}\n" for r in rows_b.get(name, []))
         if cmd in ("arp", "ip n", "ip neigh") or line in ("ip n", "ip neigh"):
             arp = self._arp.get(name, {})
             return ("\n".join(f"{ip:<16} {m}  {i}" for ip, (m, i) in arp.items()) or "(bo'sh)") + "\n"
