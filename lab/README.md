@@ -45,6 +45,34 @@ haqiqiy FRR/P4/SDN kodi bajarilmaydi.
 
 Alohida oynada ochish uchun (pywebview kerak): `python3 -m lab.netlab --window`.
 
+## Interfeys (React + shadcn/ui)
+
+UI `lab/ui/` da: Vite, React 18, TypeScript, Tailwind va shadcn/ui komponentlari
+(Radix primitivlari). Palitra oq/qora (neutral), panellar yengil "glass" effektli,
+kun va tun mavzusi bor (yuqori o'ng burchakdagi tugma). Yig'ilgan versiya
+`lab/web-react/` da repo'ga qo'shilgan, shuning uchun foydalanish uchun **Node.js
+shart emas** — Python serveri uni `/` manzilida beradi. Eski (vanilla JS) interfeys
+vaqtincha `/classic` manzilida qoladi.
+
+UI'ni o'zgartirish:
+
+```bash
+cd lab/ui && npm install
+```
+
+```bash
+npm run dev       # http://127.0.0.1:5173 (backend 8080 da ishlab tursin: /api va /ws proksi)
+```
+
+```bash
+npm run build     # tiplar tekshiruvi + lab/web-react ga yig'ish (commit qiling)
+```
+
+Tuzilma: `src/lib/` — API, WebSocket hodisalari, zustand store, Wi-Fi modeli;
+`src/components/ui/` — shadcn komponentlari; `src/features/` — kanvas, panellar va
+oynalar (qurilma, P4, SDN, ssenariy, natijalar); `src/components/charts.tsx` —
+chiziqli grafik va issiqlik xaritasi.
+
 ## Qurilmalar
 
 | Qurilma | Ichida nima ishlaydi | "Ichiga kirish" |
@@ -103,6 +131,16 @@ NetLab'da ham xuddi shunday:
 | **Analitik** | Oqim modeli: UDP qat'iy tezlikda, TCP max-min adolat + Mathis formulasi, navbat M/M/1. ~0.1 s | Tez "nima bo'ladi?" tahlili, katta topologiyalar |
 | **ns-3** | Diskret-hodisali simulyatsiya (OPNET bilan bir xil tamoyil): paket darajasida, virtual vaqtda, deterministik (seed) | Ilmiy natija, takrorlanuvchan tajriba, real vaqtdan tez |
 | **Mininet** | Haqiqiy emulyatsiya: iperf3/ping haqiqiy Linux TCP/UDP, FRR, OVS, P4, SDN orqali o'tadi | Protokol va konfiguratsiyani "haqiqatda" tekshirish |
+
+### Ikki parametrli tadqiqot (issiqlik xaritasi)
+
+Tadqiqot bo'limida ikkinchi parametr ham tanlanishi mumkin. Shunda ikki parametr
+qiymatlarining barcha kombinatsiyalari ishga tushiriladi (ko'pi bilan 49 ta). Natijalar
+oynasida **issiqlik xaritasi** chiziladi: x o'qi — 1-parametr, y o'qi — 2-parametr,
+katak — tanlangan o'lchov va oqim. Rang ketma-ket bir rangli shkalada: kichik
+qiymatlar fonga yaqin, kattalari to'q (tun mavzusida esa teskari). Har bir katakda qiymat
+yozilgan, sichqoncha bilan ustiga borsangiz tooltip chiqadi. Misol: `ospf_lab` →
+`asosiy`, x = `l4.bw` (1…100), y = `l4.queue` (10…1000).
 
 ### Parametrik tadqiqot (OPNET "parametric study")
 
@@ -313,7 +351,9 @@ token majburiy. Token URL'ini begonalarga bermang.
 | `templates/p4/`, `templates/sdn/` | P4 va SDN shablonlari |
 | `examples/` | Namunaviy loyihalar |
 | `projects/` | Sizning loyihalaringiz (gitignore) |
-| `web/` | UI (vanilla JS). Dizayn tokenlari `studio/web/css` dan olinadi. `web/vendor/xterm` — xterm.js (MIT) |
+| `ui/` | React + TypeScript + shadcn/ui manbasi (Vite) |
+| `web-react/` | Yig'ilgan UI (serverning `/` manzili) — `cd ui && npm run build` |
+| `web/` | Klassik UI (vanilla JS, `/classic`). Dizayn tokenlari `studio/web/css` dan |
 
 ## Cheklovlar va keyingi qadamlar
 

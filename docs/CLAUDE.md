@@ -201,8 +201,14 @@ Packet-Tracer/OPNET-style UI where the user builds a topology and runs it live o
   All Mininet ops hold `driver.lock` (Node.cmd is not thread-safe). Mininet imports are lazy.
 - `lab/drivers/demo_driver.py` — Mininet-free simulation (BFS L2 domains, LPM, dynamic-routing
   approximation) used for UI work, Windows, and CI (`lab/tests/smoke_demo.py`).
-- `lab/web/` — vanilla JS UI; reuses `studio/web/css/{theme,components}.css` via the `/shared` mount.
-  `lab/web/vendor/xterm/` is vendored xterm.js 5.3.0 (MIT) so it works offline.
+- `lab/ui/` — the main UI: Vite + React 18 + TypeScript + Tailwind + hand-written shadcn/ui components
+  (Radix). State in `src/lib/store.ts` (zustand; project model is the source of truth, ops sync live to the
+  backend when running), backend events via `src/lib/bus.ts` (packet animation is imperative, outside
+  React). Built output `lab/web-react/` IS committed (users need no Node); server serves it at `/` and the
+  legacy vanilla UI (`lab/web/`) at `/classic`. CI rebuilds and fails if `lab/web-react` is stale — run
+  `cd lab/ui && npm run build` after UI changes. Chart colours read CSS vars; components subscribe to
+  `store.theme` so they re-read on theme switch.
+- `lab/web/` — legacy vanilla JS UI (`/classic`); reuses `studio/web/css` via `/shared`; vendored xterm.
 - Scenarios (`project.scenarios`: apps udp/tcp/ping + timed link events) run on three engines via
   `lab/engines/manager.py` → `lab/results/<project>/<run_id>.json` (gitignored): `analytic.py` (flow
   model, in-process), `ns3_runner.py` (ns-3 DES via the `ns3` PyPI wheel, **separate process** — the
@@ -211,7 +217,8 @@ Packet-Tracer/OPNET-style UI where the user builds a topology and runs it live o
   links in ns-3 use SimpleNetDevice/SimpleChannel, not CSMA: CSMA is half-duplex and holds the channel
   for the propagation delay, capping throughput at ms-scale delays. ns-3 TCP is set to Linux-like
   defaults (Cubic, MSS 1448, 4/6 MB buffers) so engines are comparable.
-- Parametric studies (`POST /api/studies`, `RunManager.start_study`): one param (link bw/delay/loss/queue
+- Parametric studies (`POST /api/studies`, `RunManager.start_study`): optional `param2`/`values2` runs the
+  full grid (<= 49, results carry `study_param2/study_value2/study_index2`, UI draws a heatmap); one param (link bw/delay/loss/queue
   or app rate/size) × N values, run sequentially; each run stores `study_id/study_param/study_value`.
   Link params are baked into the project copy (analytic/ns-3) or injected as a t=0 `link_params` event
   (mininet, live network). ns-3: routers with `ripd` (and no ospfd/isisd) get ns-3 RipHelper; others use

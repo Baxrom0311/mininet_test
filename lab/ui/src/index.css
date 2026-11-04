@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* shadcn/ui "neutral" mavzusi — oq/qora; ustiga yengil glass (shaffof + blur) panellar. */
+@layer base {
+  :root {
+    --background: 0 0% 98%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 93%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 142 64% 36%;
+    --warning: 35 92% 42%;
+    --border: 240 5.9% 88%;
+    --input: 240 5.9% 86%;
+    --ring: 240 5.9% 10%;
+    --radius: 0.75rem;
+    --glass: 0 0% 100% / 0.72;
+    --grid: 240 5% 70% / 0.35;
+    /* grafik seriya ranglari (dataviz validatoridan o'tgan, kun) */
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #6250d6;
+    /* ketma-ket (heatmap) shkala: kichik -> katta */
+    --seq-lo: #cde2fb; --seq-hi: #0d366b;
+  }
+  .dark {
+    --background: 240 6% 5%;
+    --foreground: 0 0% 98%;
+    --card: 240 6% 8%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 6% 9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 14%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 17%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 0 0% 98%;
+    --success: 142 60% 48%;
+    --warning: 38 92% 55%;
+    --border: 240 3.7% 18%;
+    --input: 240 3.7% 20%;
+    --ring: 240 4.9% 83.9%;
+    --glass: 240 6% 9% / 0.62;
+    --grid: 240 5% 40% / 0.35;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #9085e9;
+    --seq-lo: #0d366b; --seq-hi: #cde2fb;
+  }
+  * { @apply border-border; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+    background-image:
+      radial-gradient(1200px 600px at 10% -10%, hsl(var(--foreground) / 0.06), transparent 60%),
+      radial-gradient(900px 500px at 110% 110%, hsl(var(--foreground) / 0.05), transparent 60%);
+    overflow: hidden;
+  }
+}
+
+@layer components {
+  .glass {
+    background: hsl(var(--glass));
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    backdrop-filter: blur(18px) saturate(1.3);
+    @apply border border-border/80 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.35)];
+  }
+  .mono { @apply font-mono text-[11.5px]; }
+  .kbd { @apply rounded border border-border bg-muted px-1 font-mono text-[10px] text-muted-foreground; }
+}
+
+/* xterm */
+.xterm .xterm-viewport { background: transparent !important; }

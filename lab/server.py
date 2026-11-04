@@ -26,7 +26,8 @@ from lab.model import (APP_TYPES, DEVICE_TYPES, EVENT_ACTIONS, FRR_DAEMONS, PROJ
 
 LAB_DIR = os.path.dirname(os.path.abspath(__file__))
 REPO_DIR = os.path.dirname(LAB_DIR)
-WEB_DIR = os.path.join(LAB_DIR, "web")
+WEB_DIR = os.path.join(LAB_DIR, "web")                 # klassik (vanilla JS) UI -> /classic
+WEB_REACT_DIR = os.path.join(LAB_DIR, "web-react")     # React + shadcn UI (lab/ui dan yig'ilgan) -> /
 SHARED_CSS = os.path.join(REPO_DIR, "studio", "web", "css")
 PROJECTS_DIR = os.path.join(LAB_DIR, "projects")
 EXAMPLES_DIR = os.path.join(LAB_DIR, "examples")
@@ -376,5 +377,7 @@ def create_app(driver_name="demo", token=None):
     # ───────────── statik UI ─────────────
     if os.path.isdir(SHARED_CSS):
         app.mount("/shared", StaticFiles(directory=SHARED_CSS), name="shared")
-    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+    app.mount("/classic", StaticFiles(directory=WEB_DIR, html=True), name="classic")
+    root_dir = WEB_REACT_DIR if os.path.exists(os.path.join(WEB_REACT_DIR, "index.html")) else WEB_DIR
+    app.mount("/", StaticFiles(directory=root_dir, html=True), name="web")
     return app

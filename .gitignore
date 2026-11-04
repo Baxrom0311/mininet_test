@@ -27,3 +27,7 @@ studio/config.json
 lab/projects/*.json
 lab/.venv/
 lab/results/
+
+# NetLab React UI: bog'liqliklar (yig'ilgan lab/web-react repo'da — Node.js'siz ishlashi uchun)
+lab/ui/node_modules/
+lab/ui/*.tsbuildinfo
