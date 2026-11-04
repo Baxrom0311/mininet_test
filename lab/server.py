@@ -109,8 +109,14 @@ def create_app(driver_name="demo", token=None):
                       "efficiency": W.EFFICIENCY, "ref_loss": {str(k): v for k, v in W.REF_LOSS.items()},
                       "min_rssi": W.MIN_RSSI, "exponent": W.EXPONENT, "ap_defaults": W.AP_DEFAULTS,
                       "standards": W.STANDARDS, "channels": W.CHANNELS}
+        from lab import apps as A
+        from lab.model import APP_TYPES
+        app_models = {"types": list(APP_TYPES) + list(A.MODEL_TYPES),
+                      "codecs": {k: {"label": v["label"], "payload": v["payload"]} for k, v in A.CODECS.items()},
+                      "defaults": {"voip": {"codec": "g711"}, "http": {"page": "500KB", "think": 5},
+                                   "ftp": {"file": "10MB", "direction": "download"}}}
         return {**driver.info(), "device_types": DEVICE_TYPES, "frr_daemons": FRR_DAEMONS, "wifi": wifi_model,
-                "project_version": PROJECT_VERSION, "status": driver.status()}
+                "app_models": app_models, "project_version": PROJECT_VERSION, "status": driver.status()}
 
     @app.get("/api/templates")
     def templates():

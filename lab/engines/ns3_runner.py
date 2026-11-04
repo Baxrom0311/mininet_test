@@ -62,6 +62,22 @@ void Attach(Ptr<Node> n) {
   ip->TraceConnectWithoutContext("Tx", MakeBoundCallback(&OnTx, id));
   ip->TraceConnectWithoutContext("Drop", MakeBoundCallback(&OnDrop, id));
 }
+// cheklangan uzatish (FTP/HTTP): PacketSink Rx -> maqsad baytga yetgan aniq vaqt
+static std::map<uint32_t, std::pair<uint64_t, uint64_t>> g_sink;
+static std::map<uint32_t, double> g_done;
+static void OnSinkRx(uint32_t key, Ptr<const Packet> p, const Address&) {
+  auto& e = g_sink[key];
+  e.first += p->GetSize();
+  if (e.first >= e.second && !g_done.count(key)) g_done[key] = Simulator::Now().GetSeconds();
+}
+void WatchSink(Ptr<Application> a, uint32_t key, uint64_t target) {
+  g_sink[key] = {0, target};
+  a->TraceConnectWithoutContext("Rx", MakeBoundCallback(&OnSinkRx, key));
+}
+double DoneAt(uint32_t key) {
+  auto it = g_done.find(key);
+  return it == g_done.end() ? -1.0 : it->second;
+}
 std::vector<uint64_t> Get(uint32_t id) {
   Cnt& c = g_cnt[id];
   return {c.fwd, c.rx, c.tx, c.noroute, c.drop};
@@ -122,6 +138,8 @@ def main(inp_path, out_path):
     with open(inp_path) as f:
         inp = json.load(f)
     project, sc = inp["project"], inp["scenario"]
+    from lab.services import resolve_dhcp
+    project, _leases = resolve_dhcp(project)   # DHCP: ns-3 da lizing manzillari statik o'rnatiladi
     duration = float(sc.get("duration", 30))
     t_wall = time.time()
     emit(log="ns-3 yuklanmoqda...")
@@ -139,6 +157,14 @@ def main(inp_path, out_path):
     ns.Config.SetDefault("ns3::TcpL4Protocol::SocketType", ns.StringValue("ns3::TcpCubic"))
 
     devs = project["devices"]
+    if _leases:
+        emit(log=f"DHCP: {len(_leases)} lizing (statik ekvivalent): "
+                 + ", ".join(f"{x['client']}={x['ip']}" for x in _leases[:6]))
+    if any("bgpd" in ((d.get("config") or {}).get("daemons") or []) for d in devs.values()):
+        emit(log="eslatma: BGP ns-3 da yo'q — model (lab/bgp.py) hisoblagan BGP marshrutlari statik o'rnatiladi "
+                 "(hodisada darhol qayta hisoblanadi)")
+    if any((d.get("config") or {}).get("nat") for d in devs.values()):
+        emit(log="eslatma: NAT ns-3 da yo'q — manba manzil almashtirilmaydi (ichki subnet marshruti bo'lmasa javob yetmaydi)")
     nodes = {}
     for name in sorted(devs, key=lambda n: devs[n]["id"]):
         nodes[name] = ns.CreateObject[ns.Node]()
@@ -219,6 +245,7 @@ def main(inp_path, out_path):
     jitter_warn = False
     wifi_links = []
     port_q = {}       # (dev, port) -> navbat hajmi ("1000p") — L3 tomonda qdisc uchun
+    port_qd = {}      # (dev, port) -> fifo | prio | fq_codel
     for lid, l in project["links"].items():
         a, b = l["a"], l["b"]
         p = l.get("params") or {}
@@ -260,6 +287,7 @@ def main(inp_path, out_path):
         port_dev[(a["dev"], a["port"])] = d1
         port_dev[(b["dev"], b["port"])] = d2
         port_q[(a["dev"], a["port"])] = port_q[(b["dev"], b["port"])] = q
+        port_qd[(a["dev"], a["port"])] = port_qd[(b["dev"], b["port"])] = p.get("qdisc") or "fifo"
         for side, dv in ((a, d1), (b, d2)):
             if side["dev"] in sw_ports:
                 sw_ports[side["dev"]].setdefault(port_vlan(side["dev"], side["port"]), ns.NetDeviceContainer()).Add(dv)
@@ -360,8 +388,17 @@ def main(inp_path, out_path):
             # navbati kichik. Aks holda (qo'lda AddInterface) qdisc yo'q va TrafficControlLayer
             # to'lgan qurilma navbati oldida paketlarni hisobsiz tashlaydi.
             tch = ns.TrafficControlHelper()
-            tch.SetRootQueueDisc("ns3::PfifoFastQueueDisc", "MaxSize",
-                                 ns.QueueSizeValue(ns.QueueSize(port_q[(dname, port)])))
+            qkind = port_qd.get((dname, port), "fifo")
+            if qkind == "prio":
+                # qat'iy ustuvorlik: EF (TOS 0xb8 -> socket priority 4) -> band 0, qolganlari band 1
+                tch.SetRootQueueDisc("ns3::PrioQueueDisc", "Priomap",
+                                     ns.StringValue("1 1 1 1 0 1 1 1 1 1 1 1 1 1 1 1"))
+            elif qkind == "fq_codel":
+                tch.SetRootQueueDisc("ns3::FqCoDelQueueDisc", "MaxSize",
+                                     ns.QueueSizeValue(ns.QueueSize(port_q[(dname, port)])))
+            else:
+                tch.SetRootQueueDisc("ns3::PfifoFastQueueDisc", "MaxSize",
+                                     ns.QueueSizeValue(ns.QueueSize(port_q[(dname, port)])))
             qdc = tch.Install(dv)
             root_qd[(dname, port)] = qdc.Get(0)
             try:
@@ -445,6 +482,8 @@ def main(inp_path, out_path):
         port = 9000 + i
         start, stop = float(app.get("start", 1)), float(app.get("stop", duration))
         typ = app.get("type", "udp")
+        from lab.model import dscp_class
+        tos = 0xb8 if dscp_class(app.get("dscp")) == 0 else 0     # yuqori sinf -> EF
         addr = ns.InetSocketAddress(ns.Ipv4Address(dip), port).ConvertTo()
         if typ == "ping":
             srv = ns.UdpEchoServerHelper(port)
@@ -460,16 +499,22 @@ def main(inp_path, out_path):
             sa = sink.Install(nodes[dst]); sa.Start(ns.Seconds(0.0))
             if typ == "tcp" and not app.get("rate"):
                 bs = ns.BulkSendHelper(proto, addr)
-                bs.SetAttribute("MaxBytes", ns.UintegerValue(0))
+                bs.SetAttribute("MaxBytes", ns.UintegerValue(int(app.get("bytes") or 0)))   # 0 = cheksiz
                 ca = bs.Install(nodes[src])
             else:
                 oo = ns.OnOffHelper(proto, addr)
                 oo.SetConstantRate(ns.DataRate(rate_str(app.get("rate", "1Mbps"))), int(app.get("size", 1000)))
                 ca = oo.Install(nodes[src])
         ca.Start(ns.Seconds(start)); ca.Stop(ns.Seconds(stop))
+        if tos and not ca.Get(0).SetAttributeFailSafe("Tos", ns.UintegerValue(tos)):
+            emit(log=f"ilova {app.get('id')}: DSCP (Tos atributi) bu ns-3 ilovasida yo'q — oddiy sinf")
+        if typ == "tcp" and app.get("bytes"):
+            nl.WatchSink(sa.Get(0), i, int(app["bytes"]))
         apps.append({"id": app.get("id") or f"a{i + 1}", "type": typ, "src": src, "dst": dst, "port": port,
                      "label": app.get("label") or f"{typ} {src}→{dst}",
-                     "start": start, "stop": min(stop, duration)})
+                     "start": start, "stop": min(stop, duration),
+                     **({"bytes": int(app["bytes"]), "sink_key": i} if app.get("bytes") and typ == "tcp" else {}),
+                     **({"group": app["group"], "role": app.get("role")} if app.get("group") else {})})
 
     fmh = ns.FlowMonitorHelper()
     mon = fmh.InstallAll()
@@ -696,7 +741,11 @@ def main(inp_path, out_path):
                 "loss_pct": round((tx - rx) / tx * 100, 2) if tx else None}
         if app["type"] == "ping" and rx and rrx:
             summ["avg_rtt_ms"] = round((dl / rx + rdl / rrx) * 1000, 3)
-        flows[app["id"]] = {**app, "series": series[app["id"]], "summary": summ}
+        flows[app["id"]] = {**{k: v for k, v in app.items() if k != "sink_key"},
+                            "series": series[app["id"]], "summary": summ}
+        if "sink_key" in app:
+            dt_ = float(nl.DoneAt(app["sink_key"]))
+            flows[app["id"]]["done_t"] = round(dt_, 4) if dt_ >= 0 else None
     ns.Simulator.Destroy()
     out = {"engine": "ns3", "engine_label": "ns-3 (diskret-hodisali simulyatsiya)",
            "duration": duration, "flows": flows, "links": link_series, "events": applied,

@@ -31,3 +31,6 @@ lab/results/
 # NetLab React UI: bog'liqliklar (yig'ilgan lab/web-react repo'da — Node.js'siz ishlashi uchun)
 lab/ui/node_modules/
 lab/ui/*.tsbuildinfo
+
+# Claude Code agent worktree nusxalari (vaqtinchalik)
+.claude/worktrees/

@@ -27,7 +27,7 @@ echo "== NetLab o'rnatish: $PRETTY_NAME =="
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y mininet openvswitch-switch tcpdump iperf3 iproute2 net-tools \
-  traceroute iputils-ping ethtool python3-venv python3-pip curl gnupg
+  traceroute iputils-ping ethtool iptables dnsmasq-base isc-dhcp-client python3-venv python3-pip curl gnupg
 service openvswitch-switch start 2>/dev/null || /usr/share/openvswitch/scripts/ovs-ctl start || true
 
 if [ "$WANT_FRR" -eq 1 ]; then

@@ -238,6 +238,82 @@ with TestClient(create_app("demo")) as c:
                   f"{eng}: inter-VLAN 12 Mbit/s trunk kabelidan (l4) ikki yo'nalishda o'tadi")
         c.delete(f"/api/runs/vlan_lab/{rid}")
 
+    # ---- ilova modellari: VoIP (MOS), HTTP (sahifa vaqti), FTP (fayl vaqti) ----
+    ap_ = c.get("/api/projects/ospf_lab?example=true").json()
+    ap_["scenarios"]["ilovalar"] = {"duration": 30, "events": [], "apps": [
+        {"id": "tel", "type": "voip", "src": "pc1", "dst": "srv2", "codec": "g711", "start": 1, "stop": 29},
+        {"id": "web", "type": "http", "src": "pc2", "dst": "srv1", "page": "500KB", "think": 3, "start": 1, "stop": 29},
+        {"id": "fayl", "type": "ftp", "src": "pc1", "dst": "srv1", "file": "5MB", "start": 3, "stop": 29}]}
+    bad_a = json.loads(json.dumps(ap_["scenarios"]["ilovalar"]))
+    bad_a["apps"][0]["codec"] = "opus"
+    check(len(c.post("/api/scenario/validate", json={"project": ap_, "scenario": bad_a}).json()["errors"]) == 1,
+          "ilovalar: noma'lum kodek rad etiladi")
+    for eng in want:
+        rid = c.post("/api/runs", json={"project": ap_, "scenario": "ilovalar", "engine": eng}).json()["run_id"]
+        t0 = time.time()
+        while time.time() - t0 < 300 and any(r.get("status") == "running" for r in c.get("/api/runs/ospf_lab").json()["runs"]):
+            time.sleep(0.5)
+        r = c.get(f"/api/runs/ospf_lab/{rid}").json()
+        a_ = r.get("apps") or {}
+        tel, web, ftp = a_.get("tel", {}), a_.get("web", {}), a_.get("fayl", {})
+        check(r["status"] == "done" and (tel.get("avg_mos") or 0) > 2.5 and web.get("pages_done") == 10
+              and (web.get("avg_page_s") or 9) < 2 and ftp.get("completed") and 3.5 < ftp["transfer_s"] < 8,
+              f"{eng}: VoIP MOS {tel.get('avg_mos')}, HTTP {web.get('pages_done')}/10 sahifa {web.get('avg_page_s')} s, "
+              f"FTP 5MB {ftp.get('transfer_s')} s")
+        c.delete(f"/api/runs/ospf_lab/{rid}")
+
+    # ---- QoS: fifo / prio / fq_codel — VoIP MOS TCP+UDP yuklamasi ostida (tadqiqot: l4.qdisc) ----
+    qp = c.get("/api/projects/ospf_lab?example=true").json()
+    qp["scenarios"]["qos"] = {"duration": 30, "events": [], "apps": [
+        {"id": "tel", "type": "voip", "src": "pc1", "dst": "srv2", "codec": "g711", "start": 1, "stop": 29},
+        {"id": "fayl", "type": "ftp", "src": "pc1", "dst": "srv1", "file": "20MB", "start": 3, "stop": 29},
+        {"id": "video", "type": "udp", "src": "srv1", "dst": "pc2", "rate": "9Mbps", "size": 1000, "start": 15, "stop": 25}]}
+    for eng in want:
+        st = c.post("/api/studies", json={"project": qp, "scenario": "qos", "engine": eng,
+                                          "param": {"kind": "link", "link": "l4", "field": "qdisc"},
+                                          "values": ["fifo", "prio", "fq_codel"]}).json()
+        t0 = time.time()
+        runs = []
+        while time.time() - t0 < 600:
+            runs = [r for r in c.get("/api/runs/ospf_lab").json()["runs"] if r.get("study_id") == st.get("study_id")]
+            if len(runs) == 3 and not any(r.get("status") == "running" for r in runs):
+                break
+            time.sleep(0.5)
+        mos = {}
+        for r in runs:
+            full = c.get(f"/api/runs/ospf_lab/{r['run_id']}").json()
+            mos[full.get("study_value")] = (full.get("apps") or {}).get("tel", {}).get("avg_mos")
+            c.delete(f"/api/runs/ospf_lab/{r['run_id']}")
+        check(all(mos.get(k) for k in ("fifo", "prio", "fq_codel")) and mos["fifo"] < 3.5
+              and mos["prio"] > 4.2 and mos["fq_codel"] > 4.0,
+              f"{eng}: QoS tadqiqoti — VoIP MOS fifo {mos.get('fifo')}, prio {mos.get('prio')}, fq_codel {mos.get('fq_codel')}")
+
+    # ---- DHCP + NAT ----
+    npj = c.get("/api/projects/nat_dhcp_lab?example=true").json()
+    check(c.post("/api/validate", json=npj).json()["errors"] == [], "nat_dhcp_lab: validatsiya")
+    bad_n = json.loads(json.dumps(npj))
+    bad_n["devices"]["r1"]["config"]["dhcp_server"]["pools"][0]["end"] = "10.9.9.9"
+    check(any("DHCP" in e for e in c.post("/api/validate", json=bad_n).json()["errors"]), "dhcp: subnetdan tashqari pool rad etiladi")
+    c.post("/api/net/start", json={"project": npj})
+    check("0% packet loss" in ping(c, "pc1", "198.51.100.10"), "nat: pc1 (DHCP 10.0.1.100) -> srv1 NAT orqali")
+    check("100% packet loss" in ping(c, "srv1", "10.0.1.100", 1), "nat: tashqaridan srv1 -> pc1 o'tmaydi")
+    c.post("/api/net/stop")
+    no_nat = json.loads(json.dumps(npj))
+    no_nat["devices"]["r1"]["config"].pop("nat")
+    c.post("/api/net/start", json={"project": no_nat})
+    check("100% packet loss" in ping(c, "pc1", "198.51.100.10", 1), "nat: NAT'siz javob qaytmaydi (isp ichki tarmoqni bilmaydi)")
+    c.post("/api/net/stop")
+    rid = c.post("/api/runs", json={"project": npj, "scenario": "internet", "engine": "analytic"}).json()["run_id"]
+    t0 = time.time()
+    while time.time() - t0 < 60 and any(r.get("status") == "running" for r in c.get("/api/runs/nat_dhcp_lab").json()["runs"]):
+        time.sleep(0.3)
+    r = c.get(f"/api/runs/nat_dhcp_lab/{rid}").json()
+    fs = r["flows"]
+    check(fs["web"]["summary"]["avg_thr_bps"] > 12e6 and fs["video"]["summary"]["avg_thr_bps"] > 4.5e6
+          and fs["kirish"]["summary"]["loss_pct"] == 100,
+          "analytic: NAT orqali TCP ~15 + UDP 5 Mbit/s (20 Mbit/s WAN), tashqi ping 100% yo'qoladi")
+    c.delete(f"/api/runs/nat_dhcp_lab/{rid}")
+
     if "ns3" not in want:
         print("  --   ns-3 o'rnatilmagan (pip install ns3) — ns-3 testi o'tkazib yuborildi")
 

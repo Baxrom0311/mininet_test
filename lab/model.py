@@ -34,7 +34,20 @@ DEVICE_TYPES = {
 
 FRR_DAEMONS = ["ospfd", "bgpd", "ripd", "isisd", "ospf6d", "eigrpd", "pimd", "ldpd", "bfdd"]
 
-DEFAULT_LINK = {"bw": 100, "delay": "1ms", "jitter": "0ms", "loss": 0, "queue": 1000, "medium": "wire"}
+DEFAULT_LINK = {"bw": 100, "delay": "1ms", "jitter": "0ms", "loss": 0, "queue": 1000, "medium": "wire",
+                "qdisc": "fifo"}
+# Navbat intizomi (QoS): fifo — bitta DropTail; prio — qat'iy ustuvorlik (DSCP >= 40: EF/CS5-7
+# yuqori sinf); fq_codel — oqimlar bo'yicha adolatli + CoDel AQM (navbat ~5 ms).
+QDISCS = ("fifo", "prio", "fq_codel")
+HIGH_DSCP = 40
+
+
+def dscp_class(dscp):
+    """0 — yuqori (EF/CS5..CS7), 1 — oddiy."""
+    try:
+        return 0 if int(dscp or 0) >= HIGH_DSCP else 1
+    except (TypeError, ValueError):
+        return 1
 
 PROJECT_VERSION = 1
 
@@ -277,6 +290,10 @@ def validate_project(p):
     for pname in (p.get("p4_programs") or {}):
         if not NAME_RE.match(pname) and not re.match(r"^[a-z][a-z0-9_]{0,23}$", pname):
             errors.append(f"P4 dastur '{pname}': noto'g'ri nom")
+    from lab.services import validate_services   # (aylanma import bo'lmasin)
+    errors += validate_services(p)
+    from lab.bgp import validate_bgp
+    errors += validate_bgp(p)
     return errors
 
 
@@ -287,6 +304,8 @@ def normalize_link_params(params):
             out[k] = v
     if out["medium"] not in ("wire", "wifi"):
         raise ValueError("medium: wire | wifi")
+    if out["qdisc"] not in QDISCS:
+        raise ValueError(f"qdisc: {' | '.join(QDISCS)}")
     out["bw"] = float(out["bw"])
     out["loss"] = float(out["loss"])
     out["queue"] = int(out["queue"])
@@ -353,8 +372,23 @@ def validate_scenario(project, sc):
         if a.get("id") in ids:
             errors.append(f"{w}: id takrorlangan")
         ids.add(a.get("id"))
-        if a.get("type") not in APP_TYPES:
-            errors.append(f"{w}: tur {APP_TYPES} dan biri")
+        from lab.apps import MODEL_TYPES, validate_app
+        if a.get("type") not in APP_TYPES + MODEL_TYPES:
+            errors.append(f"{w}: tur {APP_TYPES + MODEL_TYPES} dan biri")
+        elif a.get("type") in MODEL_TYPES:
+            errors += [f"{w}: {e}" for e in validate_app(a, dur)]
+        if a.get("dscp") not in (None, ""):
+            try:
+                if not 0 <= int(a["dscp"]) <= 63:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(f"{w}: dscp 0..63 (EF=46)")
+        if a.get("bytes") is not None:
+            try:
+                if int(a["bytes"]) <= 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(f"{w}: bytes musbat butun son")
         for k in ("src", "dst"):
             d = devs.get(a.get(k))
             if not d:

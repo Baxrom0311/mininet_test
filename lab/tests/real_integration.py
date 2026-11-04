@@ -292,7 +292,112 @@ def t_vlan(drv, caps):
     check(wait_ping(drv, "pc1", "10.0.10.15", 10) is not None, "jonli: s2 port4 -> VLAN10, pc5 endi yetadi")
 
 
-TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "vlan": t_vlan, "sdn": t_sdn, "p4": t_p4}
+def t_natdhcp(drv, caps):
+    """DHCP (dnsmasq rezervatsiya = model manzillari) + NAT masquerade + emulyatsiya."""
+    import shutil
+    from lab.engines import emulation
+    from lab.services import resolve_dhcp
+    proj = load("nat_dhcp_lab")
+    _rp, leases = resolve_dhcp(proj)
+    drv.start(proj)
+    for ls in leases:
+        got = drv.net.get(ls["client"]).cmd(f"ip -4 -o addr show dev {ls['iface']}")
+        check(f"inet {ls['ip']}/" in got, f"DHCP: {ls['client']} = {ls['ip']} (model bilan bir xil)")
+    rt = drv.net.get("pc1").cmd("ip route show default")
+    check("10.0.1.1" in rt, f"DHCP: default gateway {rt.strip()}")
+    ins = drv.inspect("r1")
+    tbl = next((s_ for s_ in ins["sections"] if s_["title"].startswith("DHCP")), None)
+    check(tbl and len(tbl.get("rows") or []) == len(leases), f"inspect r1: DHCP lizinglari {tbl and tbl.get('rows')}")
+    check(wait_ping(drv, "pc1", "198.51.100.10", 10) is not None, "NAT: pc1 -> srv1 (isp ichki tarmoqni bilmaydi)")
+    seen = drv.net.get("srv1").cmd("timeout 3 tcpdump -nni srv1-eth1 -c 2 icmp 2>/dev/null & "
+                                   "sleep 0.5; true")
+    drv.net.get("pc1").cmd("ping -c 2 -W 1 198.51.100.10 >/dev/null")
+    time.sleep(2.6)
+    out = drv.net.get("srv1").cmd("wait; true")
+    print("    srv1 tcpdump:", (seen + out).strip().splitlines()[-1:] )
+    nat = drv.net.get("r1").cmd("iptables -t nat -L POSTROUTING -n -v")
+    check("MASQUERADE" in nat, "iptables MASQUERADE o'rnatilgan")
+    check(not ping(drv, "srv1", leases[0]["ip"], count=2, wait=1)[0], "tashqaridan (srv1 -> pc1) o'tmaydi")
+    # NAT'siz: javob qaytmaydi
+    p2 = copy.deepcopy(drv.project)
+    p2["devices"]["r1"]["config"].pop("nat")
+    drv.apply_device_config(p2, "r1")
+    check(not ping(drv, "pc1", "198.51.100.10", count=2, wait=1)[0], "NAT o'chirilsa javob qaytmaydi")
+    p2["devices"]["r1"]["config"]["nat"] = {"outside": "r1-eth2"}
+    drv.apply_device_config(p2, "r1")
+    check(wait_ping(drv, "pc1", "198.51.100.10", 10) is not None, "NAT qayta yoqildi -> ishlaydi")
+    if shutil.which("iperf3"):
+        sc = copy.deepcopy(proj["scenarios"]["internet"])
+        sc["duration"] = 10
+        for a in sc["apps"]:
+            a["stop"] = min(a["stop"], 9)
+        res = emulation.run(drv, sc)
+        f = res["flows"]
+        web = [x["thr_bps"] for x in f["web"]["series"] if 3 <= x["t"] <= 8]
+        print("    web Mbit/s", [round(x / 1e6, 1) for x in web], "video", f["video"]["summary"]["avg_thr_bps"])
+        check(web and sum(web) / len(web) > 8e6, "emulyatsiya: TCP pc1 -> srv1 NAT orqali (~15 Mbit/s)")
+        check((f["kirish"]["summary"].get("loss_pct") or 0) > 90, "emulyatsiya: srv1 -> pc1 ping o'tmaydi")
+
+
+def t_apps(drv, caps):
+    """Ilova modellari (VoIP MOS, HTTP sahifa vaqti, FTP fayl vaqti) — Mininet dvigateli."""
+    import shutil
+    from lab import apps as am
+    from lab.engines import emulation
+    if not caps["frr"] or not shutil.which("iperf3"):
+        print("  skip (FRR/iperf3 yo'q)")
+        return
+    proj = load("ospf_lab")
+    drv.start(proj)
+    check(wait_ping(drv, "pc1", "10.0.2.11", 60) is not None, "OSPF tayyor")
+    sc = {"duration": 20, "apps": [
+        {"id": "tel", "type": "voip", "src": "pc1", "dst": "srv2", "codec": "g711", "start": 1, "stop": 19},
+        {"id": "web", "type": "http", "src": "pc2", "dst": "srv1", "page": "500KB", "think": 3, "start": 1, "stop": 19},
+        {"id": "fayl", "type": "ftp", "src": "pc1", "dst": "srv1", "file": "5MB", "start": 3, "stop": 19}], "events": []}
+    res = am.postprocess(emulation.run(drv, am.expand(sc)), sc)
+    ap = res["apps"]
+    print("   ", json.dumps(ap, ensure_ascii=False))
+    check(ap["tel"]["avg_mos"] and ap["tel"]["avg_mos"] > 3.0, f"VoIP MOS {ap['tel']['avg_mos']} ({ap['tel']['quality']})")
+    check(ap["web"]["pages_done"] >= ap["web"]["pages"] - 1 and (ap["web"]["avg_page_s"] or 9) < 3,
+          f"HTTP: {ap['web']['pages_done']}/{ap['web']['pages']} sahifa, o'rtacha {ap['web']['avg_page_s']} s")
+    check(ap["fayl"]["completed"] and 3 < ap["fayl"]["transfer_s"] < 12,
+          f"FTP 5 MB 10 Mbit/s kabelda {ap['fayl']['transfer_s']} s")
+
+
+def t_qos(drv, caps):
+    """QoS: fifo vs prio (HTB sinflari + DSCP u32 filtr) — VoIP MOS TCP yuklamasi ostida."""
+    import shutil
+    from lab import apps as am
+    from lab.engines import emulation
+    if not shutil.which("iperf3"):
+        print("  skip (iperf3 yo'q)")
+        return
+    out = {}
+    for qd in ("fifo", "prio"):
+        proj = {"version": 1, "name": "qos", "devices": {
+            "h1": host("h1", 1, "10.0.0.1/24"), "h2": host("h2", 2, "10.0.0.2/24"),
+            "s1": {"id": 3, "type": "switch", "x": 0, "y": 0, "config": {"mode": "standalone", "stp": False}}},
+            "links": {"l1": link("h1", 1, "s1", 1, bw=100), "l2": link("s1", 2, "h2", 1, bw=10, queue=500, qdisc=qd)},
+            "p4_programs": {}, "controllers": {}, "scenarios": {}}
+        drv.start(proj)
+        time.sleep(1)
+        if qd == "prio":
+            cl = drv.net.get("s1").cmd("tc class show dev s1-eth2; tc filter show dev s1-eth2 | grep -c flowid")
+            check("5:10" in cl and "5:20" in cl, "prio: HTB sinflari 5:10 / 5:20 va DSCP filtrlari")
+        sc = {"duration": 14, "events": [], "apps": [
+            {"id": "tel", "type": "voip", "src": "h2", "dst": "h1", "codec": "g711", "start": 1, "stop": 13},
+            {"id": "big", "type": "udp", "src": "h1", "dst": "h2", "rate": "14Mbps", "size": 1000, "start": 3, "stop": 13}]}
+        res = am.postprocess(emulation.run(drv, am.expand(sc)), sc)
+        t = res["apps"]["tel"]
+        late = [p for p in res["flows"]["tel"]["series"] if 5 <= p["t"] <= 12]
+        out[qd] = (sum(p["mos"] for p in late) / len(late) if late else 0, t)
+        print(f"    {qd}: MOS (yuklama ostida) {out[qd][0]:.2f}, delay {t['avg_delay_ms']} ms, loss {t['loss_pct']}%")
+        drv.stop()
+    check(out["fifo"][0] < 3.0, f"fifo: 14 Mbit/s UDP 10 Mbit/s kabelda VoIP yomon (MOS {out['fifo'][0]:.2f})")
+    check(out["prio"][0] > 4.0, f"prio: EF ustuvor — VoIP a'lo (MOS {out['prio'][0]:.2f})")
+
+
+TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "vlan": t_vlan, "natdhcp": t_natdhcp, "apps": t_apps, "qos": t_qos, "sdn": t_sdn, "p4": t_p4}
 
 
 def main(argv):

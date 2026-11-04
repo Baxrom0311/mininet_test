@@ -20,7 +20,7 @@ import math
 import time
 
 from lab.drivers.demo_driver import Net, _ms
-from lab.model import normalize_link_params, parse_rate, rip_timers
+from lab.model import dscp_class, normalize_link_params, parse_rate, rip_timers
 from lab.mobility import apply_positions, has_moves, positions_at
 from lab.wifi import ap_config, channels_overlap, ess_key, max_range_m, meters_per_px
 from lab.wifi import estimate as wifi_estimate
@@ -34,18 +34,23 @@ class _StaleNet(Net):
     """Konvergensiya oynasi: RIP routerlar uzilishdan OLDINGI routing jadvalini ishlatadi
     (forwarding esa joriy kabel holati bo'yicha — uzilgan kabelga yuborilgan paket yo'qoladi)."""
 
-    def __init__(self, project, old_project, rip_set):
+    def __init__(self, project, old_project, rip_set, extra=()):
         super().__init__(project)
-        self._old = Net(old_project)
-        self._rip = rip_set
+        # [(eski Net, qurilmalar to'plami)] — RIP (uzilishdan oldingi) va BGP (tiklanishdan oldingi) oynalari
+        self._ov = ([(Net(old_project), rip_set)] if old_project is not None else []) + \
+                   [(Net(o), st) for o, st in extra]
 
     def routes(self, dev):
-        return self._old.routes(dev) if dev in self._rip else super().routes(dev)
+        for net_, st in self._ov:
+            if dev in st:
+                return net_.routes(dev)
+        return super().routes(dev)
 
 
 def run(project, sc, progress=lambda f: None, log=lambda m: None):
     t_wall = time.time()
-    proj = copy.deepcopy(project)
+    from lab.services import resolve_dhcp
+    proj = copy.deepcopy(resolve_dhcp(project)[0])    # DHCP mijozlar — lizing manzillari
     duration = float(sc.get("duration", 30))
     apps = []
     for i, a in enumerate(sc.get("apps") or []):
@@ -66,8 +71,18 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     rip_upd = max((rip_timers(proj["devices"][n])["update"] for n in rip_set), default=30)
     rip_conv = float(sc["rip_convergence_s"]) if sc.get("rip_convergence_s") not in (None, "") else rip_upd / 2
     stale = None   # (eski loyiha nusxasi, qachongacha)
+    # BGP: kabel uzilsa (interfeys DOWN) sessiya darhol tushadi va marshrut olib tashlanadi;
+    # tiklanganda sessiya qayta o'rnatilib e'lonlar kelguncha bgp_convergence_s (real FRR,
+    # `timers connect 5`: ~2 s) davomida BGP routerlar eski (kabelsiz) jadvalni ishlatadi.
+    from lab.bgp import bgp_cfg
+    bgp_set = {n for n, d in proj["devices"].items() if bgp_cfg(d)}
+    bgp_conv = float(sc["bgp_convergence_s"]) if sc.get("bgp_convergence_s") not in (None, "") else 2.0
+    bgp_stale = None
     movers = has_moves(sc)
     handover = {}   # stansiya -> aloqa uzilgan vaqt (roaming kutilmoqda)
+    # cheklangan TCP uzatishlar (FTP fayl / HTTP sahifa): qolgan bayt, tugash vaqti, ulanish+slow start
+    remaining = {a["id"]: int(a["bytes"]) for a in apps if a.get("type") == "tcp" and a.get("bytes")}
+    done_at, setup_left = {}, {}
     node_series = {dv: [] for dv, d in proj["devices"].items() if d["type"] in L3_NS}
     rtrack = RouteTracker()
     steps = int(math.ceil(duration))
@@ -79,6 +94,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             if l and e["action"] == "link_down" and rip_set and rip_conv > 0:
                 stale = (copy.deepcopy(proj), t0 + rip_conv)
                 log(f"RIP: {rip_conv:.0f}s konvergensiya (eski yo'llar)")
+            if l and e["action"] == "link_up" and bgp_set and bgp_conv > 0 and l.get("up") is False:
+                bgp_stale = (copy.deepcopy(proj), t0 + bgp_conv)
+                log(f"BGP: {bgp_conv:.0f}s sessiya qayta o'rnatilmoqda")
             if l:
                 if e["action"] == "link_down":
                     l["up"] = False
@@ -132,9 +150,15 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     applied.append({"t": t0, "action": "roam", "device": sta, "from": cur_ap, "to": b1})
                     log(f"t={t0:.0f}s: roaming {sta}: {cur_ap} -> {b1}")
                     handover.pop(sta, None)
+        bgp_ov = ()
+        if bgp_stale and t0 < bgp_stale[1]:
+            bgp_stale[0]["devices"] = proj["devices"]
+            bgp_ov = ((bgp_stale[0], bgp_set),)
         if stale and t0 < stale[1]:
             stale[0]["devices"] = proj["devices"]   # eski routing jadvali, lekin joriy pozitsiyalar
-            n = _StaleNet(proj, stale[0], rip_set)
+            n = _StaleNet(proj, stale[0], rip_set, bgp_ov)
+        elif bgp_ov:
+            n = _StaleNet(proj, None, set(), bgp_ov)
         else:
             n = Net(proj)
         cap = {}
@@ -196,12 +220,13 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         flows = []   # har aktiv ilova uchun holat
         for a in apps:
             st = {"app": a, "ok": False, "path": [], "back": [], "rate": 0.0}
-            if a["start"] <= t0 + 1e-9 < a["stop"]:
+            if a["start"] <= t0 + 1e-9 < a["stop"] and a["id"] not in done_at:
                 dip = a.get("dst_ip") or (str(n.ip_of(a["dst"]).ip) if n.ip_of(a["dst"]) else None)
                 sip = n.ip_of(a["src"])
                 if dip and sip:
                     ok, why, _h, path, _d = n.forward(a["src"], ipaddress.ip_address(dip))
-                    ok2, _w2, _h2, back, _d2 = n.forward(a["dst"], sip.ip) if ok else (False, "", [], [], 0)
+                    ok2, _w2, _h2, back, _d2 = (n.reply(a["src"], sip.ip, a["dst"], ipaddress.ip_address(dip), _h)
+                                                if ok else (False, "", [], [], 0))
                     st.update(ok=ok and ok2, why=why, path=path, back=back)
                 st["active"] = True
             flows.append(st)
@@ -219,15 +244,35 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             f["res"] = resources(f["path"])
             for key, w in f["res"]:
                 load[key] += f["offered"] * w
+        # QoS: `prio` kabelida yuqori sinf (DSCP >= 40) birinchi xizmat qilinadi — oddiy sinf
+        # faqat qolgan sig'imni oladi; fifo/fq_codel — umumiy (proporsional) kesish.
+        def qdisc_of(key):
+            return ((proj["links"][key[0]].get("params") or {}).get("qdisc") or "fifo") if key[0] != "air" else "fifo"
+        load_hi = {k2: 0.0 for k2 in cap}
+        for f in flows:
+            if "offered" in f and dscp_class(f["app"].get("dscp")) == 0:
+                for key, w in f["res"]:
+                    load_hi[key] += f["offered"] * w
         scale = {k2: (min(1.0, cap[k2] / v) if v > 0 else 1.0) for k2, v in load.items()}
+        scale_cls = {}
+        for k2, v in load.items():
+            if qdisc_of(k2) == "prio":
+                hi, lo = load_hi[k2], v - load_hi[k2]
+                s_hi = min(1.0, cap[k2] / hi) if hi > 0 else 1.0
+                left = max(cap[k2] - hi * s_hi, 0.0)
+                scale_cls[k2] = (s_hi, min(1.0, left / lo) if lo > 0 else 1.0)
         used = {k2: 0.0 for k2 in cap}
+        used_hi = {k2: 0.0 for k2 in cap}
         for f in flows:
             if "offered" in f:
-                s_min = min([scale[key] for key, _w in f["res"]] or [1.0])
+                cls = dscp_class(f["app"].get("dscp"))
+                s_min = min([scale_cls[key][cls] if key in scale_cls else scale[key] for key, _w in f["res"]] or [1.0])
                 f["rate"] = f["offered"] * s_min
                 f["overload_drop"] = 1 - s_min
                 for key, w in f["res"]:
                     used[key] += f["rate"] * w
+                    if cls == 0:
+                        used_hi[key] += f["rate"] * w
         # 2) TCP — max-min adolat (progressive filling) qolgan sig'imda
         tcp = [f for f in flows if f.get("active") and f["ok"] and f["app"]["type"] == "tcp"]
         for f in tcp:
@@ -241,47 +286,105 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 rtt = 2 * sum(max(_ms((proj["links"][lid].get("params") or {}).get("delay", "1ms")), 0.05) / 1000
                               for lid, _d in f["path"])
                 f["cap"] = min(f["cap"], MSS_BITS * 1.22 / (max(rtt, 1e-4) * math.sqrt(loss_p)))
-        remaining = {k2: max(cap[k2] - used[k2], 0.0) for k2 in cap}
-        active = [f for f in tcp if f["path"]]
-        frozen = set()
-        for _ in range(64):
-            live = [f for f in active if id(f) not in frozen]
-            if not live:
+        def alloc(live_tcp):
+            """max-min progressive filling qolgan (UDP'dan keyingi) sig'imda."""
+            for f in live_tcp:
+                f["rate"] = 0.0
+            remaining_c = {k2: max(cap[k2] - used[k2], 0.0) for k2 in cap}
+            active_ = [f for f in live_tcp if f["path"]]
+            frozen = set()
+            for _ in range(64):
+                live = [f for f in active_ if id(f) not in frozen]
+                if not live:
+                    break
+                cnt = {}
+                for f in live:
+                    for key, w in f["res"]:
+                        cnt[key] = cnt.get(key, 0) + w * f["spd"]
+                inc = min([remaining_c[k2] / c for k2, c in cnt.items()] + [(f["cap"] - f["rate"]) / f["spd"] for f in live])
+                if inc <= 1e-6:
+                    inc = 0
+                for f in live:
+                    f["rate"] += inc * f["spd"]
+                    for key, w in f["res"]:
+                        remaining_c[key] -= inc * f["spd"] * w
+                for f in live:
+                    if f["rate"] >= f["cap"] - 1e-6 or any(remaining_c[key] <= 1e-6 * cap[key] for key, _w in f["res"]):
+                        frozen.add(id(f))
+
+        # Qadam ichida hodisaga asoslangan: cheklangan uzatish (FTP/HTTP) tugasa, uning ulushi
+        # qolgan oqimlarga o'tadi (taqsimlash qayta hisoblanadi). rate = qadam bo'yicha o'rtacha.
+        dt_ = t1 - t0
+        live = [f for f in tcp if f["path"]]
+        acc = {id(f): 0.0 for f in tcp}
+        got = {id(f): 0.0 for f in tcp}
+        for f in live:
+            aid = f["app"]["id"]
+            if aid in remaining and aid not in setup_left:
+                # 3-way handshake (1 RTT) + slow start (initcwnd 10 MSS, har RTT x2) — tarqalish RTT bo'yicha
+                rtt0 = sum(2 * _ms((proj["links"][lid].get("params") or {}).get("delay", "1ms")) / 1000
+                           + 12000 / cap[(lid, d)] for lid, d in f["path"])
+                rounds = math.ceil(math.log2(1 + remaining[aid] / (10 * 1448)))
+                setup_left[aid] = rtt0 * (1 + rounds)
+        t_left = dt_
+        for _ in range(32):
+            if t_left <= 1e-9 or not live:
                 break
-            cnt = {}
+            alloc(live)
+            step = t_left
             for f in live:
-                for key, w in f["res"]:
-                    cnt[key] = cnt.get(key, 0) + w * f["spd"]
-            inc = min([remaining[k2] / c for k2, c in cnt.items()] + [(f["cap"] - f["rate"]) / f["spd"] for f in live])
-            if inc <= 1e-6:
-                inc = 0
-            for f in live:
-                f["rate"] += inc * f["spd"]
-                for key, w in f["res"]:
-                    remaining[key] -= inc * f["spd"] * w
-            for f in live:
-                if f["rate"] >= f["cap"] - 1e-6 or any(remaining[key] <= 1e-6 * cap[key] for key, _w in f["res"]):
-                    frozen.add(id(f))
+                aid = f["app"]["id"]
+                if aid in remaining and f["rate"] > 0:
+                    step = min(step, setup_left[aid] + remaining[aid] * 8 / f["rate"])
+            step = max(step, 1e-6)
+            for f in list(live):
+                aid = f["app"]["id"]
+                acc[id(f)] += f["rate"] * step
+                if aid in remaining:
+                    su = min(setup_left[aid], step)
+                    setup_left[aid] -= su
+                    bits = f["rate"] * (step - su)
+                    got[id(f)] += bits
+                    remaining[aid] -= bits / 8
+                    if remaining[aid] <= 1e-3:
+                        remaining[aid] = 0
+                        done_at[aid] = t0 + (dt_ - t_left) + step
+                        live.remove(f)
+            t_left -= step
+        for f in tcp:
+            f["rate"] = acc[id(f)] / dt_ if dt_ > 0 else 0.0
+            if f["app"]["id"] in remaining:
+                f["thr_fixed"] = got[id(f)] / dt_ if dt_ > 0 else 0.0
         for f in tcp:
             for key, w in f["res"]:
                 used[key] += f["rate"] * w
-        tcp_on = {h for f in tcp for h in f["path"] if f["rate"] > 0 and f["cap"] == float("inf")}
+        # TCP navbati faqat TOR JOYDA (to'yingan hop) yig'iladi — yo'ldagi boshqa hoplarda emas
+        tcp_on = {h for f in tcp for h in f["path"]
+                  if f["rate"] > 0 and f["cap"] == float("inf") and used[h] >= 0.97 * cap[h]}
         air_sat = {k2[1] for k2 in cap if k2[0] == "air" and used[k2] >= 0.97}
 
         # 3) kechikish / yo'qotish
-        def hop_delay(h, pkt_bits):
+        def hop_delay(h, pkt_bits, cls=1):
             lid, _d = h
             p = proj["links"][lid].get("params") or {}
             c = cap[h]
             tx = pkt_bits / c
             rho = min(used[h] / c, 0.999)
             qmax = int(p.get("queue", 1000)) * 12000 / c
+            qd = p.get("qdisc") or "fifo"
+            if qd == "prio" and cls == 0:
+                # yuqori sinf: faqat o'z sinfi navbati (M/M/1) + bitta oddiy paket qoldiq xizmati
+                rho_h = min(used_hi[h] / c, 0.999)
+                q = min(rho_h / (1 - rho_h) * tx, qmax) + (12000 / c if used[h] > used_hi[h] else 0)
+                return _ms(p.get("delay", "1ms")) / 1000 + tx + q, q
+            q_cap = 0.005 + tx if qd == "fq_codel" else float("inf")   # CoDel: navbat ~ target 5 ms'da
             if lid in wifi_of and wifi_of[lid][0] in air_sat:   # efir to'yingan — navbat o'sadi
                 return _ms(p.get("delay", "1ms")) / 1000 + tx + 0.25 * qmax, 0.25 * qmax
             if scale.get(h, 1) < 1 or h in tcp_on:          # to'yingan: navbat to'la (UDP) / yarim (TCP)
                 q = qmax if scale.get(h, 1) < 1 else 0.25 * qmax   # TCP: taxminiy turg'un navbat
             else:
                 q = min(rho / (1 - rho) * tx, qmax)
+            q = min(q, q_cap)
             return _ms(p.get("delay", "1ms")) / 1000 + tx + q, q
 
         for f in flows:
@@ -292,8 +395,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             if f["ok"]:
                 bits = int(a.get("size", 1000 if a["type"] != "ping" else 64)) * 8 if a["type"] != "tcp" else 12000
                 d_fwd, q_sum = 0.0, 0.0
+                fcls = dscp_class(a.get("dscp"))
                 for h in f["path"]:
-                    dd, q = hop_delay(h, bits); d_fwd += dd; q_sum += q
+                    dd, q = hop_delay(h, bits, fcls); d_fwd += dd; q_sum += q
                 link_loss = 1 - math.prod(1 - float((proj["links"][lid].get("params") or {}).get("loss", 0)) / 100
                                           for lid, _d in f["path"])
                 tot_loss = 1 - (1 - link_loss) * (1 - f.get("overload_drop", 0))
@@ -302,8 +406,10 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                           jitter_ms=round(q_sum * 1000 * 0.15 + 0.01, 3),
                           loss_pct=round(tot_loss * 100 if a["type"] != "tcp" else link_loss * 100, 2))
                 if a["type"] == "ping":
-                    d_back = sum(hop_delay(h, bits)[0] for h in f["back"])
+                    d_back = sum(hop_delay(h, bits, fcls)[0] for h in f["back"])
                     pt["rtt_ms"] = round((d_fwd + d_back) * 1000, 3)
+                if "thr_fixed" in f:
+                    pt["thr_bps"] = round(f["thr_fixed"])
             series[a["id"]].append(pt)
         for lid in proj["links"]:
             ab, ba = used[(lid, "ab")], used[(lid, "ba")]
@@ -353,6 +459,10 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             summ["avg_rtt_ms"] = mean("rtt_ms", [p for p in ok if p.get("rtt_ms") is not None])
         flows_out[a["id"]] = {"id": a["id"], "label": a["label"], "type": a["type"], "src": a["src"], "dst": a["dst"],
                               "start": a["start"], "stop": a["stop"], "series": s, "summary": summ}
+        if a["id"] in remaining:
+            flows_out[a["id"]].update(bytes=int(a["bytes"]), done_t=round(done_at[a["id"]], 3) if a["id"] in done_at else None)
+        if a.get("group"):
+            flows_out[a["id"]].update(group=a["group"], role=a.get("role"))
     return {"engine": "analytic", "engine_label": "Analitik (oqim modeli)", "duration": duration,
             "flows": flows_out, "links": link_series, "events": applied,
             "nodes": node_series, "route_events": rtrack.events,

@@ -1,0 +1,316 @@
+{
+  "version": 1,
+  "name": "bgp_lab",
+  "notes": "Ikki avtonom tizim: AS65001 (r1, r2 — ichida OSPF + iBGP, pc1 LAN) va AS65002 (r3, srv1 LAN). r2 <-> r3 — eBGP. r1 o'z LAN'ini BGP'da e'lon qiladi, r2 iBGP'da next-hop-self. Ssenariy 'ebgp_uzilish': t=10s da r2-r3 kabeli uziladi (marshrut olib tashlanadi), t=20s da tiklanadi.",
+  "p4_programs": {},
+  "controllers": {},
+  "devices": {
+    "pc1": {
+      "id": 1,
+      "type": "host",
+      "x": 80,
+      "y": 220,
+      "config": {
+        "interfaces": {
+          "pc1-eth1": {
+            "ip": "10.1.0.10/24"
+          }
+        },
+        "gateway": "10.1.0.1",
+        "routes": []
+      }
+    },
+    "s1": {
+      "id": 2,
+      "type": "switch",
+      "x": 200,
+      "y": 220,
+      "config": {
+        "mode": "standalone",
+        "stp": false
+      }
+    },
+    "r1": {
+      "id": 3,
+      "type": "router",
+      "x": 330,
+      "y": 220,
+      "config": {
+        "daemons": [
+          "ospfd",
+          "bgpd"
+        ],
+        "interfaces": {
+          "r1-eth1": {
+            "ip": "10.1.0.1/24"
+          },
+          "r1-eth2": {
+            "ip": "10.12.0.1/30"
+          }
+        },
+        "startup": "hostname r1\n!\ninterface r1-eth2\n ip ospf network point-to-point\n ip ospf hello-interval 1\n ip ospf dead-interval 4\n!\nrouter ospf\n ospf router-id 1.1.1.1\n network 10.1.0.0/24 area 0\n network 10.12.0.0/30 area 0\n!",
+        "bgp": {
+          "asn": 65001,
+          "router_id": "1.1.1.1",
+          "networks": [
+            "10.1.0.0/24"
+          ],
+          "neighbors": [
+            {
+              "ip": "10.12.0.2",
+              "remote_as": 65001
+            }
+          ]
+        },
+        "routes": []
+      }
+    },
+    "r2": {
+      "id": 4,
+      "type": "router",
+      "x": 470,
+      "y": 220,
+      "config": {
+        "daemons": [
+          "ospfd",
+          "bgpd"
+        ],
+        "interfaces": {
+          "r2-eth1": {
+            "ip": "10.12.0.2/30"
+          },
+          "r2-eth2": {
+            "ip": "203.0.113.1/30"
+          }
+        },
+        "startup": "hostname r2\n!\ninterface r2-eth1\n ip ospf network point-to-point\n ip ospf hello-interval 1\n ip ospf dead-interval 4\n!\nrouter ospf\n ospf router-id 2.2.2.2\n network 10.12.0.0/30 area 0\n!",
+        "bgp": {
+          "asn": 65001,
+          "router_id": "2.2.2.2",
+          "neighbors": [
+            {
+              "ip": "10.12.0.1",
+              "remote_as": 65001,
+              "next_hop_self": true
+            },
+            {
+              "ip": "203.0.113.2",
+              "remote_as": 65002
+            }
+          ]
+        },
+        "routes": []
+      }
+    },
+    "r3": {
+      "id": 5,
+      "type": "router",
+      "x": 620,
+      "y": 220,
+      "config": {
+        "daemons": [
+          "bgpd"
+        ],
+        "interfaces": {
+          "r3-eth1": {
+            "ip": "203.0.113.2/30"
+          },
+          "r3-eth2": {
+            "ip": "10.2.0.1/24"
+          }
+        },
+        "startup": "hostname r3\n!",
+        "bgp": {
+          "asn": 65002,
+          "router_id": "3.3.3.3",
+          "networks": [
+            "10.2.0.0/24"
+          ],
+          "neighbors": [
+            {
+              "ip": "203.0.113.1",
+              "remote_as": 65001
+            }
+          ]
+        },
+        "routes": []
+      }
+    },
+    "s2": {
+      "id": 6,
+      "type": "switch",
+      "x": 750,
+      "y": 220,
+      "config": {
+        "mode": "standalone",
+        "stp": false
+      }
+    },
+    "srv1": {
+      "id": 7,
+      "type": "server",
+      "x": 870,
+      "y": 220,
+      "config": {
+        "interfaces": {
+          "srv1-eth1": {
+            "ip": "10.2.0.10/24"
+          }
+        },
+        "gateway": "10.2.0.1",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "pc1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "s1",
+        "port": 2
+      },
+      "b": {
+        "dev": "r1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "r1",
+        "port": 2
+      },
+      "b": {
+        "dev": "r2",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l4": {
+      "a": {
+        "dev": "r2",
+        "port": 2
+      },
+      "b": {
+        "dev": "r3",
+        "port": 1
+      },
+      "params": {
+        "bw": 20,
+        "delay": "5ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l5": {
+      "a": {
+        "dev": "r3",
+        "port": 2
+      },
+      "b": {
+        "dev": "s2",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l6": {
+      "a": {
+        "dev": "s2",
+        "port": 2
+      },
+      "b": {
+        "dev": "srv1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "scenarios": {
+    "ebgp_uzilish": {
+      "duration": 40,
+      "notes": "t=10s da eBGP kabeli (l4) uziladi — marshrut olib tashlanadi; t=20s da tiklanadi — sessiya qayta o'rnatiladi",
+      "apps": [
+        {
+          "id": "video",
+          "type": "udp",
+          "src": "pc1",
+          "dst": "srv1",
+          "rate": "4Mbps",
+          "size": 1000,
+          "start": 1,
+          "stop": 39,
+          "label": "video pc1→srv1 (AS65001→AS65002)"
+        },
+        {
+          "id": "ping",
+          "type": "ping",
+          "src": "pc1",
+          "dst": "srv1",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 39,
+          "label": "ping pc1→srv1"
+        }
+      ],
+      "events": [
+        {
+          "t": 10,
+          "action": "link_down",
+          "link": "l4"
+        },
+        {
+          "t": 20,
+          "action": "link_up",
+          "link": "l4"
+        }
+      ]
+    }
+  }
+}

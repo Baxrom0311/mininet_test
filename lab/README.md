@@ -44,7 +44,7 @@ Majburlash: `NETLAB_OVS_DATAPATH=kernel|user`.
 Haqiqiy tarmoq integratsiya testi (root kerak; FRR/os-ken/BMv2 bo'lmasa tegishli qism o'tkazib yuboriladi):
 
 ```bash
-sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv sdn p4
+sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv vlan natdhcp sdn p4
 ```
 
 ### Istalgan kompyuter (demo rejim, Mininet'siz)
@@ -198,6 +198,55 @@ tomonda `PfifoFastQueueDisc(MaxSize=queue)`, Mininet'da netem `limit` yoki (nete
 bo'lmasa) HTB ostidagi `pfifo limit`. Jonli tarmoqda `stats` hodisasi ham
 `queue_ab/queue_ba/qdrops` maydonlarini beradi.
 
+### Ilova modellari: VoIP, HTTP, FTP (OPNET "Application Config")
+
+| Tur | Maydonlar | Natija (`apps.<id>` va `flows.<id>`) |
+|---|---|---|
+| `voip` | `codec`: `g711` / `g729` | ikki yo'nalishli RTP (50 paket/s); har soniya **MOS** (ITU-T G.107 E-model: kechikish + 2×jitter bufer + kodek, yo'qotish → Ie_eff), `avg_mos`, `min_mos`, `quality` |
+| `http` | `page` (masalan `500KB`), `think` (s) | har `think` soniyada sahifa (server→mijoz TCP); `pages_done/pages`, `avg_page_s`, `max_page_s`, `items[]` |
+| `ftp` | `file` (`20MB`), `direction` (`download`/`upload`) | `transfer_s`, `avg_rate_bps`, `completed` |
+
+`src` — mijoz, `dst` — server. Ilovalar dvigatelga oddiy udp/tcp ga yoyilib beriladi
+(`lab/apps.py`); tcp `bytes` (cheklangan uzatish) uchala dvigatelda bor: analitikda
+qadam ichida hodisaga asoslangan (uzatish tugasa ulushi boshqalarga o'tadi, ulanish +
+slow start RTT'lari), ns-3'da `BulkSend MaxBytes` + PacketSink trace (aniq tugash vaqti),
+Mininet'da `iperf3 -n`.
+
+`ospf_lab` (10 Mbit/s r1-r2), VoIP + HTTP (500 KB / 3 s) + FTP (5 MB) birga:
+
+| | VoIP MOS | HTTP sahifa | FTP 5 MB |
+|---|---|---|---|
+| Analitik | 4.12 | 0.75 s | 5.5 s |
+| ns-3 | 4.08 | 0.76 s | 4.7 s |
+| Mininet (real, netem'siz) | 4.39 | 1.05 s (iperf3 boshqaruv ulanishi ham) | 5.1 s |
+
+Tadqiqot maydonlari: `app.codec`, `app.page`, `app.think`, `app.file`.
+
+### QoS: navbat intizomi va DSCP
+
+Kabel `params.qdisc`: `fifo` (standart), `prio` (qat'iy ustuvorlik), `fq_codel`
+(oqimlar bo'yicha adolat + CoDel AQM). Ilova `dscp` (0..63); `voip` standart EF=46.
+Yuqori sinf — DSCP >= 40 (EF, CS5..CS7).
+
+| Dvigatel | prio | fq_codel |
+|---|---|---|
+| Analitik | yuqori sinf UDP birinchi xizmat qilinadi; navbati faqat o'z sinfi (M/M/1) | navbat ~5 ms (CoDel target) |
+| ns-3 | `PrioQueueDisc` (EF → socket priority 4 → band 0) | `FqCoDelQueueDisc` |
+| Mininet | HTB ierarxiyasi: 5:10 (prio 0, rate=bw) / 5:20 (prio 1) + u32 DSCP filtr — `sch_prio` shart emas | `fq_codel` (kernelda bo'lsa; bo'lmasa fifo + ogohlantirish) |
+
+Mininet'da TOS: `iperf3 -S`, `ping -Q`. Tadqiqot maydoni: `link.qdisc`.
+
+`ospf_lab`, l4 (10 Mbit/s) da VoIP + FTP 20 MB + 9 Mbit/s video — VoIP MOS:
+
+| | fifo | prio | fq_codel |
+|---|---|---|---|
+| Analitik | 3.02 | 4.39 | 4.39 |
+| ns-3 | 1.66 | 4.38 | 4.36 |
+
+Real Mininet (10 Mbit/s kabel, 14 Mbit/s UDP yuklama): fifo MOS 1.96 → prio 4.28.
+
+Eslatma: analitik modelda TCP navbati endi faqat tor joyda (to'yingan hop) hisoblanadi.
+
 ### Ikki parametrli tadqiqot (issiqlik xaritasi)
 
 Tadqiqot bo'limida ikkinchi parametr ham tanlanishi mumkin. Shunda ikki parametr
@@ -275,6 +324,64 @@ Xulosa: **faqat Mininet bilan OPNET'ni to'liq takrorlab bo'lmaydi.** Shuning uch
 NetLab gibrid qilib qurilgan: bitta loyiha modeli, uchta dvigatel. Mininet —
 Packet Tracer tomoni (haqiqiy qurilmalar, CLI, hardware). ns-3 — OPNET tomoni
 (DES, masshtab, statistika, solishtirish).
+
+## VLAN, NAT va DHCP
+
+### VLAN (802.1Q)
+
+Switch portlari — `config.ports` (kalit — port raqami):
+
+```json
+"ports": {"1": {"mode": "access", "vlan": 10},
+          "3": {"mode": "trunk", "allowed": [10, 20], "native": 1}}
+```
+
+- **access** — tegsiz kadrlar shu VLAN'da; tegli kadr tashlanadi.
+- **trunk** — `allowed` (bo'sh = hammasi) tegli o'tadi; `native` berilsa tegsiz kadrlar shu VLAN'ga.
+- sozlanmagan port — OVS standarti (barcha VLAN'lar tegli, tegsiz = ichki VLAN 0).
+- Router/host subinterfeysi (router-on-a-stick): `"r1-eth1.10": {"ip": "10.0.10.1/24"}`
+  (nom ≤ 15 belgi — Linux cheklovi).
+
+| Dvigatel | Qanday |
+|---|---|
+| Mininet | OVS `tag` / `trunks` / `vlan_mode` (jonli o'zgartirish ham), subinterfeys — `ip link add … type vlan` (kernelda `8021q` kerak; bo'lmasa aniq xato) |
+| Analitik / demo | L2 BFS 802.1Q qoidalari bilan (izolyatsiya, trunk, inter-VLAN routing) |
+| ns-3 | access VLAN — har VLAN uchun alohida bridge; trunk/subinterfeys — tushunarli xato |
+
+Namuna: `vlan_lab` — ikki switch orasida trunk, r1 router-on-a-stick, pc5 boshqa VLAN'da
+(izolyatsiya). Inter-VLAN trafik trunk kabelidan ikki marta o'tadi (`links.l4` ab va ba).
+
+### DHCP
+
+Server (router/server) — `config.dhcp_server`:
+
+```json
+"dhcp_server": {"pools": [{"iface": "r1-eth1", "start": "10.0.1.100", "end": "10.0.1.150",
+                           "gateway": "10.0.1.1", "lease": 3600}]}
+```
+
+Mijoz — interfeys IP'si `"dhcp"`. Manzillar deterministik taqsimlanadi (qurilma id
+tartibida, bo'sh birinchi manzil; `lab/services.py: resolve_dhcp`) — analitik va ns-3
+shu manzillarni statik ishlatadi, Mininet esa haqiqiy **dnsmasq** (MAC bo'yicha
+rezervatsiya — natija model bilan bir xil) va **dhclient** (namespace ichida, o'z
+skripti bilan — `/etc/resolv.conf` ga tegmaydi). Mijoz server bilan bitta L2 domenda
+(VLAN hisobga olinadi) bo'lishi kerak; relay yo'q. Inspect → "DHCP lizinglari".
+
+### NAT (masquerade)
+
+Router `config.nat = {"outside": "r1-eth2"}` — boshqa interfeyslardan outside orqali
+chiqadigan paketlar manbasi outside IP'ga almashtiriladi (Mininet: `iptables -t nat …
+MASQUERADE`). Analitik/demo modelda javob yo'li avval NAT routerning outside IP'siga,
+keyin ichki manzilga boradi (tashqi router ichki subnetni bilmasa ham ishlaydi);
+tashqaridan ichkariga yangi ulanish — marshrut bo'lmasa o'tmaydi. ns-3'da NAT yo'q
+(ogohlantirish). Inspect → iptables va conntrack.
+
+Namuna: `nat_dhcp_lab` — pc1/pc2 DHCP oladi, r1 NAT bilan provayderga (isp) chiqaradi.
+Real sinov: srv1 so'rovlarni `203.0.113.2` (r1 outside) dan ko'radi; NAT o'chirilsa
+javoblar qaytmaydi.
+
+Router `config.routes` (statik marshrutlar) Mininet'da kernel marshruti sifatida ham
+qo'llanadi (zebra uni ko'radi).
 
 ## Wi-Fi (simsiz tarmoq)
 
@@ -388,6 +495,8 @@ masalan `5,10,15,20,25` dBm qiymatlarida uzoqdagi stansiya tezligini ko'ring.
 - `wifi_roaming`: bitta ESS'dagi ikki AP; mob1 ap1 dan ap2 ga yuradi va roaming qiladi.
 - `p4_l2_lab`: uchta host, P4 L2 switch, `dmac` jadvali.
 - `sdn_router_lab`: SDN switch + SDN router (`l3_router` ilovasi).
+- `vlan_lab`: VLAN 10/20, trunk, router-on-a-stick, izolyatsiya. Ssenariy: `vlanlar`.
+- `nat_dhcp_lab`: DHCP server + NAT (masquerade) + provayder. Ssenariy: `internet`.
 
 ## Klaviatura
 

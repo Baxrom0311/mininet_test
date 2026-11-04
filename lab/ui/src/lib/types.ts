@@ -1,10 +1,10 @@
 export type DeviceType = 'host' | 'server' | 'switch' | 'p4switch' | 'router' | 'sdnrouter' | 'wifiap'
 
-export interface LinkParams { bw: number; delay: string; jitter: string; loss: number; queue: number; medium?: 'wire' | 'wifi' }
+export interface LinkParams { bw: number; delay: string; jitter: string; loss: number; queue: number; medium?: 'wire' | 'wifi'; qdisc?: 'fifo' | 'prio' | 'fq_codel' }
 export interface Endpoint { dev: string; port: number }
 export interface Link { a: Endpoint; b: Endpoint; params: LinkParams; up?: boolean }
 export interface Device { id: number; type: DeviceType; x: number; y: number; config: Record<string, any> }
-export interface ScenarioApp { id: string; type: 'udp' | 'tcp' | 'ping'; src: string; dst: string; rate?: string; size?: number; start?: number; stop?: number; label?: string; interval?: number; dst_ip?: string }
+export interface ScenarioApp { id: string; type: 'udp' | 'tcp' | 'ping' | 'voip' | 'http' | 'ftp'; src: string; dst: string; rate?: string; size?: number; start?: number; stop?: number; label?: string; interval?: number; dst_ip?: string; bytes?: number; codec?: 'g711' | 'g729'; page?: string; think?: number; file?: string; direction?: 'download' | 'upload'; dscp?: number }
 export interface ScenarioEvent { t: number; action: 'link_down' | 'link_up' | 'link_params' | 'move' | 'roam'; link?: string; params?: Record<string, any>; device?: string; x?: number; y?: number; duration?: number; from?: string; to?: string }
 export interface Scenario { duration: number; apps: ScenarioApp[]; events: ScenarioEvent[]; notes?: string; seed?: number }
 export interface Project {
@@ -43,6 +43,8 @@ export interface RunResult {
   run_id: string; scenario_name: string; engine: string; engine_label?: string; created: number; duration: number; wall_s?: number
   status: string; error?: string; label?: string; flows: Record<string, FlowResult>; links?: Record<string, LinkPoint[]>
   nodes?: Record<string, NodePoint[]>; route_events?: RouteEvent[]; convergence?: Convergence[]
+  /** ilova modellari xulosasi (voip: avg_mos/min_mos/quality, http: pages/avg_page_s, ftp: transfer_s) */
+  apps?: Record<string, { type: 'voip' | 'http' | 'ftp'; [k: string]: any }>
   events?: ScenarioEvent[]; notes?: string[]
   study_id?: string; study_param?: any; study_value?: any; study_index?: number; study_param2?: any; study_value2?: any; study_index2?: number
 }
