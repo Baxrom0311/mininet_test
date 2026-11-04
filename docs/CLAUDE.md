@@ -225,6 +225,15 @@ Packet-Tracer/OPNET-style UI where the user builds a topology and runs it live o
   YansWifi channel per AP, IdealWifiManager, AP device bridged with its wired ports. Analytic: per-station
   capacity from the model + per-AP airtime resource with airtime-fair TCP sharing. Mininet: AP = OVS
   switch, Wi-Fi link = TCLink at the modelled rate (no shared medium).
+- ns-3 routing no longer uses Ipv4GlobalRouting (segfaults on IpForward=false P2P hosts; aborts with "L2
+  forwarding loop" when several APs share one YansWifiChannel and are bridged to the same LAN). Instead
+  `install_routes()` installs `Net.routes()` (same model as analytic) as static routes, re-run on link
+  events and when a moving station's Wi-Fi link goes in/out of range. RIP routers keep ns-3 RIP.
+- Wi-Fi multi-AP: all APs of a band share ONE YansWifiChannel; per-AP `channel` (validated against
+  `wifi.CHANNELS`) separates them at the PHY. Analytic: co-channel APs within link range form one airtime
+  pool (union-find). Mobility: `move` events (`lab/mobility.py`, canvas px, linear) — ns-3 updates
+  positions every 0.5 s (samples stay 1 s; rate uses time since last sample), analytic per step,
+  mininet via `MininetDriver.wifi_refresh()` each second.
 - The real driver could not be executed in CI/this repo's sandbox (no Mininet/OVS/root netns); it was
   checked against Mininet 2.3 sources only. Treat first real runs as integration testing.
 

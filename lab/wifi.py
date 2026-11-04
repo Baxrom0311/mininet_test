@@ -29,7 +29,16 @@ WIDTH_MULT = {20: 1.0, 40: 2.08, 80: 4.33, 160: 8.67}
 EFFICIENCY = {"80211ax": 0.8, "80211ac": 0.8, "80211n": 0.78, "80211g": 0.55}
 STANDARDS = list(MCS)
 
-AP_DEFAULTS = {"standard": "80211ax", "band": 5, "width": 20, "tx_power": 20.0, "ssid": ""}
+AP_DEFAULTS = {"standard": "80211ax", "band": 5, "width": 20, "tx_power": 20.0, "ssid": "", "channel": 0}
+
+# Ruxsat etilgan kanal raqamlari (ns-3 ChannelSettings bilan mos). channel=0 — birinchisi.
+CHANNELS = {
+    "5": {"20": [36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144,
+                 149, 153, 157, 161, 165],
+          "40": [38, 46, 54, 62, 102, 110, 118, 126, 134, 142, 151, 159],
+          "80": [42, 58, 106, 122, 138, 155], "160": [50, 114]},
+    "2.4": {"20": list(range(1, 14)), "40": [3, 4, 5, 6, 7, 8, 9, 10, 11]},
+}
 
 
 def ap_config(dev):
@@ -44,7 +53,29 @@ def ap_config(dev):
     if cfg["band"] == 2.4 and cfg["width"] > 40:
         cfg["width"] = 40
     cfg["tx_power"] = float(cfg["tx_power"])
+    allowed = CHANNELS[_bkey(cfg["band"])][str(cfg["width"])]
+    try:
+        ch = int(cfg.get("channel") or 0)
+    except (TypeError, ValueError):
+        ch = 0
+    cfg["channel"] = ch if ch in allowed else allowed[0]
     return cfg
+
+
+def _bkey(band):
+    return "2.4" if float(band) < 4 else "5"
+
+
+def center_mhz(cfg):
+    ch = cfg["channel"]
+    return 2407 + 5 * ch if cfg["band"] == 2.4 else 5000 + 5 * ch
+
+
+def channels_overlap(c1, c2):
+    """Bir diapazon va chastota oraliqlari kesishadimi (bir kanal / qisman ustma-ust)."""
+    if c1["band"] != c2["band"]:
+        return False
+    return abs(center_mhz(c1) - center_mhz(c2)) < (c1["width"] + c2["width"]) / 2
 
 
 def estimate(distance_m, cfg):

@@ -147,7 +147,7 @@ va ns-3 bir xil o'tkazuvchanlikni (~5 Mbit/s video, kabel uzilganda 0) beradi,
 lekin kechikish va TCP tiklanishi farq qiladi. Bu modellarning chegarasini ko'rsatadi.
 
 **ns-3 modellashtirishdagi soddalashtirishlar:**
-- `ripd` yoqilgan routerlar ns-3'ning haqiqiy RIPv2 protokolida ishlaydi. OSPF, IS-IS va BGP o'rniga global SPF ishlatiladi: kabel uzilganda yo'llar darhol qayta hisoblanadi (OSPF'ning sekundlik konvergensiyasi modellashtirilmaydi).
+- `ripd` yoqilgan routerlar ns-3'ning haqiqiy RIPv2 protokolida ishlaydi. Qolgan routerlarning yo'llarini analitik dvigatel bilan **bir xil** SPF modeli (hop soni) hisoblaydi va ns-3'ga statik marshrut sifatida o'rnatadi. Kabel uzilganda yoki stansiya qamrovdan chiqqanda yo'llar darhol qayta hisoblanadi (OSPF'ning sekundlik konvergensiyasi modellashtirilmaydi). ns-3'ning o'z global routing'i ishlatilmaydi: ns-3.44'da u ikki holatda yiqiladi — `IpForward=false` hostda va umumiy Wi-Fi kanaliga ulangan bir nechta AP bo'lganda.
 - Jitter parametri modellashtirilmaydi.
 - P4 switch ns-3'da oddiy L2 bridge, SDN router esa oddiy L3 router sifatida ishlaydi (P4 va SDN mantiqi faqat Mininet dvigatelida bajariladi).
 - TCP Cubic, MSS 1448 (Linux'ga yaqin qilib sozlangan).
@@ -200,6 +200,57 @@ Model ns-3 o'lchovlariga kalibrlangan. 802.11ax, 20 MHz, 20 dBm uchun:
 | Analitik | Har bir stansiya tezligi = model taxmini; AP efir vaqti stansiyalar o'rtasida bo'linadi (efir vaqti bo'yicha adolat), TCP ACK uchun ~9% qo'shimcha efir |
 | Mininet | Radio yo'q: AP = OVS switch, Wi-Fi kabeli = model tezligidagi TCLink (umumiy efir emulyatsiya qilinmaydi) |
 
+### Bir nechta AP va kanal xalaqiti
+
+AP sozlamasida **kanal** tanlanadi. Ro'yxatdagi kanallar diapazon va kenglikka mos
+keladi, masalan 5 GHz / 20 MHz uchun 36, 40, 44 va hokazo. Bir xil (yoki chastotasi
+ustma-ust tushadigan) kanaldagi, bir-birini eshitadigan AP'lar **umumiy efirni
+bo'lishadi**:
+- ns-3'da barcha AP'lar bitta radio muhitda ishlaydi. Bir kanaldagilar CSMA/CA orqali
+  navbat kutadi va to'qnashadi, boshqa kanaldagilar esa bir-biriga ta'sir qilmaydi.
+- Analitik dvigatelda bunday AP'lar bitta efir vaqti guruhiga birlashtiriladi.
+
+`wifi_kampus` namunasi — 60 m oraliqdagi ikki AP. Standart holatda ap1 36-kanalda, ap2 40-kanalda:
+
+| AP kanallari | ns-3 (ikki TCP yuklash, Mbit/s) | Analitik |
+|---|---|---|
+| 36 / 36 (bir kanal) | 39.4 + 36.3 | 42.1 + 42.1 |
+| 36 / 40 (turli kanal) | 79.3 + 80.8 | 84.2 + 84.2 |
+
+Tadqiqot oynasida **"Wi-Fi ap2 · kanal"** parametrini `36,40` qiymatlari bilan
+ishga tushirsangiz, shu farqni bitta grafikda ko'rasiz.
+
+### Harakatlanuvchi stansiyalar
+
+Ssenariy hodisasi **"Harakat"**: qurilma `t` soniyadan boshlab `davomiylik` soniya
+ichida (x, y) nuqtaga to'g'ri chiziq bo'ylab yuradi. Manzilni 📍 tugmasi bilan
+to'g'ridan-to'g'ri kanvasdan tanlash mumkin. Ssenariy oynasi ochiq turganda kanvasda
+harakat yo'nalishi strelka bilan ko'rsatiladi.
+- **ns-3:** pozitsiya har 0.5 s da yangilanadi; MCS va to'qnashuvlar real hisoblanadi.
+- **Analitik:** har soniyada radio taxmini qayta hisoblanadi.
+- **Mininet:** har soniyada TCLink tezligi qayta o'rnatiladi, qamrovdan chiqsa link uziladi.
+
+`wifi_kampus` → `yurish`: mob1 ap1 dan uzoqlashadi, video tezligi MCS bo'yicha
+bosqichma-bosqich tushadi:
+- ns-3: 60 → 57 → 53 → 41 → 27 → 13 → 0 Mbit/s;
+- analitik: 60 → 55 → 41 → 27 → 0 Mbit/s.
+
+Aloqa uzilgach, ping ham to'xtaydi.
+
+**Hali yo'q:** stansiyaning eng yaqin AP'ga avtomatik o'tishi (roaming). Stansiya o'z
+kabeli ulangan AP'da qoladi.
+
+**ns-3'da kuzatilgan holat.** Bir kanaldagi qo'shni AP bor va downlink yuklamasi kanal
+sig'imiga yaqin bo'lsa, stansiya bilan aloqa butunlay uzilib qolishi mumkin.
+`wifi_kampus` misolida (mob1 ap1 dan 35 m, ap2 dan 46 m; ikkala AP 36-kanalda):
+- 30 Mbit/s — normal o'tadi;
+- 40 Mbit/s — oqim faqat ~4-soniyada boshlanadi;
+- 50+ Mbit/s — umuman o'tmaydi.
+
+Ap2 boshqa kanalda bo'lsa yoki umuman bo'lmasa, 60 Mbit/s ham normal o'tadi. Bu real
+Wi-Fi'dagi to'qnashuv/qayta uzatish qulashi bo'lishi ham, ns-3 modelining artefakti
+ham bo'lishi mumkin. Shuning uchun bunday natijalarni analitik dvigatel bilan solishtiring.
+
 `wifi_ofis` namunasi: AP, uch noutbuk (23 / 50 / 64 m) va simli server.
 `yuklama` ssenariysi Wi-Fi'ning "performance anomaly" hodisasini ko'rsatadi:
 uzoqdagi sekin stansiya efirni uzoq band qiladi va yaqindagi stansiyani ham
@@ -211,6 +262,7 @@ masalan `5,10,15,20,25` dBm qiymatlarida uzoqdagi stansiya tezligini ko'ring.
 - `ospf_lab`: ikki LAN, ikki FRR router, OSPF area 0. Ssenariylar: `asosiy`, `uzilish`, `tez_kabel`.
 - `rip_ring`: uch router uchburchak, RIPv2. `uzilish` ssenariysi — konvergensiya tahlili.
 - `wifi_ofis`: Wi-Fi AP, uch noutbuk turli masofada, simli server. Ssenariylar: `yolgiz`, `yuklama`.
+- `wifi_kampus`: ikki AP (bir kanalda), switch, server, harakatlanuvchi mob1. Ssenariylar: `xalaqit`, `yurish`.
 - `p4_l2_lab`: uchta host, P4 L2 switch, `dmac` jadvali.
 - `sdn_router_lab`: SDN switch + SDN router (`l3_router` ilovasi).
 
@@ -249,5 +301,5 @@ token majburiy. Token URL'ini begonalarga bermang.
 - Real driver Ubuntu'da Mininet 2.3, OVS 2.17+, FRR 8+ va p4lang paketlari bilan ishlash uchun yozilgan. Bu repo'da u faqat statik tekshirilgan (CI'da Mininet yo'q). Birinchi ishga tushirishda xato chiqsa, **Hodisalar** panelidagi logni yuboring.
 - Router qurilmasini tarmoq ishlayotganda qayta nomlab bo'lmaydi.
 - Mininet dvigateli (`engines/emulation.py`) faqat statik tekshirilgan — birinchi real ishga tushirishda xato chiqishi mumkin.
-- Wi-Fi: harakatlanuvchi stansiyalar (mobility), bir nechta AP o'rtasida roaming va AP'lararo kanal interferensiyasi hali yo'q. Har bir AP o'z kanalida ishlaydi.
+- Wi-Fi: AP'lar o'rtasida avtomatik roaming va qo'shni (ustma-ust tushmaydigan) kanallarning qisman xalaqiti modellashtirilmaydi.
 - Rejada: LTE/5G, harakatlanuvchi stansiyalar, bir nechta parametrli tadqiqot (2D), ns-3'da kabel yuklamasi statistikasi, VLAN/trunk, pcap yuklab olish.

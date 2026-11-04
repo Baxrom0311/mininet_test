@@ -1,0 +1,289 @@
+{
+  "version": 1,
+  "name": "wifi_kampus",
+  "meters_per_px": 0.25,
+  "notes": "Ikki AP 60 m oraliqda: ap1 — 36-kanal, ap2 — 40-kanal (to'g'ri rejalashtirilgan). ap2 ni 36 ga o'tkazsangiz (tadqiqot: ap2.channel = 36,40), ikkala AP bir-birini eshitadi va efirni bo'lishadi. mob1 harakatlanadi: ap1 dan uzoqlashadi.",
+  "devices": {
+    "s1": {
+      "id": 1,
+      "type": "switch",
+      "x": 500,
+      "y": 520,
+      "config": {
+        "mode": "standalone",
+        "stp": false,
+        "controller": ""
+      }
+    },
+    "srv1": {
+      "id": 2,
+      "type": "server",
+      "x": 500,
+      "y": 680,
+      "config": {
+        "interfaces": {
+          "srv1-eth1": {
+            "ip": "10.0.0.10/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "ap1": {
+      "id": 3,
+      "type": "wifiap",
+      "x": 380,
+      "y": 360,
+      "config": {
+        "standard": "80211ax",
+        "band": 5,
+        "width": 20,
+        "tx_power": 20,
+        "ssid": "bino-a",
+        "channel": 36
+      }
+    },
+    "ap2": {
+      "id": 4,
+      "type": "wifiap",
+      "x": 620,
+      "y": 360,
+      "config": {
+        "standard": "80211ax",
+        "band": 5,
+        "width": 20,
+        "tx_power": 20,
+        "ssid": "bino-b",
+        "channel": 40
+      }
+    },
+    "lap1": {
+      "id": 5,
+      "type": "host",
+      "x": 300,
+      "y": 300,
+      "config": {
+        "interfaces": {
+          "lap1-eth1": {
+            "ip": "10.0.0.21/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "lap2": {
+      "id": 6,
+      "type": "host",
+      "x": 680,
+      "y": 300,
+      "config": {
+        "interfaces": {
+          "lap2-eth1": {
+            "ip": "10.0.0.22/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "mob1": {
+      "id": 7,
+      "type": "host",
+      "x": 470,
+      "y": 250,
+      "config": {
+        "interfaces": {
+          "mob1-eth1": {
+            "ip": "10.0.0.31/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "srv1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 1
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000,
+        "medium": "wire"
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "ap1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 2
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000,
+        "medium": "wire"
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "ap2",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 3
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000,
+        "medium": "wire"
+      },
+      "up": true
+    },
+    "w1": {
+      "a": {
+        "dev": "lap1",
+        "port": 1
+      },
+      "b": {
+        "dev": "ap1",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000,
+        "medium": "wifi"
+      },
+      "up": true
+    },
+    "w2": {
+      "a": {
+        "dev": "lap2",
+        "port": 1
+      },
+      "b": {
+        "dev": "ap2",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000,
+        "medium": "wifi"
+      },
+      "up": true
+    },
+    "w3": {
+      "a": {
+        "dev": "mob1",
+        "port": 1
+      },
+      "b": {
+        "dev": "ap1",
+        "port": 3
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000,
+        "medium": "wifi"
+      },
+      "up": true
+    }
+  },
+  "p4_programs": {},
+  "controllers": {},
+  "scenarios": {
+    "xalaqit": {
+      "duration": 20,
+      "apps": [
+        {
+          "id": "d1",
+          "type": "tcp",
+          "src": "srv1",
+          "dst": "lap1",
+          "start": 1,
+          "stop": 19,
+          "label": "yuklash →lap1 (ap1)"
+        },
+        {
+          "id": "d2",
+          "type": "tcp",
+          "src": "srv1",
+          "dst": "lap2",
+          "start": 1,
+          "stop": 19,
+          "label": "yuklash →lap2 (ap2)"
+        }
+      ],
+      "events": [],
+      "notes": "Tadqiqot: ap2.channel = 36,40 — bir kanalda yuklashlar efirni bo'lishadi"
+    },
+    "yurish": {
+      "duration": 40,
+      "apps": [
+        {
+          "id": "m",
+          "type": "udp",
+          "src": "srv1",
+          "dst": "mob1",
+          "rate": "60Mbps",
+          "size": 1400,
+          "start": 1,
+          "stop": 39,
+          "label": "video →mob1 (harakatda)"
+        },
+        {
+          "id": "p",
+          "type": "ping",
+          "src": "mob1",
+          "dst": "srv1",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 39,
+          "label": "ping mob1→srv1"
+        }
+      ],
+      "events": [
+        {
+          "t": 5,
+          "action": "move",
+          "device": "mob1",
+          "x": 100,
+          "y": 120,
+          "duration": 30
+        }
+      ],
+      "notes": "mob1 t=5..35 s da ap1 dan ~80 m uzoqlashadi: MCS pasayadi, keyin aloqa uziladi"
+    }
+  }
+}

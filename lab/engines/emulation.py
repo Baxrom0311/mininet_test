@@ -131,6 +131,10 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
 
     applied = []
     for e in sorted(sc.get("events") or [], key=lambda e: float(e.get("t", 0))):
+        if e.get("action") == "move":       # harakat — pastdagi har soniyalik siklda
+            applied.append({**e})
+            continue
+
         def fire(e=e):
             try:
                 if e["action"] in ("link_down", "link_up"):
@@ -147,11 +151,18 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
     # kabel yuklamasi
     link_series = {lid: [] for lid in project["links"]}
     prev = {}
+    from lab.mobility import has_moves, positions_at
+    movers = has_moves(sc)
     k = 0
     while k < int(duration):
         k += 1
         if stop_ev.wait(max(T0 + k - time.time(), 0)):
             break
+        if movers:     # Wi-Fi stansiya harakati: TCLink tezligi radio modelidan qayta hisoblanadi
+            try:
+                driver.wifi_refresh(positions_at(project, sc, float(k)))
+            except Exception as ex:  # noqa: BLE001
+                log(f"harakat xatosi: {ex}")
         cache = {}
         for lid, l in project["links"].items():
             pa, pb = pid[l["a"]["dev"]], pid[l["b"]["dev"]]

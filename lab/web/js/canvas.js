@@ -3,7 +3,7 @@
 (function (NL) {
   'use strict';
   const S = NL.store;
-  const C = NL.canvas = { mode: 'select', placeType: null, linkSrc: null, tx: 0, ty: 0, k: 1, geom: {} };
+  const C = NL.canvas = { mode: 'select', placeType: null, linkSrc: null, tx: 0, ty: 0, k: 1, geom: {}, overlay: [], pickCb: null };
   let svg, vp, gCov, gLinks, gPkts, gDevs, gGhost, stageEl, hintEl, emptyEl, scaleEl;
   const R = 26;   // qurilma radiusi
 
@@ -14,6 +14,9 @@
     const pat = NL.s('pattern', { id: 'gridp', width: 32, height: 32, patternUnits: 'userSpaceOnUse' });
     pat.appendChild(NL.s('circle', { cx: 1, cy: 1, r: 1.1, class: 'grid-dot' }));
     defs.appendChild(pat);
+    const mk = NL.s('marker', { id: 'mvarrow', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' });
+    mk.appendChild(NL.s('path', { d: 'M0,0 L10,5 L0,10 z', class: 'mvhead' }));
+    defs.appendChild(mk);
     svg.appendChild(defs);
     vp = NL.s('g');
     vp.appendChild(NL.s('rect', { x: -20000, y: -20000, width: 40000, height: 40000, fill: 'url(#gridp)', class: 'bg' }));
@@ -45,6 +48,7 @@
     const hints = {
       select: '', link: 'Kabel: birinchi qurilmani bosing (Esc — bekor)', delete: 'O\'chirish: qurilma yoki kabelni bosing',
       place: `Joylash: ${placeType ? (NL.store.info.device_types[placeType] || {}).label : ''} — kanvasga bosing`,
+      pick: 'Harakat manzili: kanvasdagi nuqtani bosing (Esc — bekor)',
     };
     hintEl.textContent = hints[mode] || '';
     NL.emit('mode', mode);
@@ -95,9 +99,24 @@
     updateScale();
   };
 
+  C.pickPoint = function (cb) { C.pickCb = cb; C.setMode('pick'); };
+  C.setOverlay = function (moves) { C.overlay = moves || []; renderCoverage(); };
+
   // Wi-Fi AP qamrovi: tashqi doira — aloqa chegarasi (RSSI = -82 dBm), ichki — yuqori MCS zonasi (SNR >= 25 dB)
   function renderCoverage() {
     gCov.innerHTML = '';
+    // ssenariy harakatlari (oyna ochiq bo'lsa): qurilmadan manzilgacha strelka
+    let prevPos = {};
+    for (const e of C.overlay) {
+      const d = S.dev(e.device); if (!d || !isFinite(e.x) || !isFinite(e.y)) continue;
+      const [x0, y0] = prevPos[e.device] || [d.x, d.y];
+      gCov.appendChild(NL.s('line', { x1: x0, y1: y0, x2: e.x, y2: e.y, class: 'mvline', 'marker-end': 'url(#mvarrow)' }));
+      gCov.appendChild(NL.s('circle', { cx: e.x, cy: e.y, r: 6, class: 'mvdot' }));
+      const t = NL.s('text', { x: (x0 + e.x) / 2, y: (y0 + e.y) / 2 - 8, class: 'mvlbl' });
+      t.textContent = `${e.device}: t=${e.t}s → ${(+e.t + (+e.duration || 0))}s`;
+      gCov.appendChild(t);
+      prevPos[e.device] = [e.x, e.y];
+    }
     if (!S.info || !S.info.wifi) return;
     const mpp = NL.wifi.mpp();
     for (const [name, d] of Object.entries(S.project.devices)) {
@@ -233,6 +252,11 @@
       const linkEl = ev.target.closest('[data-link]');
       const w = toWorld(ev);
       moved = false;
+      if (C.mode === 'pick') {
+        const cb = C.pickCb; C.pickCb = null; C.setMode('select');
+        if (cb) cb(w.x, w.y);
+        return;
+      }
       if (C.mode === 'place' && !devEl) {
         S.addDevice(C.placeType, w.x, w.y);
         if (!ev.shiftKey) C.setMode('select');

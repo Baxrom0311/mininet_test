@@ -21,6 +21,8 @@ import time
 
 from lab.drivers.demo_driver import Net, _ms
 from lab.model import normalize_link_params, parse_rate
+from lab.mobility import apply_positions, has_moves, positions_at
+from lab.wifi import ap_config, channels_overlap, max_range_m, meters_per_px
 from lab.wifi import link_estimate as wifi_link_estimate
 
 MSS_BITS = 1448 * 8
@@ -59,6 +61,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                and "ripd" in ((d.get("config") or {}).get("daemons") or [])
                and not ({"ospfd", "isisd", "ospf6d"} & set((d.get("config") or {}).get("daemons") or []))}
     stale = None   # (eski loyiha nusxasi, qachongacha)
+    movers = has_moves(sc)
     steps = int(math.ceil(duration))
     for k in range(steps):
         t0, t1 = float(k), float(min(k + 1, duration))
@@ -76,8 +79,11 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 elif e["action"] == "link_params":
                     l["params"] = normalize_link_params({**(l.get("params") or {}), **(e.get("params") or {})})
             applied.append({"t": t0, **e})
-            log(f"t={t0:.0f}s: {e['action']} {e.get('link')}")
+            log(f"t={t0:.0f}s: {e['action']} {e.get('link') or e.get('device')}")
+        if movers:     # harakat: oraliq o'rtasidagi pozitsiya
+            apply_positions(proj, positions_at(project, sc, (t0 + t1) / 2))
         if stale and t0 < stale[1]:
+            stale[0]["devices"] = proj["devices"]   # eski routing jadvali, lekin joriy pozitsiyalar
             n = _StaleNet(proj, stale[0], rip_set)
         else:
             n = Net(proj)
@@ -89,8 +95,30 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             if est:
                 bw = max(est["thr_mbps"], 0.001) * 1e6
                 wifi_of[lid] = (est["ap"], bw)
-                cap[("air", est["ap"])] = 1.0      # AP efir vaqti: jami ulush <= 1
             cap[(lid, "ab")] = cap[(lid, "ba")] = bw
+        # efir vaqti: bir kanalda (chastotalar kesishadi) va bir-birini eshitadigan AP'lar
+        # (masofa <= aloqa chegarasi) bitta umumiy efirni bo'lishadi — union-find
+        aps = sorted({ap_ for ap_, _c in wifi_of.values()})
+        parent = {ap_: ap_ for ap_ in aps}
+
+        def root(x):
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        cfgs = {ap_: ap_config(proj["devices"][ap_]) for ap_ in aps}
+        mpp = meters_per_px(proj)
+        for i_, a1 in enumerate(aps):
+            for a2 in aps[i_ + 1:]:
+                d1, d2 = proj["devices"][a1], proj["devices"][a2]
+                dist = math.hypot(d1["x"] - d2["x"], d1["y"] - d2["y"]) * mpp
+                if channels_overlap(cfgs[a1], cfgs[a2]) and dist <= max(max_range_m(cfgs[a1]), max_range_m(cfgs[a2])):
+                    parent[root(a1)] = root(a2)
+        pool = {ap_: root(ap_) for ap_ in aps}
+        for lid in list(wifi_of):
+            ap_, c_ = wifi_of[lid]
+            wifi_of[lid] = (pool[ap_], c_)        # endi kalit — efir guruhi
+            cap[("air", pool[ap_])] = 1.0
 
         max_sta = {}
         for ap_, c_ in wifi_of.values():
@@ -250,4 +278,5 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             "notes": ["oqim darajasidagi taxmin: UDP qat'iy, TCP max-min adolat + Mathis, navbat M/M/1",
                       "dinamik routing: demo modeli (dinamik daemonli routerlar o'zaro barcha subnetlarni biladi)",
                       "RIP: kabel uzilgandan keyin rip_convergence_s (standart 15s) davomida eski yo'llar",
-                      "Wi-Fi: SNR→MCS (ns-3 ga kalibrlangan), AP efir vaqti bo'yicha adolat (A-MPDU), TCP ACK efiri ~9%"]}
+                      "Wi-Fi: SNR→MCS (ns-3 ga kalibrlangan), efir vaqti bo'yicha adolat (A-MPDU), TCP ACK efiri ~9%",
+                      "Wi-Fi: bir kanalda va bir-birini eshitadigan AP'lar umumiy efirni bo'lishadi; harakat — oraliq o'rtasidagi pozitsiya"]}

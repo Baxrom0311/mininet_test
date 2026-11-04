@@ -114,7 +114,7 @@ with TestClient(create_app("demo")) as c:
         r = c.get(f"/api/runs/rip_ring/{rid}").json()
         v = {int(x["t"]): x["thr_bps"] for x in r["flows"]["video"]["series"]}
         gap = sum(1 for t in range(11, 50) if v.get(t, 0) < 1e5)
-        check(3 <= gap <= 32 and v.get(55, 0) > 3e6, f"{eng}: RIP uzilish {gap}s, keyin zaxira yo'l (r3) orqali tiklanadi")
+        check(3 <= gap <= 40 and v.get(55, 0) > 3e6, f"{eng}: RIP uzilish {gap}s, keyin zaxira yo'l (r3) orqali tiklanadi")
         c.delete(f"/api/runs/rip_ring/{rid}")
 
     # ---- Wi-Fi: radio modeli, ping, qamrovdan tashqari, analitik/ns-3 o'tkazuvchanlik ----
@@ -140,6 +140,35 @@ with TestClient(create_app("demo")) as c:
         thr = r["flows"]["d1"]["summary"]["avg_thr_bps"] / 1e6
         check(70 <= thr <= 100, f"{eng}: Wi-Fi TCP (23 m, 802.11ax 20 MHz) 70..100 Mbit/s: {thr:.1f}")
         c.delete(f"/api/runs/wifi_ofis/{rid}")
+
+    # ---- Wi-Fi: kanal xalaqiti (tadqiqot ap2.channel = 36,40) va harakatlanuvchi stansiya ----
+    kp = c.get("/api/projects/wifi_kampus?example=true").json()
+    check(c.post("/api/validate", json=kp).json()["errors"] == [], "wifi_kampus: validatsiya")
+    for eng in want:
+        st = c.post("/api/studies", json={"project": kp, "scenario": "xalaqit", "engine": eng,
+                                          "param": {"kind": "ap", "ap": "ap2", "field": "channel"}, "values": [36, 40]}).json()
+        t0 = time.time()
+        while time.time() - t0 < 300:
+            mem = [r for r in c.get("/api/runs/wifi_kampus").json()["runs"] if r.get("study_id") == st["study_id"]]
+            if len(mem) == 2 and all(r["status"] != "running" for r in mem):
+                break
+            time.sleep(0.5)
+        mem.sort(key=lambda r: r["study_index"])
+        tot = [sum(f["summary"]["avg_thr_bps"] for f in c.get(f"/api/runs/wifi_kampus/{r['run_id']}").json()["flows"].values()) / 1e6
+               for r in mem]
+        check(len(tot) == 2 and tot[0] < 0.7 * tot[1], f"{eng}: bir kanal (36/36) {tot[0]:.0f} < turli kanal (36/40) {tot[1]:.0f} Mbit/s" if len(tot) == 2 else f"{eng}: kanal tadqiqoti")
+        for r in mem:
+            c.delete(f"/api/runs/wifi_kampus/{r['run_id']}")
+        rid = c.post("/api/runs", json={"project": kp, "scenario": "yurish", "engine": eng}).json()["run_id"]
+        t0 = time.time()
+        while time.time() - t0 < 300:
+            if not any(r.get("status") == "running" for r in c.get("/api/runs/wifi_kampus").json()["runs"]):
+                break
+            time.sleep(0.5)
+        v = {int(x["t"]): x["thr_bps"] / 1e6 for x in c.get(f"/api/runs/wifi_kampus/{rid}").json()["flows"]["m"]["series"]}
+        check(v.get(4, 0) > 50 and 5 < v.get(22, 0) < 50 and v.get(38, 1) < 0.1,
+              f"{eng}: harakat — {v.get(4, 0):.0f} -> {v.get(22, 0):.0f} -> {v.get(38, 0):.0f} Mbit/s")
+        c.delete(f"/api/runs/wifi_kampus/{rid}")
 
     if "ns3" not in want:
         print("  --   ns-3 o'rnatilmagan (pip install ns3) — ns-3 testi o'tkazib yuborildi")

@@ -107,7 +107,7 @@ def create_app(driver_name="demo", token=None):
         wifi_model = {"mcs": W.MCS, "width_mult": {str(k): v for k, v in W.WIDTH_MULT.items()},
                       "efficiency": W.EFFICIENCY, "ref_loss": {str(k): v for k, v in W.REF_LOSS.items()},
                       "min_rssi": W.MIN_RSSI, "exponent": W.EXPONENT, "ap_defaults": W.AP_DEFAULTS,
-                      "standards": W.STANDARDS}
+                      "standards": W.STANDARDS, "channels": W.CHANNELS}
         return {**driver.info(), "device_types": DEVICE_TYPES, "frr_daemons": FRR_DAEMONS, "wifi": wifi_model,
                 "project_version": PROJECT_VERSION, "status": driver.status()}
 

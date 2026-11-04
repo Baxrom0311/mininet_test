@@ -298,3 +298,8 @@
 .covlbl { font-size: 11px; fill: var(--c-wifiap); text-anchor: middle; font-family: var(--mono); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
 .stage-scale { position: absolute; left: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; color: var(--text-dim); font-family: var(--mono); pointer-events: none; }
 .stage-scale i { display: block; height: 6px; border: 1.5px solid var(--text-dim); border-top: none; }
+.mvline { stroke: var(--accent-3); stroke-width: 2; stroke-dasharray: 6 5; fill: none; pointer-events: none; }
+.mvhead { fill: var(--accent-3); }
+.mvdot { fill: color-mix(in srgb, var(--accent-3) 25%, transparent); stroke: var(--accent-3); stroke-width: 1.5; pointer-events: none; }
+.mvlbl { font-size: 10.5px; fill: var(--accent-3); text-anchor: middle; font-family: var(--mono); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+.lab-stage.mode-pick svg.canvas { cursor: crosshair; }

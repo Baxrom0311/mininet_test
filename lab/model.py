@@ -222,7 +222,7 @@ def controller_config(project):
 
 
 APP_TYPES = ("udp", "tcp", "ping")
-EVENT_ACTIONS = ("link_down", "link_up", "link_params")
+EVENT_ACTIONS = ("link_down", "link_up", "link_params", "move")
 
 
 def validate_scenario(project, sc):
@@ -266,7 +266,16 @@ def validate_scenario(project, sc):
         w = f"hodisa {i + 1}"
         if e.get("action") not in EVENT_ACTIONS:
             errors.append(f"{w}: amal {EVENT_ACTIONS} dan biri")
-        if e.get("link") not in (project.get("links") or {}):
+        if e.get("action") == "move":
+            if e.get("device") not in devs:
+                errors.append(f"{w}: qurilma '{e.get('device')}' yo'q")
+            try:
+                float(e.get("x")), float(e.get("y"))
+                if float(e.get("duration", 0) or 0) < 0:
+                    errors.append(f"{w}: davomiylik >= 0")
+            except (TypeError, ValueError):
+                errors.append(f"{w}: x, y son bo'lsin")
+        elif e.get("link") not in (project.get("links") or {}):
             errors.append(f"{w}: kabel '{e.get('link')}' yo'q")
         try:
             if not (0 <= float(e.get("t", -1)) <= dur):

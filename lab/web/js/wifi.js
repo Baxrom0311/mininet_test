@@ -14,6 +14,9 @@
       c.width = [20, 40, 80, 160].includes(parseInt(c.width, 10)) ? parseInt(c.width, 10) : 20;
       if (c.band === 2.4 && c.width > 40) c.width = 40;
       c.tx_power = parseFloat(c.tx_power); if (!isFinite(c.tx_power)) c.tx_power = 20;
+      const allowed = ((((M() || {}).channels || {})[c.band === 2.4 ? '2.4' : '5'] || {})[String(c.width)]) || [];
+      const ch = parseInt(c.channel, 10);
+      c.channel = allowed.includes(ch) ? ch : (allowed[0] || 0);
       return c;
     },
     estimate(distM, c) {

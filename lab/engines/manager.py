@@ -186,11 +186,11 @@ class RunManager:
                     app["size"] = int(v)
             elif kind == "ap":
                 ap = param.get("ap")
-                if (p2["devices"].get(ap) or {}).get("type") != "wifiap" or field != "tx_power":
+                if (p2["devices"].get(ap) or {}).get("type") != "wifiap" or field not in ("tx_power", "channel"):
                     raise ValueError("Wi-Fi AP yoki maydon noto'g'ri")
                 if engine == "mininet":
-                    raise ValueError("AP quvvati tadqiqoti Mininet dvigatelida qo'llab-quvvatlanmaydi (radio yo'q)")
-                p2["devices"][ap].setdefault("config", {})["tx_power"] = float(v)
+                    raise ValueError("AP radio tadqiqoti Mininet dvigatelida qo'llab-quvvatlanmaydi (radio yo'q)")
+                p2["devices"][ap].setdefault("config", {})[field] = float(v) if field == "tx_power" else int(v)
             else:
                 raise ValueError("param.kind: link | app | ap")
             variants.append((v, p2, sc2))

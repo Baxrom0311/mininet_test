@@ -173,9 +173,21 @@
       const band = sel([['5', '5 GHz'], ['2.4', '2.4 GHz']], String(W.band));
       const width = sel([['20', '20 MHz'], ['40', '40 MHz'], ['80', '80 MHz'], ['160', '160 MHz']], String(W.width));
       const txp = inp(W.tx_power, '20', { type: 'number', step: 'any' });
+      const chSel = sel([], '');
+      const fillCh = () => {
+        const b = std.value === '80211g' ? '2.4' : std.value === '80211ac' ? '5' : band.value;
+        const wd = b === '2.4' ? String(Math.min(parseInt(width.value, 10), 40)) : width.value;
+        const list = (((S.info.wifi || {}).channels || {})[b] || {})[wd] || [];
+        const cur = chSel.value || String(W.channel);
+        chSel.innerHTML = '';
+        list.forEach(c => chSel.appendChild(new Option(String(c), String(c))));
+        chSel.value = list.map(String).includes(cur) ? cur : String(list[0] || '');
+      };
+      [std, band, width].forEach(x => x.addEventListener('change', fillCh));
+      fillCh();
       const ssid = inp(cfg.ssid || '', 'netlab-' + name);
       getters.push(() => { cfg.standard = std.value; cfg.band = parseFloat(band.value); cfg.width = parseInt(width.value, 10);
-        cfg.tx_power = parseFloat(txp.value) || 20; cfg.ssid = ssid.value.trim(); });
+        cfg.tx_power = parseFloat(txp.value) || 20; cfg.ssid = ssid.value.trim(); cfg.channel = parseInt(chSel.value, 10) || 0; });
       const rows = Object.entries(ports).map(([p_, info]) => {
         const e = NL.wifi.linkEstimate(info.lid);
         return e ? h('tr', {}, [info.peer, e.distance_m.toFixed(1) + ' m', e.rssi_dbm.toFixed(1), e.snr_db.toFixed(1), e.ok ? 'MCS' + e.mcs : '—', e.ok ? '~' + e.thr_mbps.toFixed(1) : 'aloqa yo\'q'].map(x => h('td', { text: x })))
@@ -183,7 +195,7 @@
       });
       pane.append(h('div', { class: 'f-row' }, [field('Standart', std), field('Diapazon', band)]),
         h('div', { class: 'f-row' }, [field('Kanal kengligi', width), field('Uzatish quvvati (dBm)', txp)]),
-        field('SSID', ssid),
+        h('div', { class: 'f-row' }, [field('SSID', ssid), field('Kanal (bir kanaldagi yaqin AP\'lar efirni bo\'lishadi)', chSel)]),
         h('div', { class: 'isec' }, [h('h4', { text: 'Stansiyalar (radio modeli, joriy joylashuv)' }),
           h('table', {}, [h('tr', {}, ['Qurilma', 'Masofa', 'RSSI dBm', 'SNR dB', 'MCS', 'Mbit/s'].map(x => h('th', { text: x }))), ...rows])]),
         h('div', { class: 'note', text: 'Simsiz ulash: kabel asbobi (C) bilan AP va host/server/router ni bosing — avtomatik Wi-Fi bo\'ladi. AP\'ning simli porti (switch/server ga) oddiy kabel.' }));

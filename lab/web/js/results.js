@@ -70,37 +70,71 @@
     const drawEvents = () => {
       evBox.innerHTML = '';
       const links = Object.entries(S.project.links).map(([lid, l]) => [lid, `${lid}: ${l.a.dev}↔${l.b.dev}`]);
+      const devNames = Object.keys(S.project.devices).sort();
       const rows = sc.events.map((e, i) => {
         const t = F().inp(e.t ?? 10, '', { type: 'number', step: 'any', style: { width: '80px' } });
-        const act = F().sel([['link_down', 'Kabel uzilishi'], ['link_up', 'Kabel tiklanishi'], ['link_params', 'Kabel parametrlari']], e.action);
+        const act = F().sel([['link_down', 'Kabel uzilishi'], ['link_up', 'Kabel tiklanishi'], ['link_params', 'Kabel parametrlari'],
+          ['move', 'Harakat (qurilma yuradi)']], e.action);
+        const isMove = () => act.value === 'move';
         const lk = F().sel(links, e.link);
+        const dv = F().sel(devNames.map(n => [n, n]), e.device || devNames[0]);
         const p = e.params || {};
         const bw = F().inp(p.bw ?? '', 'Mbit/s', { style: { width: '80px' } }), dl = F().inp(p.delay ?? '', 'ms', { style: { width: '70px' } }),
           ls = F().inp(p.loss ?? '', 'loss %', { style: { width: '70px' } });
         const pBox = h('div', { class: 'row', style: { gap: '4px' } }, [bw, dl, ls]);
-        pBox.style.display = e.action === 'link_params' ? '' : 'none';
-        [t, act, lk, bw, dl, ls].forEach(el => el.addEventListener('change', () => {
-          e.t = parseFloat(t.value) || 0; e.action = act.value; e.link = lk.value;
-          if (e.action === 'link_params') {
-            e.params = {};
-            if (bw.value) e.params.bw = parseFloat(bw.value);
-            if (dl.value) e.params.delay = dl.value.trim();
-            if (ls.value) e.params.loss = parseFloat(ls.value);
-          } else delete e.params;
-          pBox.style.display = e.action === 'link_params' ? '' : 'none';
-          save();
+        const mx = F().inp(e.x ?? '', 'x px', { type: 'number', step: 'any', style: { width: '74px' } });
+        const my = F().inp(e.y ?? '', 'y px', { type: 'number', step: 'any', style: { width: '74px' } });
+        const md = F().inp(e.duration ?? 10, 'sek', { type: 'number', step: 'any', min: 0, style: { width: '64px' } });
+        const pick = h('button', { class: 'btn ghost sm', text: '📍', title: 'Manzilni kanvasdan tanlash', onclick: () => {
+          NL.canvas.pickPoint((x, y) => { mx.value = Math.round(x); my.value = Math.round(y); mx.dispatchEvent(new Event('change')); });
+        } });
+        const mBox = h('div', { class: 'row', style: { gap: '4px' } }, [mx, my, pick, h('span', { class: 'note', text: 'davom.' }), md]);
+        const target = h('td', {}), extra = h('td', {});
+        const layout = () => {
+          target.innerHTML = ''; extra.innerHTML = '';
+          target.appendChild(isMove() ? dv : lk);
+          extra.appendChild(isMove() ? mBox : pBox);
+          pBox.style.display = act.value === 'link_params' ? '' : 'none';
+        };
+        layout();
+        [t, act, lk, dv, bw, dl, ls, mx, my, md].forEach(el => el.addEventListener('change', () => {
+          e.t = parseFloat(t.value) || 0; e.action = act.value;
+          if (isMove()) {
+            delete e.link; delete e.params;
+            e.device = dv.value; e.x = parseFloat(mx.value); e.y = parseFloat(my.value); e.duration = Math.max(parseFloat(md.value) || 0, 0);
+            if (!isFinite(e.x) || !isFinite(e.y)) { const d = S.dev(e.device); e.x = d.x; e.y = d.y; mx.value = d.x; my.value = d.y; }
+          } else {
+            delete e.device; delete e.x; delete e.y; delete e.duration;
+            e.link = lk.value;
+            if (e.action === 'link_params') {
+              e.params = {};
+              if (bw.value) e.params.bw = parseFloat(bw.value);
+              if (dl.value) e.params.delay = dl.value.trim();
+              if (ls.value) e.params.loss = parseFloat(ls.value);
+            } else delete e.params;
+          }
+          if (el === act) layout();
+          save(); showMoves();
         }));
-        return h('tr', {}, [h('td', {}, t), h('td', {}, act), h('td', {}, lk), h('td', {}, pBox),
-          h('td', {}, h('button', { class: 'btn ghost sm', text: '×', onclick: () => { sc.events.splice(i, 1); save(); drawEvents(); } }))]);
+        return h('tr', {}, [h('td', {}, t), h('td', {}, act), target, extra,
+          h('td', {}, h('button', { class: 'btn ghost sm', text: '×', onclick: () => { sc.events.splice(i, 1); save(); drawEvents(); showMoves(); } }))]);
       });
       evBox.appendChild(h('div', { class: 'isec sc-table' }, [h('h4', {}, ['Vaqtli hodisalar', h('button', { class: 'btn neon sm', text: '+ hodisa', onclick: () => {
         const first = Object.keys(S.project.links)[0];
-        if (!first) { NL.toast('Avval kabel ulang', 'warn'); return; }
-        sc.events.push({ t: Math.round((sc.duration || 30) / 3), action: 'link_down', link: first }); save(); drawEvents();
+        if (!first) {
+          const d0 = Object.keys(S.project.devices)[0];
+          if (!d0) { NL.toast('Avval qurilma qo\'shing', 'warn'); return; }
+          const d = S.dev(d0);
+          sc.events.push({ t: 5, action: 'move', device: d0, x: d.x + 100, y: d.y, duration: 10 });
+        } else sc.events.push({ t: Math.round((sc.duration || 30) / 3), action: 'link_down', link: first });
+        save(); drawEvents(); showMoves();
       } })]),
-      rows.length ? h('table', {}, [h('tr', {}, ['Vaqt (s)', 'Amal', 'Kabel', 'Parametrlar', ''].map(x => h('th', { text: x }))), ...rows])
-        : h('div', { class: 'empty-row', text: 'Hodisa yo\'q — masalan t=10s da kabel uzilishi, t=16s da tiklanishi (failover tahlili).' })]));
+      rows.length ? h('table', {}, [h('tr', {}, ['Vaqt (s)', 'Amal', 'Kabel / qurilma', 'Parametrlar', ''].map(x => h('th', { text: x }))), ...rows])
+        : h('div', { class: 'empty-row', text: 'Hodisa yo\'q — masalan t=10s da kabel uzilishi, t=16s da tiklanishi (failover tahlili), yoki Wi-Fi stansiyaning harakati.' })]));
     };
+
+    const showMoves = () => NL.canvas.setOverlay((sc.events || []).filter(e => e.action === 'move'));
+    showMoves();
 
     // --- ishga tushirish
     const engSel = F().sel([], '');
@@ -155,13 +189,13 @@
 
     // --- parametrik tadqiqot: bitta parametr, bir nechta qiymat -> har biri alohida ishga tushirish
     const PARAM_DEFAULTS = { bw: '1,2,5,10,20,50,100', delay: '1,5,10,20,50,100', loss: '0,0.5,1,2,5,10',
-      queue: '10,50,100,500,1000', rate: '1Mbps,2Mbps,5Mbps,10Mbps,20Mbps', size: '200,500,1000,1400', tx_power: '5,10,15,20,25' };
-    const FIELD_LABEL = { tx_power: 'quvvat (dBm)', bw: 'tezlik (Mbit/s)', delay: 'kechikish (ms)', loss: 'yo\'qotish (%)', queue: 'navbat (paket)', rate: 'tezlik', size: 'paket (B)' };
+      queue: '10,50,100,500,1000', rate: '1Mbps,2Mbps,5Mbps,10Mbps,20Mbps', size: '200,500,1000,1400', tx_power: '5,10,15,20,25', channel: '36,40' };
+    const FIELD_LABEL = { channel: 'kanal', tx_power: 'quvvat (dBm)', bw: 'tezlik (Mbit/s)', delay: 'kechikish (ms)', loss: 'yo\'qotish (%)', queue: 'navbat (paket)', rate: 'tezlik', size: 'paket (B)' };
     const opts = [];
     Object.entries(S.project.links).forEach(([lid, l]) => ['bw', 'delay', 'loss', 'queue'].forEach(f =>
       opts.push([`link|${lid}|${f}`, `kabel ${lid} (${l.a.dev}↔${l.b.dev}) · ${FIELD_LABEL[f]}`])));
     Object.entries(S.project.devices).filter(([, d]) => d.type === 'wifiap').forEach(([n]) =>
-      opts.push([`ap|${n}|tx_power`, `Wi-Fi ${n} · uzatish quvvati (dBm)`]));
+      { opts.push([`ap|${n}|tx_power`, `Wi-Fi ${n} · uzatish quvvati (dBm)`]); opts.push([`ap|${n}|channel`, `Wi-Fi ${n} · kanal`]); });
     sc.apps.forEach(a => (a.type === 'tcp' ? ['rate'] : a.type === 'udp' ? ['rate', 'size'] : []).forEach(f =>
       opts.push([`app|${a.id}|${f}`, `ilova ${a.id} · ${FIELD_LABEL[f]}`])));
     const pSel = F().sel(opts, NL.storage.get('netlab.studyParam', opts[0] ? opts[0][0] : ''));
@@ -200,7 +234,7 @@
         h('div', { class: 'row wrap' }, [pSel, h('div', { style: { flex: '1', minWidth: '180px' } }, vals)]),
         h('div', { class: 'row wrap' }, [stBtn, stProg, stInfo]),
         h('div', { class: 'note', text: 'Har bir qiymat uchun ssenariy yuqoridagi dvigatelda alohida ishga tushiriladi; natijalar oynasida "parametr ↔ o\'lchov" grafigi chiziladi (OPNET parametric study).' })])]));
-    return { dispose() { unsub(); unsub2(); unsub3(); } };
+    return { dispose() { unsub(); unsub2(); unsub3(); NL.canvas.setOverlay([]); } };
   }
 
   // ======================= natijalar oynasi =======================
@@ -304,7 +338,7 @@
         series = flowIds.slice(0, SERIES_N).map((fid, k) => ({ name: (data[0].flows[fid] || {}).label || fid, color: seriesColor(k),
           points: data.map((r, i) => ({ x: xs[i], y: ((r.flows[fid] || {}).summary || {})[M.sum] ?? null })) }));
       }
-      const fieldName = { tx_power: 'AP quvvati, dBm', bw: 'kabel tezligi, Mbit/s', delay: 'kechikish, ms', loss: 'loss, %', queue: 'navbat, paket', rate: 'ilova tezligi', size: 'paket, B' }[P.field] || P.field;
+      const fieldName = { channel: 'AP kanali', tx_power: 'AP quvvati, dBm', bw: 'kabel tezligi, Mbit/s', delay: 'kechikish, ms', loss: 'loss, %', queue: 'navbat, paket', rate: 'ilova tezligi', size: 'paket, B' }[P.field] || P.field;
       const box = h('div', { class: 'chart-card' });
       main.append(box);
       NL.lineChart(box, { series, fmt: M.fmt, markers: true, xTicks: xs, xFmt: (x) => String(x),
@@ -439,7 +473,7 @@
       const x = X(e.t);
       svg.appendChild(NL.s('line', { x1: x, x2: x, y1: m.t, y2: H - m.b, class: 'evline' }));
       const t = NL.s('text', { x: x + 4, y: m.t + 11, class: 'evlbl' });
-      t.textContent = ({ link_down: '✕ ', link_up: '✓ ', link_params: '⚙ ' }[e.action] || '') + (e.link || '');
+      t.textContent = ({ link_down: '✕ ', link_up: '✓ ', link_params: '⚙ ', move: '➜ ' }[e.action] || '') + (e.link || e.device || '');
       svg.appendChild(t);
     });
     // chiziqlar (null — uzilish)

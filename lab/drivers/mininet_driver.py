@@ -634,6 +634,31 @@ class MininetDriver(BaseDriver):
                               "params": l.get("params")})
             return {"ok": True, "link": l}
 
+    def wifi_refresh(self, positions):
+        """Harakat: qurilma pozitsiyalarini yangilab, ularning Wi-Fi kabellari TCLink
+        tezligini radio modelidan qayta o'rnatadi (qamrovdan chiqsa — link down)."""
+        with self.lock:
+            self._require_running()
+            touched = set()
+            for dev, (x, y) in positions.items():
+                d = self.project["devices"].get(dev)
+                if d and (d.get("x"), d.get("y")) != (x, y):
+                    d["x"], d["y"] = x, y
+                    touched.add(dev)
+            for lid, l in self.project["links"].items():
+                if (l.get("params") or {}).get("medium") != "wifi" or lid not in self._links:
+                    continue
+                if l["a"]["dev"] not in touched and l["b"]["dev"] not in touched:
+                    continue
+                opts, ok = self._tc_opts(lid, normalize_link_params(l.get("params")))
+                state = "up" if ok and l.get("up") is not False else "down"
+                for intf in (self._links[lid].intf1, self._links[lid].intf2):
+                    intf.params.update(opts)
+                    intf.config(**opts)
+                    intf.ifconfig(state)
+        if touched:
+            self.bus.publish({"type": "positions", "devices": {n: list(positions[n]) for n in touched}})
+
     # ─────────────────────────── FRR ───────────────────────────
     def _frr_dirs(self, name):
         return f"/etc/frr/{name}", f"/var/run/frr/{name}"

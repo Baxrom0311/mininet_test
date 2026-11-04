@@ -267,11 +267,12 @@
   // ---------- klaviatura ----------
   function bindKeys() {
     addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && NL.canvas.mode === 'pick') { NL.canvas.pickCb = null; NL.canvas.setMode('select'); return; }
       if (e.target.closest && e.target.closest('input,textarea,select,.xterm,.win,.modal-back')) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); S.save().catch(er => NL.toast(er.message, 'error')); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k === 'escape') NL.canvas.setMode('select');
+      if (k === 'escape') { NL.canvas.pickCb = null; NL.canvas.setMode('select'); }
       else if (k === 'v') NL.canvas.setMode('select');
       else if (k === 'c') NL.canvas.setMode('link');
       else if (k === 'd') NL.canvas.setMode('delete');

@@ -17,15 +17,17 @@ Modellashtirish (ns-3 3.40+):
     (full-duplex, bridge'lanadi; CSMA half-duplex bo'lgani uchun ishlatilmaydi)
   * kabel: DataRate=bw, Delay=delay, DropTail navbat=queue paket, RateErrorModel=loss
   * routing: interfeys IP'lari + statik marshrutlar/gateway (yuqori ustuvorlik)
-    + Ipv4GlobalRouting (SPF; OSPF/IS-IS ekvivalenti — dinamik daemonli routerlar uchun)
+    + SPF (lab Net.routes — analitik bilan bir xil; OSPF/IS-IS ekvivalenti), RIP -> ns-3 RIPv2
   * jitter ns-3 kanal modelida yo'q — e'tiborsiz qoldiriladi (logda aytiladi)
   * hodisalar (link_down/link_up/link_params) qadamlar orasida qo'llanadi,
     link_down'dan keyin global routing qayta hisoblanadi (konvergensiya ~0s)
 """
 
+import copy
 import ipaddress
 import json
 import math
+import os
 import sys
 import time
 
@@ -66,6 +68,8 @@ def main(inp_path, out_path):
     emit(log="ns-3 yuklanmoqda...")
     from ns import ns  # noqa: E402  (og'ir import — faqat shu jarayonda)
     emit(log="ns-3 tayyor, topologiya qurilmoqda")
+    for comp in filter(None, os.environ.get("NETLAB_NS3_LOG", "").split(",")):   # debug: ns-3 loglari (stderr)
+        ns.LogComponentEnable(comp.strip(), ns.LOG_LEVEL_INFO)
     ns.RngSeedManager.SetSeed(int(sc.get("seed", 1)) or 1)
     # TCP: Linux (Mininet) ga yaqin standartlar — ns-3 o'zi MSS=536, bufer=128KB
     # ishlatadi, bu oyna bilan o'tkazuvchanlikni sun'iy cheklaydi va dvigatellar
@@ -81,13 +85,20 @@ def main(inp_path, out_path):
         nodes[name] = ns.CreateObject[ns.Node]()
     # Routing: ripd yoqilgan (va ospfd/isisd yoqilmagan) routerlar — ns-3 RIPv2 (haqiqiy
     # protokol: periodik/triggered update, split horizon, timeout). Qolgan L3 qurilmalar —
-    # static + Ipv4GlobalRouting (SPF; OSPF/IS-IS ekvivalenti, konvergensiya ~0s).
+    # static + SPF marshrutlar (install_routes; OSPF/IS-IS ekvivalenti, konvergensiya ~0s).
     def uses_rip(d):
         dm = set((d.get("config") or {}).get("daemons") or [])
         return d["type"] == "router" and "ripd" in dm and not (dm & {"ospfd", "isisd", "ospf6d"})
 
     rip_nodes = [n for n, d in devs.items() if uses_rip(d)]
+    # Ipv4GlobalRouting ISHLATILMAYDI: ns-3.44 da u (1) P2P bilan ulangan IpForward=false
+    # hostda segfault beradi, (2) bir nechta AP umumiy Wi-Fi kanaliga va bitta LAN'ga
+    # bridge qilinganda "L2 forwarding loop" deb to'xtaydi. Marshrutlarni analitik
+    # dvigatel bilan BIR XIL model (Net.routes) hisoblaydi va statik sifatida o'rnatadi.
     stack = ns.InternetStackHelper()
+    _lst_static = ns.Ipv4ListRoutingHelper()
+    _lst_static.Add(ns.Ipv4StaticRoutingHelper(), 0)
+    stack.SetRoutingHelper(_lst_static)
     rip_stack = None
     if rip_nodes:
         rip = ns.RipHelper()
@@ -157,8 +168,12 @@ def main(inp_path, out_path):
     if jitter_warn:
         emit(log="eslatma: jitter ns-3 kanal modelida yo'q — e'tiborsiz qoldirildi")
 
-    # ---- Wi-Fi: har AP — o'z kanali (YansWifi + LogDistance n=3), IdealWifiManager,
+    # ---- Wi-Fi: har diapazon uchun BITTA umumiy YansWifiChannel (LogDistance n=3) —
+    # bir kanaldagi AP'lar va ularning stansiyalari bir-biriga haqiqatan xalaqit beradi
+    # (CSMA/CA, to'qnashuv), boshqa kanaldagilar PHY darajasida ajratiladi. IdealWifiManager,
     # joylashuv = kanvas koordinatasi * meters_per_px. Model lab/wifi.py bilan bir xil.
+    shared_ch = {}
+    placed = set()          # mobility o'rnatilgan (Wi-Fi ishtirokchi) qurilmalar
     if wifi_links:
         from lab.wifi import REF_LOSS, ap_config, meters_per_px
         mpp = meters_per_px(project)
@@ -167,7 +182,6 @@ def main(inp_path, out_path):
             ap_end, sta_end = (l["a"], l["b"]) if devs[l["a"]["dev"]]["type"] == "wifiap" else (l["b"], l["a"])
             by_ap.setdefault(ap_end["dev"], []).append((lid, ap_end, sta_end))
         mob_nodes, mob_pos = ns.NodeContainer(), ns.ListPositionAllocator()
-        placed = set()
 
         def place(n):
             if n in placed:
@@ -178,14 +192,16 @@ def main(inp_path, out_path):
 
         for ap, members in by_ap.items():
             cfg = ap_config(devs[ap])
-            ch = ns.YansWifiChannelHelper()
-            ch.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel")
-            ch.AddPropagationLoss("ns3::LogDistancePropagationLossModel", "Exponent", ns.DoubleValue(3.0),
-                                  "ReferenceLoss", ns.DoubleValue(REF_LOSS[cfg["band"]]))
+            if cfg["band"] not in shared_ch:
+                ch = ns.YansWifiChannelHelper()
+                ch.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel")
+                ch.AddPropagationLoss("ns3::LogDistancePropagationLossModel", "Exponent", ns.DoubleValue(3.0),
+                                      "ReferenceLoss", ns.DoubleValue(REF_LOSS[cfg["band"]]))
+                shared_ch[cfg["band"]] = ch.Create()
             phy = ns.YansWifiPhyHelper()
-            phy.SetChannel(ch.Create())
+            phy.SetChannel(shared_ch[cfg["band"]])
             band = "BAND_5GHZ" if cfg["band"] == 5 else "BAND_2_4GHZ"
-            phy.Set("ChannelSettings", ns.StringValue(f"{{0, {cfg['width']}, {band}, 0}}"))
+            phy.Set("ChannelSettings", ns.StringValue(f"{{{cfg['channel']}, {cfg['width']}, {band}, 0}}"))
             phy.Set("TxPowerStart", ns.DoubleValue(cfg["tx_power"]))
             phy.Set("TxPowerEnd", ns.DoubleValue(cfg["tx_power"]))
             wifi = ns.WifiHelper()
@@ -209,7 +225,7 @@ def main(inp_path, out_path):
                 place(se["dev"])
                 link_objs[lid] = {"devs": [sd, ap_dev], "errs": [], "ends": [se], "loss": 0.0,
                                   "chan": None, "wifi": True}
-            emit(log=f"Wi-Fi {ap}: {cfg['standard']} {cfg['band']} GHz {cfg['width']} MHz, "
+            emit(log=f"Wi-Fi {ap}: {cfg['standard']} {cfg['band']} GHz kanal {cfg['channel']} / {cfg['width']} MHz, "
                      f"{cfg['tx_power']:.0f} dBm, {len(members)} stansiya")
         mob = ns.MobilityHelper()
         mob.SetPositionAllocator(mob_pos)
@@ -253,28 +269,31 @@ def main(inp_path, out_path):
                 return idx
         return None
 
-    for name, d in devs.items():
-        if d["type"] not in L3:
-            continue
-        cfg = d.get("config") or {}
-        sr = srh.GetStaticRouting(nodes[name].GetObject[ns.Ipv4]())
-        routes = list(cfg.get("routes") or [])
-        if cfg.get("gateway") and d["type"] in ("host", "server"):
-            routes.append({"prefix": "0.0.0.0/0", "via": cfg["gateway"]})
-        for r in routes:
-            try:
-                net = ipaddress.ip_network(r["prefix"], strict=False)
-                via = ipaddress.ip_address(r["via"])
-            except (KeyError, ValueError):
+    from lab.drivers.demo_driver import Net
+    state = copy.deepcopy(project)      # joriy holat: kabel up/down, pozitsiyalar (routing uchun)
+
+    def install_routes():
+        """Net.routes (ulangan + statik + gateway + dinamik[hop soni]) -> ns-3 statik marshrutlar.
+        RIP routerlarda faqat foydalanuvchi statik marshrutlari (qolganini ns-3 RIP o'rganadi)."""
+        n = Net(state)
+        for name, d in devs.items():
+            if d["type"] not in L3:
                 continue
-            idx = out_if(name, via)
-            if idx is None:
-                emit(log=f"{name}: {r['via']} ulangan subnetda emas — marshrut o'tkazib yuborildi")
-                continue
-            sr.AddNetworkRouteTo(ns.Ipv4Address(str(net.network_address)), ns.Ipv4Mask(str(net.netmask)),
-                                 ns.Ipv4Address(str(via)), idx)
-    emit(log="routing jadvallari (global SPF)")
-    ns.Ipv4GlobalRoutingHelper.PopulateRoutingTables()
+            sr = srh.GetStaticRouting(nodes[name].GetObject[ns.Ipv4]())
+            for i in range(sr.GetNRoutes() - 1, -1, -1):
+                if sr.GetRoute(i).GetGateway().Get() != 0:      # ulangan (gateway'siz) marshrutlar qoladi
+                    sr.RemoveRoute(i)
+            for net, via, ifn, proto in n.routes(name):
+                if via is None or (name in rip_nodes and proto != "static"):
+                    continue
+                k = (name, int(ifn.rsplit("eth", 1)[1]))
+                if k not in iface:
+                    continue
+                sr.AddNetworkRouteTo(ns.Ipv4Address(str(net.network_address)), ns.Ipv4Mask(str(net.netmask)),
+                                     ns.Ipv4Address(str(via)), iface[k][1])
+
+    emit(log="routing jadvallari (SPF, analitik bilan bir xil model)")
+    install_routes()
     emit(log="ilovalar")
 
     # ilovalar
@@ -354,7 +373,9 @@ def main(inp_path, out_path):
                 if k in iface:
                     ipv4, idx, _ = iface[k]
                     (ipv4.SetUp if up else ipv4.SetDown)(idx)
-            ns.Ipv4GlobalRoutingHelper.RecomputeRoutingTables()
+            if lid in state["links"]:
+                state["links"][lid]["up"] = bool(up)
+            install_routes()
 
     events = sorted(sc.get("events") or [], key=lambda e: float(e.get("t", 0)))
     initially_down = [lid for lid, l in project["links"].items() if l.get("up") is False]
@@ -365,9 +386,32 @@ def main(inp_path, out_path):
     step = float(sc.get("sample", 1.0))
     marks = sorted({round(k * step, 6) for k in range(1, int(math.ceil(duration / step)) + 1)}
                    | {round(float(e["t"]), 6) for e in events if 0 < float(e.get("t", 0)) < duration})
+    # harakat: pozitsiyalar har 0.5s da yangilanadi (oraliq nuqtalarda namuna olinmaydi)
+    from lab.mobility import has_moves, positions_at
+    movers = has_moves(sc)
+    if movers:
+        marks = sorted(set(marks) | {round(k * 0.5, 6) for k in range(1, int(duration * 2))})
+        mpp_m = __import__("lab.wifi", fromlist=["meters_per_px"]).meters_per_px(project)
+
+    from lab.mobility import apply_positions
+    from lab.wifi import link_estimate as _wle
+    wifi_ok_sig = [None]
+
+    def update_positions(t):
+        pos = positions_at(project, sc, t)
+        apply_positions(state, pos)
+        sig = tuple(sorted(lid for lid, l in state["links"].items()
+                           if (l.get("params") or {}).get("medium") == "wifi" and (_wle(state, lid) or {}).get("ok")))
+        if wifi_ok_sig[0] is not None and sig != wifi_ok_sig[0]:
+            install_routes()          # stansiya qamrovdan chiqdi/kirdi — yo'llar qayta hisoblanadi
+        wifi_ok_sig[0] = sig
+        for dev, (x, y) in pos.items():
+            if dev in placed:     # faqat Wi-Fi ishtirokchilarida mobility bor
+                nodes[dev].GetObject[ns.MobilityModel]().SetPosition(ns.Vector(x * mpp_m, y * mpp_m, 1.5))
     prev = {}
     series = {a["id"]: [] for a in apps}
     now = 0.0
+    last_sample = 0.0       # oxirgi namuna vaqti (harakat bo'lsa qadam 0.5s, namuna esa 1s)
     ev_i = 0
     applied = []
 
@@ -391,16 +435,20 @@ def main(inp_path, out_path):
         while ev_i < len(events) and float(events[ev_i].get("t", 0)) <= now + 1e-9:
             e = events[ev_i]; ev_i += 1
             act = e.get("action")
-            set_link(e.get("link"), up=(act == "link_up") if act in ("link_up", "link_down") else None,
-                     params=e.get("params") if act == "link_params" else None)
+            if act != "move":
+                set_link(e.get("link"), up=(act == "link_up") if act in ("link_up", "link_down") else None,
+                         params=e.get("params") if act == "link_params" else None)
             applied.append({"t": now, **e})
-            emit(log=f"t={now:.1f}s: {act} {e.get('link')}")
+            emit(log=f"t={now:.1f}s: {act} {e.get('link') or e.get('device')}")
+        if movers:
+            update_positions(now)
         ns.Simulator.Stop(ns.Seconds(mark - now))
         ns.Simulator.Run()
-        dt = mark - now
         now = mark
         if abs(mark / step - round(mark / step)) > 1e-6:
-            continue   # hodisa nuqtasi — namuna olinmaydi
+            continue   # oraliq nuqta (hodisa/harakat) — namuna olinmaydi
+        dt = now - last_sample
+        last_sample = now
         mon.CheckForLostPackets()
         for app in apps:
             fwd, rev = flows_for(app)
@@ -421,6 +469,11 @@ def main(inp_path, out_path):
             series[app["id"]].append(pt)
         emit(progress=round(now / duration, 3))
 
+    if os.environ.get("NETLAB_NS3_DEBUG"):
+        for fid, st_ in mon.GetFlowStats():
+            t5 = clf.FindFlow(fid)
+            emit(log=f"flow {fid}: {t5.sourceAddress}:{t5.sourcePort} -> {t5.destinationAddress}:{t5.destinationPort} "
+                     f"proto {t5.protocol} tx {st_.txPackets} rx {st_.rxPackets} rxB {st_.rxBytes}")
     # yakuniy xulosa
     flows = {}
     for app in apps:
@@ -440,7 +493,7 @@ def main(inp_path, out_path):
     out = {"engine": "ns3", "engine_label": "ns-3 (diskret-hodisali simulyatsiya)",
            "duration": duration, "flows": flows, "events": applied,
            "wall_s": round(time.time() - t_wall, 2),
-           "notes": ["dinamik routing: ripd → ns-3 RIPv2 (haqiqiy konvergensiya); ospfd/isisd va boshqalar → Ipv4GlobalRouting (SPF, darhol)",
+           "notes": ["dinamik routing: ripd → ns-3 RIPv2 (haqiqiy konvergensiya); qolganlari — analitik bilan bir xil SPF modeli statik marshrut sifatida (hodisada darhol qayta hisoblanadi)",
                      "TCP: Cubic, MSS 1448, bufer 4/6 MB (Linux'ga yaqin)",
                      "Wi-Fi: YansWifi + LogDistance(n=3), IdealWifiManager; joylashuv = kanvas * meters_per_px",
                      "jitter parametri modellashtirilmaydi", "P4/SDN mantiqi: switch L2 bridge, SDN router — L3 router sifatida"]}
