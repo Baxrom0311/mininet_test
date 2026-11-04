@@ -1151,6 +1151,15 @@ exit 0
                            f"-c 'timers basic {tm['update']} {tm['timeout']} {tm['garbage']}' 2>&1")
             if out.strip():
                 self.bus.log("warn", f"rip timers: {out.strip()[-300:]}", name)
+        if "bgpd" in daemons and cfg.get("bgp"):
+            from lab.bgp import frr_config
+            path = os.path.join(etc, "bgp-netlab.conf")
+            with open(path, "w") as f:
+                f.write(frr_config(cfg["bgp"]))
+            time.sleep(0.3)
+            out = node.cmd(f"vtysh -N {name} -f {path} 2>&1")
+            if "error" in out.lower() or "unknown command" in out.lower():
+                self.bus.log("warn", f"bgp config: {out.strip()[-400:]}", name)
         self.bus.log("ok", f"FRR ishga tushdi: {', '.join(daemons)}", name)
 
     def _frr_stop(self, name):
@@ -1355,6 +1364,8 @@ exit 0
                         if dm in extra:
                             secs.append(self._text(f"FRR: {extra[dm]}",
                                                    node.cmd(f"vtysh -N {name} -c '{extra[dm]}' 2>&1")))
+                    if "bgpd" in daemons:
+                        secs.append(self._text("FRR: show ip bgp", node.cmd(f"vtysh -N {name} -c 'show ip bgp' 2>&1")))
                 qd = []
                 for port in sorted(link_ports(self.project, name)):
                     qd.append(_run(["mnexec", "-a", str(node.pid), "tc", "-s", "qdisc", "show",
