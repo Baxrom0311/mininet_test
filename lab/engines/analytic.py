@@ -45,7 +45,8 @@ class _StaleNet(Net):
 
 def run(project, sc, progress=lambda f: None, log=lambda m: None):
     t_wall = time.time()
-    proj = copy.deepcopy(project)
+    from lab.services import resolve_dhcp
+    proj = copy.deepcopy(resolve_dhcp(project)[0])    # DHCP mijozlar — lizing manzillari
     duration = float(sc.get("duration", 30))
     apps = []
     for i, a in enumerate(sc.get("apps") or []):
@@ -201,7 +202,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 sip = n.ip_of(a["src"])
                 if dip and sip:
                     ok, why, _h, path, _d = n.forward(a["src"], ipaddress.ip_address(dip))
-                    ok2, _w2, _h2, back, _d2 = n.forward(a["dst"], sip.ip) if ok else (False, "", [], [], 0)
+                    ok2, _w2, _h2, back, _d2 = (n.reply(a["src"], sip.ip, a["dst"], ipaddress.ip_address(dip), _h)
+                                                if ok else (False, "", [], [], 0))
                     st.update(ok=ok and ok2, why=why, path=path, back=back)
                 st["active"] = True
             flows.append(st)

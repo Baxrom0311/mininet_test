@@ -277,6 +277,8 @@ def validate_project(p):
     for pname in (p.get("p4_programs") or {}):
         if not NAME_RE.match(pname) and not re.match(r"^[a-z][a-z0-9_]{0,23}$", pname):
             errors.append(f"P4 dastur '{pname}': noto'g'ri nom")
+    from lab.services import validate_services   # (aylanma import bo'lmasin)
+    errors += validate_services(p)
     return errors
 
 

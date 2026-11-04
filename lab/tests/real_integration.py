@@ -292,7 +292,54 @@ def t_vlan(drv, caps):
     check(wait_ping(drv, "pc1", "10.0.10.15", 10) is not None, "jonli: s2 port4 -> VLAN10, pc5 endi yetadi")
 
 
-TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "vlan": t_vlan, "sdn": t_sdn, "p4": t_p4}
+def t_natdhcp(drv, caps):
+    """DHCP (dnsmasq rezervatsiya = model manzillari) + NAT masquerade + emulyatsiya."""
+    import shutil
+    from lab.engines import emulation
+    from lab.services import resolve_dhcp
+    proj = load("nat_dhcp_lab")
+    _rp, leases = resolve_dhcp(proj)
+    drv.start(proj)
+    for ls in leases:
+        got = drv.net.get(ls["client"]).cmd(f"ip -4 -o addr show dev {ls['iface']}")
+        check(f"inet {ls['ip']}/" in got, f"DHCP: {ls['client']} = {ls['ip']} (model bilan bir xil)")
+    rt = drv.net.get("pc1").cmd("ip route show default")
+    check("10.0.1.1" in rt, f"DHCP: default gateway {rt.strip()}")
+    ins = drv.inspect("r1")
+    tbl = next((s_ for s_ in ins["sections"] if s_["title"].startswith("DHCP")), None)
+    check(tbl and len(tbl.get("rows") or []) == len(leases), f"inspect r1: DHCP lizinglari {tbl and tbl.get('rows')}")
+    check(wait_ping(drv, "pc1", "198.51.100.10", 10) is not None, "NAT: pc1 -> srv1 (isp ichki tarmoqni bilmaydi)")
+    seen = drv.net.get("srv1").cmd("timeout 3 tcpdump -nni srv1-eth1 -c 2 icmp 2>/dev/null & "
+                                   "sleep 0.5; true")
+    drv.net.get("pc1").cmd("ping -c 2 -W 1 198.51.100.10 >/dev/null")
+    time.sleep(2.6)
+    out = drv.net.get("srv1").cmd("wait; true")
+    print("    srv1 tcpdump:", (seen + out).strip().splitlines()[-1:] )
+    nat = drv.net.get("r1").cmd("iptables -t nat -L POSTROUTING -n -v")
+    check("MASQUERADE" in nat, "iptables MASQUERADE o'rnatilgan")
+    check(not ping(drv, "srv1", leases[0]["ip"], count=2, wait=1)[0], "tashqaridan (srv1 -> pc1) o'tmaydi")
+    # NAT'siz: javob qaytmaydi
+    p2 = copy.deepcopy(drv.project)
+    p2["devices"]["r1"]["config"].pop("nat")
+    drv.apply_device_config(p2, "r1")
+    check(not ping(drv, "pc1", "198.51.100.10", count=2, wait=1)[0], "NAT o'chirilsa javob qaytmaydi")
+    p2["devices"]["r1"]["config"]["nat"] = {"outside": "r1-eth2"}
+    drv.apply_device_config(p2, "r1")
+    check(wait_ping(drv, "pc1", "198.51.100.10", 10) is not None, "NAT qayta yoqildi -> ishlaydi")
+    if shutil.which("iperf3"):
+        sc = copy.deepcopy(proj["scenarios"]["internet"])
+        sc["duration"] = 10
+        for a in sc["apps"]:
+            a["stop"] = min(a["stop"], 9)
+        res = emulation.run(drv, sc)
+        f = res["flows"]
+        web = [x["thr_bps"] for x in f["web"]["series"] if 3 <= x["t"] <= 8]
+        print("    web Mbit/s", [round(x / 1e6, 1) for x in web], "video", f["video"]["summary"]["avg_thr_bps"])
+        check(web and sum(web) / len(web) > 8e6, "emulyatsiya: TCP pc1 -> srv1 NAT orqali (~15 Mbit/s)")
+        check((f["kirish"]["summary"].get("loss_pct") or 0) > 90, "emulyatsiya: srv1 -> pc1 ping o'tmaydi")
+
+
+TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "vlan": t_vlan, "natdhcp": t_natdhcp, "sdn": t_sdn, "p4": t_p4}
 
 
 def main(argv):

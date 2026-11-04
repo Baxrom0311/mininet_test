@@ -122,6 +122,8 @@ def main(inp_path, out_path):
     with open(inp_path) as f:
         inp = json.load(f)
     project, sc = inp["project"], inp["scenario"]
+    from lab.services import resolve_dhcp
+    project, _leases = resolve_dhcp(project)   # DHCP: ns-3 da lizing manzillari statik o'rnatiladi
     duration = float(sc.get("duration", 30))
     t_wall = time.time()
     emit(log="ns-3 yuklanmoqda...")
@@ -139,6 +141,11 @@ def main(inp_path, out_path):
     ns.Config.SetDefault("ns3::TcpL4Protocol::SocketType", ns.StringValue("ns3::TcpCubic"))
 
     devs = project["devices"]
+    if _leases:
+        emit(log=f"DHCP: {len(_leases)} lizing (statik ekvivalent): "
+                 + ", ".join(f"{x['client']}={x['ip']}" for x in _leases[:6]))
+    if any((d.get("config") or {}).get("nat") for d in devs.values()):
+        emit(log="eslatma: NAT ns-3 da yo'q — manba manzil almashtirilmaydi (ichki subnet marshruti bo'lmasa javob yetmaydi)")
     nodes = {}
     for name in sorted(devs, key=lambda n: devs[n]["id"]):
         nodes[name] = ns.CreateObject[ns.Node]()

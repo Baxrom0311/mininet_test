@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "name": "nat_dhcp_lab",
+  "notes": "Uy/ofis tarmog'i: r1 LAN'ga DHCP (10.0.1.100-150) beradi va NAT (masquerade) bilan provayderga (isp) chiqaradi. isp ichki 10.0.1.0/24 ni bilmaydi — javoblar faqat NAT tufayli qaytadi. Tashqaridan (srv1 -> pc1) ulanish o'tmaydi.",
+  "p4_programs": {},
+  "controllers": {},
+  "devices": {
+    "pc1": {
+      "id": 1,
+      "type": "host",
+      "x": 100,
+      "y": 140,
+      "config": {
+        "interfaces": {
+          "pc1-eth1": {
+            "ip": "dhcp"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "pc2": {
+      "id": 2,
+      "type": "host",
+      "x": 100,
+      "y": 320,
+      "config": {
+        "interfaces": {
+          "pc2-eth1": {
+            "ip": "dhcp"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "s1": {
+      "id": 3,
+      "type": "switch",
+      "x": 260,
+      "y": 230,
+      "config": {
+        "mode": "standalone",
+        "stp": false
+      }
+    },
+    "r1": {
+      "id": 4,
+      "type": "router",
+      "x": 420,
+      "y": 230,
+      "config": {
+        "daemons": [],
+        "interfaces": {
+          "r1-eth1": {
+            "ip": "10.0.1.1/24"
+          },
+          "r1-eth2": {
+            "ip": "203.0.113.2/30"
+          }
+        },
+        "routes": [
+          {
+            "prefix": "0.0.0.0/0",
+            "via": "203.0.113.1"
+          }
+        ],
+        "nat": {
+          "outside": "r1-eth2"
+        },
+        "dhcp_server": {
+          "pools": [
+            {
+              "iface": "r1-eth1",
+              "start": "10.0.1.100",
+              "end": "10.0.1.150",
+              "gateway": "10.0.1.1",
+              "lease": 3600
+            }
+          ]
+        },
+        "startup": "hostname r1\n!"
+      }
+    },
+    "isp": {
+      "id": 5,
+      "type": "router",
+      "x": 600,
+      "y": 230,
+      "config": {
+        "daemons": [],
+        "interfaces": {
+          "isp-eth1": {
+            "ip": "203.0.113.1/30"
+          },
+          "isp-eth2": {
+            "ip": "198.51.100.1/24"
+          }
+        },
+        "routes": [],
+        "startup": "hostname isp\n!"
+      }
+    },
+    "srv1": {
+      "id": 6,
+      "type": "server",
+      "x": 780,
+      "y": 230,
+      "config": {
+        "interfaces": {
+          "srv1-eth1": {
+            "ip": "198.51.100.10/24"
+          }
+        },
+        "gateway": "198.51.100.1",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "pc1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "pc2",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "s1",
+        "port": 3
+      },
+      "b": {
+        "dev": "r1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l4": {
+      "a": {
+        "dev": "r1",
+        "port": 2
+      },
+      "b": {
+        "dev": "isp",
+        "port": 1
+      },
+      "params": {
+        "bw": 20,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l5": {
+      "a": {
+        "dev": "isp",
+        "port": 2
+      },
+      "b": {
+        "dev": "srv1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "scenarios": {
+    "internet": {
+      "duration": 20,
+      "apps": [
+        {
+          "id": "web",
+          "type": "tcp",
+          "src": "pc1",
+          "dst": "srv1",
+          "start": 1,
+          "stop": 19,
+          "label": "pc1 → srv1 (NAT orqali)"
+        },
+        {
+          "id": "video",
+          "type": "udp",
+          "src": "pc2",
+          "dst": "srv1",
+          "rate": "5Mbps",
+          "size": 1000,
+          "start": 1,
+          "stop": 19,
+          "label": "pc2 → srv1 UDP"
+        },
+        {
+          "id": "ping",
+          "type": "ping",
+          "src": "pc1",
+          "dst": "srv1",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 19,
+          "label": "ping pc1→srv1"
+        },
+        {
+          "id": "kirish",
+          "type": "ping",
+          "src": "srv1",
+          "dst": "pc1",
+          "interval": 0.5,
+          "start": 1,
+          "stop": 19,
+          "label": "srv1→pc1 (tashqaridan — o'tmaydi)"
+        }
+      ],
+      "events": [],
+      "notes": "pc1/pc2 manzillari DHCP'dan; javoblar r1 NAT orqali qaytadi; tashqi ulanish (srv1→pc1) isp'da marshrut yo'qligi sababli o'tmaydi"
+    }
+  }
+}

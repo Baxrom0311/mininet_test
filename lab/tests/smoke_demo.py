@@ -238,6 +238,32 @@ with TestClient(create_app("demo")) as c:
                   f"{eng}: inter-VLAN 12 Mbit/s trunk kabelidan (l4) ikki yo'nalishda o'tadi")
         c.delete(f"/api/runs/vlan_lab/{rid}")
 
+    # ---- DHCP + NAT ----
+    npj = c.get("/api/projects/nat_dhcp_lab?example=true").json()
+    check(c.post("/api/validate", json=npj).json()["errors"] == [], "nat_dhcp_lab: validatsiya")
+    bad_n = json.loads(json.dumps(npj))
+    bad_n["devices"]["r1"]["config"]["dhcp_server"]["pools"][0]["end"] = "10.9.9.9"
+    check(any("DHCP" in e for e in c.post("/api/validate", json=bad_n).json()["errors"]), "dhcp: subnetdan tashqari pool rad etiladi")
+    c.post("/api/net/start", json={"project": npj})
+    check("0% packet loss" in ping(c, "pc1", "198.51.100.10"), "nat: pc1 (DHCP 10.0.1.100) -> srv1 NAT orqali")
+    check("100% packet loss" in ping(c, "srv1", "10.0.1.100", 1), "nat: tashqaridan srv1 -> pc1 o'tmaydi")
+    c.post("/api/net/stop")
+    no_nat = json.loads(json.dumps(npj))
+    no_nat["devices"]["r1"]["config"].pop("nat")
+    c.post("/api/net/start", json={"project": no_nat})
+    check("100% packet loss" in ping(c, "pc1", "198.51.100.10", 1), "nat: NAT'siz javob qaytmaydi (isp ichki tarmoqni bilmaydi)")
+    c.post("/api/net/stop")
+    rid = c.post("/api/runs", json={"project": npj, "scenario": "internet", "engine": "analytic"}).json()["run_id"]
+    t0 = time.time()
+    while time.time() - t0 < 60 and any(r.get("status") == "running" for r in c.get("/api/runs/nat_dhcp_lab").json()["runs"]):
+        time.sleep(0.3)
+    r = c.get(f"/api/runs/nat_dhcp_lab/{rid}").json()
+    fs = r["flows"]
+    check(fs["web"]["summary"]["avg_thr_bps"] > 12e6 and fs["video"]["summary"]["avg_thr_bps"] > 4.5e6
+          and fs["kirish"]["summary"]["loss_pct"] == 100,
+          "analytic: NAT orqali TCP ~15 + UDP 5 Mbit/s (20 Mbit/s WAN), tashqi ping 100% yo'qoladi")
+    c.delete(f"/api/runs/nat_dhcp_lab/{rid}")
+
     if "ns3" not in want:
         print("  --   ns-3 o'rnatilmagan (pip install ns3) — ns-3 testi o'tkazib yuborildi")
 

@@ -518,6 +518,7 @@ class MininetDriver(BaseDriver):
                 self.net.build()
                 for name, d in self.project["devices"].items():
                     self._start_device(name, d)
+                self._dhcp_sync()
                 self.started_at = time.time()
                 self._threads_stop.clear()
                 self._rebuild_intf_map()
@@ -542,6 +543,7 @@ class MininetDriver(BaseDriver):
 
     def _teardown(self):
         self._threads_stop.set()
+        self._dhcp_kill()
         for p in list(self._cap_procs.values()):
             self._kill(p)
         self._cap_procs.clear()
@@ -651,9 +653,10 @@ class MininetDriver(BaseDriver):
                     cmds.append(f"ip link show {ifn} >/dev/null 2>&1 || "
                                 f"ip link add link {base} name {ifn} type vlan id {vl}")
                 ip = (ics.get(ifn) or {}).get("ip", "")
-                cmds.append(f"ip addr flush dev {ifn}")
-                if ip and ip.lower() != "dhcp":
-                    cmds.append(f"ip addr add {ip} dev {ifn}")
+                if ip.lower() != "dhcp":        # DHCP manzili dhclient'niki — tegmaymiz
+                    cmds.append(f"ip addr flush dev {ifn}")
+                    if ip:
+                        cmds.append(f"ip addr add {ip} dev {ifn}")
                 cmds.append(f"ip link set {ifn} up")
                 if self._datapath == "user":
                     # userspace (netdev) OVS veth'dagi "partial" checksum'ni to'ldirmaydi —
@@ -670,10 +673,122 @@ class MininetDriver(BaseDriver):
         if gw and d["type"] in ("host", "server"):
             cmds.append(f"ip route replace default via {gw}")
         for r in cfg.get("routes") or []:
-            if d["type"] in ("host", "server"):
-                cmds.append(f"ip route replace {r['prefix']} via {r['via']}")
+            # router'da ham kernel marshruti (zebra uni "K" sifatida ko'radi)
+            cmds.append(f"ip route replace {r['prefix']} via {r['via']}")
         if cmds:
             node.cmd(" ; ".join(c + " 2>&1" for c in cmds))
+
+    # ─────────────────────────── DHCP ───────────────────────────
+    _DHCLIENT_SCRIPT = """#!/bin/sh
+# NetLab: minimal dhclient-script — faqat namespace ichida IP/marshrut (resolv.conf'ga tegmaydi)
+case "$reason" in
+  PREINIT) ip link set "$interface" up ;;
+  BOUND|RENEW|REBIND|REBOOT)
+    [ -n "$old_ip_address" ] && [ "$old_ip_address" != "$new_ip_address" ] && ip addr flush dev "$interface"
+    ip addr replace "$new_ip_address/$new_subnet_mask" dev "$interface"
+    [ -n "$new_routers" ] && ip route replace default via "${new_routers%% *}" dev "$interface" ;;
+  EXPIRE|FAIL|RELEASE|STOP) ip addr flush dev "$interface" ;;
+esac
+exit 0
+"""
+
+    def _dhcp_kill(self):
+        d = os.path.join(RUN_DIR, "dhcp")
+        if not os.path.isdir(d):
+            return
+        for f in os.listdir(d):
+            if f.endswith(".pid"):
+                try:
+                    with open(os.path.join(d, f)) as fh:
+                        os.kill(int(fh.read().strip()), signal.SIGTERM)
+                except (OSError, ValueError):
+                    pass
+                try:
+                    os.remove(os.path.join(d, f))
+                except OSError:
+                    pass
+
+    def _dhcp_sync(self):
+        """DHCP serverlar (dnsmasq) va mijozlar (dhclient). Manzillar lab.services.resolve_dhcp
+        bilan bir xil bo'lishi uchun dnsmasq'ga MAC bo'yicha rezervatsiya (dhcp-host) beriladi.
+        dnsmasq/dhclient bo'lmasa — o'sha manzillar statik o'rnatiladi (ogohlantirish bilan)."""
+        from lab.services import dhcp_pools, resolve_dhcp
+        _rp, leases = resolve_dhcp(self.project)
+        pools = dhcp_pools(self.project)
+        self._dhcp_kill()
+        if not pools and not leases:
+            return
+        d = os.path.join(RUN_DIR, "dhcp")
+        os.makedirs(d, exist_ok=True)
+        real = bool(_which("dnsmasq")) and bool(_which("dhclient"))
+        if not real:
+            self.bus.log("warn", "dnsmasq/dhclient topilmadi — DHCP manzillari statik o'rnatiladi "
+                                 "(apt install dnsmasq-base isc-dhcp-client)")
+        by_srv = {}
+        for i, (srv, ifn, ipi, pool) in enumerate(pools):
+            by_srv.setdefault(srv, []).append((i, ifn, ipi, pool))
+        if real:
+            for srv, items in by_srv.items():
+                if srv not in self.net:
+                    continue
+                args = ["dnsmasq", "--conf-file=/dev/null", "--port=0", "--bind-interfaces", "--dhcp-authoritative",
+                        "--user=root", "--log-dhcp", f"--log-facility={d}/{srv}.log",
+                        f"--pid-file={d}/dnsmasq-{srv}.pid", f"--dhcp-leasefile={d}/{srv}.leases"]
+                for i, ifn, ipi, pool in items:
+                    args += [f"--interface={ifn}",
+                             f"--dhcp-range=set:p{i},{pool['start']},{pool['end']},{ipi.netmask},{int(pool.get('lease', 3600))}",
+                             f"--dhcp-option=tag:p{i},option:router,{pool.get('gateway') or ipi.ip}"]
+                for ls in leases:
+                    if ls["server"] == srv:
+                        args.append(f"--dhcp-host={ls['mac']},{ls['ip']}")
+                out = self.net.get(srv).cmd(" ".join(args) + " 2>&1")
+                if out.strip():
+                    self.bus.log("warn", f"dnsmasq: {out.strip()[-300:]}", srv)
+            script = os.path.join(d, "dhclient-netlab.sh")
+            with open(script, "w") as f:
+                f.write(self._DHCLIENT_SCRIPT)
+            os.chmod(script, 0o755)
+            conf = os.path.join(d, "dhclient.conf")
+            with open(conf, "w") as f:
+                f.write("timeout 15;\nretry 5;\nrequest subnet-mask, routers;\n")
+        for ls in leases:
+            node = self.net.get(ls["client"]) if ls["client"] in self.net else None
+            if not node:
+                continue
+            ifn = ls["iface"]
+            if real:
+                node.cmd(f"dhclient -4 -1 -cf {conf} -sf {script} -pf {d}/dhc-{ifn}.pid "
+                         f"-lf {d}/dhc-{ifn}.leases {ifn} >/dev/null 2>&1 &")
+            else:
+                node.cmd(f"ip addr replace {ls['ip']}/{ls['prefix']} dev {ifn}; "
+                         f"ip route replace default via {ls['gateway']} dev {ifn}")
+        if real and leases:
+            pending = {(ls["client"], ls["iface"]): ls["ip"] for ls in leases if ls["client"] in self.net}
+            t0 = time.time()
+            while pending and time.time() - t0 < 20:
+                for (c, ifn), ip in list(pending.items()):
+                    if f"inet {ip}/" in self.net.get(c).cmd(f"ip -4 -o addr show dev {ifn}"):
+                        pending.pop((c, ifn))
+                if pending:
+                    time.sleep(0.3)
+            got = len(leases) - len(pending)
+            self.bus.log("ok" if not pending else "warn",
+                         f"DHCP: {got}/{len(leases)} mijoz manzil oldi ({time.time() - t0:.1f} s)"
+                         + (f"; olmadi: {', '.join(f'{c}/{i}' for c, i in pending)}" if pending else ""))
+
+    def dhcp_leases(self, name):
+        """Server lizinglari (dnsmasq lease fayli): [[MAC, IP, mijoz, muddat]]."""
+        path = os.path.join(RUN_DIR, "dhcp", f"{name}.leases")
+        rows = []
+        try:
+            with open(path) as f:
+                for line in f:
+                    v = line.split()
+                    if len(v) >= 4:
+                        rows.append([v[1], v[2], v[3], time.strftime("%H:%M:%S", time.localtime(int(v[0])))])
+        except OSError:
+            pass
+        return rows
 
     @staticmethod
     def _nat_cmds(cfg):
@@ -786,6 +901,11 @@ class MininetDriver(BaseDriver):
                     else:
                         node.cmd(f"ovs-vsctl del-controller {name}")
                         node.cmd(f"ovs-ofctl -O OpenFlow13 del-flows {name}")
+            from lab.services import has_dhcp_clients
+            oc_, nc_ = (old or {}).get("config") or {}, d.get("config") or {}
+            if oc_.get("dhcp_server") != nc_.get("dhcp_server") or (oc_.get("interfaces") != nc_.get("interfaces")
+                                                                    and has_dhcp_clients(self.project)):
+                self._dhcp_sync()
             self._write_ctrl_configs()
             self.bus.log("ok", f"{name}: sozlama qo'llandi", name)
             return {"ok": True}
@@ -1179,6 +1299,15 @@ class MininetDriver(BaseDriver):
                 rows = [[n.get("dst"), n.get("lladdr", "—"), n.get("dev"), ",".join(n.get("state", []))]
                         for n in self._ns_json(node, "ip -j neigh")]
                 secs.append(self._table("ARP jadvali", ["IP", "MAC", "Interfeys", "Holat"], rows))
+                cfg_ = d.get("config") or {}
+                if cfg_.get("dhcp_server"):
+                    secs.append(self._table("DHCP lizinglari (dnsmasq)", ["MAC", "IP", "Mijoz", "Tugaydi"],
+                                            self.dhcp_leases(name)))
+                if cfg_.get("nat"):
+                    secs.append(self._text("NAT (iptables -t nat)", node.cmd("iptables -t nat -L POSTROUTING -n -v 2>&1")))
+                    secs.append(self._text("NAT ulanishlari (conntrack)",
+                                           node.cmd("cat /proc/net/nf_conntrack 2>/dev/null | head -30 || "
+                                                    "conntrack -L 2>&1 | head -30")))
                 if t == "router":
                     secs.append(self._text("FRR: show ip route", node.cmd(f"vtysh -N {name} -c 'show ip route' 2>&1")))
                     daemons = (d.get("config") or {}).get("daemons", [])

@@ -41,7 +41,11 @@ def _ms(v):
 class Net:
     """Loyiha modelidan L3 forwarding hisoblovchi yordamchi."""
 
-    def __init__(self, project):
+    def __init__(self, project, resolve=True):
+        if resolve:
+            from lab.services import has_dhcp_clients, resolve_dhcp
+            if has_dhcp_clients(project):
+                project = resolve_dhcp(project)[0]     # "dhcp" -> deterministik lizing manzillari
         self.p = project
         self.devs = project["devices"]
         self._if_cache = {}
@@ -232,6 +236,38 @@ class Net:
             hops.append((nd, str(nip)))
             cur = nd
         return False, "TTL tugadi (marshrut halqasi?)", hops, links, delay
+
+    def nat_chain(self, src_dev, dst, hops):
+        """Yo'ldagi NAT routerlar: [(router, outside_ip)] — paket ichki interfeysdan kirib
+        outside interfeysdan chiqqan joylar (manba shu IP'ga almashtiriladi)."""
+        chain = []
+        for nd, ip_in in hops[:-1]:          # oxirgi hop — manzil qurilmaning o'zi
+            out = ((self.devs[nd].get("config") or {}).get("nat") or {}).get("outside")
+            if not out:
+                continue
+            r = self.lookup(nd, dst)
+            ingress = next((ifn for _p, ifn, ipi in self.ifaces(nd) if ipi and str(ipi.ip) == ip_in), None)
+            if r and r[2] == out and ingress != out:
+                oip = next((ipi.ip for _p, ifn, ipi in self.ifaces(nd) if ifn == out and ipi), None)
+                if oip:
+                    chain.append((nd, oip))
+        return chain
+
+    def reply(self, src_dev, src_ip, dst_dev, dst, hops):
+        """dst_dev'dan src'ga javob yo'li (NAT hisobga olingan): forward() bilan bir xil kortej.
+        NAT bo'lsa javob avval oxirgi NAT routerning outside IP'siga boradi, u ichkariga uzatadi."""
+        chain = self.nat_chain(src_dev, dst, hops)
+        if not chain:
+            return self.forward(dst_dev, src_ip)
+        targets = [(r, ip) for r, ip in reversed(chain)]
+        cur, all_h, all_l, tot = dst_dev, [], [], 0.0
+        for i, (r, ip) in enumerate(targets + [(src_dev, src_ip)]):
+            ok, why, h, l, dl = self.forward(cur, ip)
+            all_h += h; all_l += l; tot += dl
+            if not ok:
+                return False, why, all_h, all_l, tot
+            cur = r
+        return True, "ok", all_h, all_l, tot
 
     def ip_of(self, dev):
         for _p, _i, ipi in self.ifaces(dev):
@@ -429,6 +465,17 @@ class DemoDriver(BaseDriver):
                 secs.append({"title": "Interfeyslar", "kind": "table",
                              "columns": ["Interfeys", "Holat", "MAC", "IPv4", "MTU", "RX pkt", "TX pkt", "Drop"],
                              "rows": rows})
+                cfg = d.get("config") or {}
+                if cfg.get("dhcp_server"):
+                    from lab.services import resolve_dhcp
+                    rows = [[x["mac"], x["ip"], x["client"], x["server_iface"]]
+                            for x in resolve_dhcp(self.project)[1] if x["server"] == name]
+                    secs.append({"title": "DHCP lizinglari", "kind": "table",
+                                 "columns": ["MAC", "IP", "Mijoz", "Interfeys"], "rows": rows})
+                if cfg.get("nat"):
+                    secs.append({"title": "NAT", "kind": "text",
+                                 "text": f"MASQUERADE: ichki interfeyslar -> {cfg['nat'].get('outside')} "
+                                         f"({next((str(i.ip) for _p, f, i in n.ifaces(name) if f == cfg['nat'].get('outside') and i), '?')})"})
                 rt = n.routes(name)
                 secs.append({"title": "Routing jadvali", "kind": "table",
                              "columns": ["Manzil", "Gateway", "Interfeys", "Protokol", "Metric"],
@@ -607,7 +654,7 @@ class DemoDriver(BaseDriver):
             ok, why, hops, links, d1 = n.forward(name, dst)
             if ok:
                 dst_dev, _ = n.owner_of(dst)
-                ok2, why2, hops2, back, d2 = n.forward(dst_dev, src_ip.ip if src_ip else dst)
+                ok2, why2, hops2, back, d2 = n.reply(name, src_ip.ip if src_ip else dst, dst_dev, dst, hops)
                 t = self._emit_path(links, "ICMP", f"IP {src_ip.ip if src_ip else '?'} > {dst}: ICMP echo request, seq {seq}")
                 if ok2:
                     self._emit_path(back, "ICMP", f"IP {dst} > {src_ip.ip}: ICMP echo reply, seq {seq}", t or 0)

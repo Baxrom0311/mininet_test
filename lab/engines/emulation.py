@@ -71,8 +71,11 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
     stop_ev = threading.Event()
     T0 = time.time() + 2.0    # serverlar ishga tushishi uchun 2s
 
+    from lab.services import resolve_dhcp
+    rproj = resolve_dhcp(project)[0]     # DHCP lizinglari (dnsmasq rezervatsiyalari bilan bir xil)
+
     def ip_of(dev):
-        for ifn, ic in sorted(((project["devices"][dev].get("config") or {}).get("interfaces") or {}).items()):
+        for ifn, ic in sorted(((rproj["devices"][dev].get("config") or {}).get("interfaces") or {}).items()):
             if ic.get("ip"):
                 return ic["ip"].split("/")[0]
         return None

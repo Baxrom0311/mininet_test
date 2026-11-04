@@ -44,7 +44,7 @@ Majburlash: `NETLAB_OVS_DATAPATH=kernel|user`.
 Haqiqiy tarmoq integratsiya testi (root kerak; FRR/os-ken/BMv2 bo'lmasa tegishli qism o'tkazib yuboriladi):
 
 ```bash
-sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv sdn p4
+sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv vlan natdhcp sdn p4
 ```
 
 ### Istalgan kompyuter (demo rejim, Mininet'siz)
@@ -276,6 +276,64 @@ NetLab gibrid qilib qurilgan: bitta loyiha modeli, uchta dvigatel. Mininet —
 Packet Tracer tomoni (haqiqiy qurilmalar, CLI, hardware). ns-3 — OPNET tomoni
 (DES, masshtab, statistika, solishtirish).
 
+## VLAN, NAT va DHCP
+
+### VLAN (802.1Q)
+
+Switch portlari — `config.ports` (kalit — port raqami):
+
+```json
+"ports": {"1": {"mode": "access", "vlan": 10},
+          "3": {"mode": "trunk", "allowed": [10, 20], "native": 1}}
+```
+
+- **access** — tegsiz kadrlar shu VLAN'da; tegli kadr tashlanadi.
+- **trunk** — `allowed` (bo'sh = hammasi) tegli o'tadi; `native` berilsa tegsiz kadrlar shu VLAN'ga.
+- sozlanmagan port — OVS standarti (barcha VLAN'lar tegli, tegsiz = ichki VLAN 0).
+- Router/host subinterfeysi (router-on-a-stick): `"r1-eth1.10": {"ip": "10.0.10.1/24"}`
+  (nom ≤ 15 belgi — Linux cheklovi).
+
+| Dvigatel | Qanday |
+|---|---|
+| Mininet | OVS `tag` / `trunks` / `vlan_mode` (jonli o'zgartirish ham), subinterfeys — `ip link add … type vlan` (kernelda `8021q` kerak; bo'lmasa aniq xato) |
+| Analitik / demo | L2 BFS 802.1Q qoidalari bilan (izolyatsiya, trunk, inter-VLAN routing) |
+| ns-3 | access VLAN — har VLAN uchun alohida bridge; trunk/subinterfeys — tushunarli xato |
+
+Namuna: `vlan_lab` — ikki switch orasida trunk, r1 router-on-a-stick, pc5 boshqa VLAN'da
+(izolyatsiya). Inter-VLAN trafik trunk kabelidan ikki marta o'tadi (`links.l4` ab va ba).
+
+### DHCP
+
+Server (router/server) — `config.dhcp_server`:
+
+```json
+"dhcp_server": {"pools": [{"iface": "r1-eth1", "start": "10.0.1.100", "end": "10.0.1.150",
+                           "gateway": "10.0.1.1", "lease": 3600}]}
+```
+
+Mijoz — interfeys IP'si `"dhcp"`. Manzillar deterministik taqsimlanadi (qurilma id
+tartibida, bo'sh birinchi manzil; `lab/services.py: resolve_dhcp`) — analitik va ns-3
+shu manzillarni statik ishlatadi, Mininet esa haqiqiy **dnsmasq** (MAC bo'yicha
+rezervatsiya — natija model bilan bir xil) va **dhclient** (namespace ichida, o'z
+skripti bilan — `/etc/resolv.conf` ga tegmaydi). Mijoz server bilan bitta L2 domenda
+(VLAN hisobga olinadi) bo'lishi kerak; relay yo'q. Inspect → "DHCP lizinglari".
+
+### NAT (masquerade)
+
+Router `config.nat = {"outside": "r1-eth2"}` — boshqa interfeyslardan outside orqali
+chiqadigan paketlar manbasi outside IP'ga almashtiriladi (Mininet: `iptables -t nat …
+MASQUERADE`). Analitik/demo modelda javob yo'li avval NAT routerning outside IP'siga,
+keyin ichki manzilga boradi (tashqi router ichki subnetni bilmasa ham ishlaydi);
+tashqaridan ichkariga yangi ulanish — marshrut bo'lmasa o'tmaydi. ns-3'da NAT yo'q
+(ogohlantirish). Inspect → iptables va conntrack.
+
+Namuna: `nat_dhcp_lab` — pc1/pc2 DHCP oladi, r1 NAT bilan provayderga (isp) chiqaradi.
+Real sinov: srv1 so'rovlarni `203.0.113.2` (r1 outside) dan ko'radi; NAT o'chirilsa
+javoblar qaytmaydi.
+
+Router `config.routes` (statik marshrutlar) Mininet'da kernel marshruti sifatida ham
+qo'llanadi (zebra uni ko'radi).
+
 ## Wi-Fi (simsiz tarmoq)
 
 Kabel asbobi (`C`) bilan Wi-Fi AP'ni va host/server/router'ni ketma-ket bosing —
@@ -388,6 +446,8 @@ masalan `5,10,15,20,25` dBm qiymatlarida uzoqdagi stansiya tezligini ko'ring.
 - `wifi_roaming`: bitta ESS'dagi ikki AP; mob1 ap1 dan ap2 ga yuradi va roaming qiladi.
 - `p4_l2_lab`: uchta host, P4 L2 switch, `dmac` jadvali.
 - `sdn_router_lab`: SDN switch + SDN router (`l3_router` ilovasi).
+- `vlan_lab`: VLAN 10/20, trunk, router-on-a-stick, izolyatsiya. Ssenariy: `vlanlar`.
+- `nat_dhcp_lab`: DHCP server + NAT (masquerade) + provayder. Ssenariy: `internet`.
 
 ## Klaviatura
 
