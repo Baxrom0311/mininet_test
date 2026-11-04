@@ -32,7 +32,7 @@ import threading
 import time
 
 from lab.wifi import link_estimate as wifi_link_estimate
-from lab.model import (DEVICE_TYPES, FRR_DAEMONS, controller_config, device_mac,
+from lab.model import (DEVICE_TYPES, FRR_DAEMONS, controller_config, device_mac, rip_timers,
                        ifname, link_ports, normalize_link_params, validate_project)
 from .base import (BaseDriver, DriverError, Terminal, p4_compile_standalone,
                    p4_pipeline_from_json)
@@ -921,6 +921,13 @@ class MininetDriver(BaseDriver):
             out = node.cmd(f"vtysh -N {name} -f {path} 2>&1")
             if "error" in out.lower() or "unknown command" in out.lower():
                 self.bus.log("warn", f"startup-config: {out.strip()[-500:]}", name)
+        if "ripd" in daemons and cfg.get("rip_timers"):
+            tm = rip_timers(d)
+            time.sleep(0.3)
+            out = node.cmd(f"vtysh -N {name} -c 'conf t' -c 'router rip' "
+                           f"-c 'timers basic {tm['update']} {tm['timeout']} {tm['garbage']}' 2>&1")
+            if out.strip():
+                self.bus.log("warn", f"rip timers: {out.strip()[-300:]}", name)
         self.bus.log("ok", f"FRR ishga tushdi: {', '.join(daemons)}", name)
 
     def _frr_stop(self, name):

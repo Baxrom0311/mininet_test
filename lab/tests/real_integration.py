@@ -241,13 +241,17 @@ def t_conv(drv, caps):
         print("  skip (FRR/iperf3 yo'q)")
         return
     proj = load("rip_ring")
+    for n in ("r1", "r2", "r3"):     # tez RIP: update 10 s (config.rip_timers -> vtysh `timers basic`)
+        proj["devices"][n]["config"]["rip_timers"] = {"update": 10, "timeout": 60, "garbage": 40}
     drv.start(proj)
+    tb = drv.frr_running_config("r1")
+    check("timers basic 10 60 40" in (tb if isinstance(tb, str) else json.dumps(tb)), "r1: timers basic 10 60 40 qo'llandi")
     ip = next(iter(proj["devices"]["srv1"]["config"]["interfaces"].values()))["ip"].split("/")[0]
     check(wait_ping(drv, "pc1", ip, 90) is not None, "RIP yo'llari tayyor")
-    # RIP: muqobil yo'l keyingi periodik update'da (30 s gacha) — shuning uchun 45 s
-    sc = {"duration": 45, "apps": [
-        {"id": "v", "type": "udp", "src": "pc1", "dst": "srv1", "rate": "2Mbps", "size": 1000, "start": 1, "stop": 44},
-        {"id": "p", "type": "ping", "src": "pc1", "dst": "srv1", "interval": 0.2, "start": 1, "stop": 44}],
+    # muqobil yo'l keyingi periodik update'da (update=10 -> 10 s gacha)
+    sc = {"duration": 30, "apps": [
+        {"id": "v", "type": "udp", "src": "pc1", "dst": "srv1", "rate": "2Mbps", "size": 1000, "start": 1, "stop": 29},
+        {"id": "p", "type": "ping", "src": "pc1", "dst": "srv1", "interval": 0.2, "start": 1, "stop": 29}],
         "events": [{"t": 8, "action": "link_down", "link": "l2"}]}
     res = emulation.run(drv, sc)
     r1 = [x for x in res["nodes"]["r1"] if 3 <= x["t"] <= 7]
@@ -256,9 +260,9 @@ def t_conv(drv, caps):
     print("    route_events", [(e["t"], e["dev"], len(e["added"]), len(e["removed"])) for e in res["route_events"]])
     cv = res["convergence"]
     print("    convergence", cv)
-    check(cv and cv[0]["converged_s"] is not None and 0 <= cv[0]["converged_s"] <= 35,
+    check(cv and cv[0]["converged_s"] is not None and 0 <= cv[0]["converged_s"] <= 14,
           f"l2 uzilishidan keyin RIP konvergensiyasi o'lchandi: {cv and cv[0]['converged_s']} s")
-    after = [x["thr_bps"] for x in res["flows"]["v"]["series"] if 41 <= x["t"] <= 43]
+    after = [x["thr_bps"] for x in res["flows"]["v"]["series"] if 24 <= x["t"] <= 28]
     check(after and min(after) > 1.5e6, "konvergensiyadan keyin video r3 orqali tiklandi")
 
 

@@ -20,7 +20,7 @@ import math
 import time
 
 from lab.drivers.demo_driver import Net, _ms
-from lab.model import normalize_link_params, parse_rate
+from lab.model import normalize_link_params, parse_rate, rip_timers
 from lab.mobility import apply_positions, has_moves, positions_at
 from lab.wifi import ap_config, channels_overlap, ess_key, max_range_m, meters_per_px
 from lab.wifi import estimate as wifi_estimate
@@ -58,10 +58,13 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     applied, ev_i = [], 0
     # RIP konvergensiyasi: kabel uzilgandan keyin RIP routerlar eski yo'llarni rip_conv s
     # davomida ishlatadi (keyingi periodik update'gacha; 30s davr -> kutilgan ~15s).
-    rip_conv = float(sc.get("rip_convergence_s", 15))
     rip_set = {n for n, d in proj["devices"].items() if d["type"] == "router"
                and "ripd" in ((d.get("config") or {}).get("daemons") or [])
                and not ({"ospfd", "isisd", "ospf6d"} & set((d.get("config") or {}).get("daemons") or []))}
+    # Muqobil yo'l qo'shni routerning keyingi PERIODIK update'ida keladi: kutish ~ U(0, update)
+    # -> o'rtacha update/2 (FRR/ns-3 standart 30 s -> 15 s). rip_convergence_s — qo'lda almashtirish.
+    rip_upd = max((rip_timers(proj["devices"][n])["update"] for n in rip_set), default=30)
+    rip_conv = float(sc["rip_convergence_s"]) if sc.get("rip_convergence_s") not in (None, "") else rip_upd / 2
     stale = None   # (eski loyiha nusxasi, qachongacha)
     movers = has_moves(sc)
     handover = {}   # stansiya -> aloqa uzilgan vaqt (roaming kutilmoqda)
@@ -356,7 +359,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             "convergence": convergence(applied, rtrack.events, duration), "wall_s": round(time.time() - t_wall, 3),
             "notes": ["oqim darajasidagi taxmin: UDP qat'iy, TCP max-min adolat + Mathis, navbat M/M/1",
                       "dinamik routing: demo modeli (dinamik daemonli routerlar o'zaro barcha subnetlarni biladi)",
-                      "RIP: kabel uzilgandan keyin rip_convergence_s (standart 15s) davomida eski yo'llar",
+                      "RIP: kabel uzilgandan keyin update/2 (rip_timers, standart 30 s -> 15 s) yoki rip_convergence_s davomida eski yo'llar",
                       "Wi-Fi: SNR→MCS (ns-3 ga kalibrlangan), efir vaqti bo'yicha adolat (A-MPDU), TCP ACK efiri ~9%",
                       "Wi-Fi: bir kanalda va bir-birini eshitadigan AP'lar umumiy efirni bo'lishadi; harakat — oraliq o'rtasidagi pozitsiya",
                       "Wi-Fi roaming: ESS (SSID+diapazon+kanal) ichida, joriy AP uzilgach 1s uzilish bilan eng kuchli AP'ga"]}

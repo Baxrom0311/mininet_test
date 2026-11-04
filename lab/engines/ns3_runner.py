@@ -37,6 +37,65 @@ WIFI_STD = {"80211g": "WIFI_STANDARD_80211g", "80211n": "WIFI_STANDARD_80211n",
             "80211ac": "WIFI_STANDARD_80211ac", "80211ax": "WIFI_STANDARD_80211ax"}
 
 
+# Qurilma statistikasi uchun C++ yordamchi (cppyy): Ipv4L3Protocol trace'lari
+# C++ ichida sanaladi (Python callback'lari har paketda juda sekin bo'lardi).
+_NODESTATS_CPP = r"""
+#include <sstream>
+namespace netlab {
+using namespace ns3;
+struct Cnt { uint64_t fwd = 0, rx = 0, tx = 0, noroute = 0, drop = 0; };
+static std::map<uint32_t, Cnt> g_cnt;
+static void OnFwd(uint32_t id, const Ipv4Header&, Ptr<const Packet>, uint32_t) { g_cnt[id].fwd++; }
+static void OnRx(uint32_t id, Ptr<const Packet>, Ptr<Ipv4>, uint32_t) { g_cnt[id].rx++; }
+static void OnTx(uint32_t id, Ptr<const Packet>, Ptr<Ipv4>, uint32_t) { g_cnt[id].tx++; }
+static void OnDrop(uint32_t id, const Ipv4Header&, Ptr<const Packet>, Ipv4L3Protocol::DropReason r,
+                   Ptr<Ipv4>, uint32_t) {
+  if (r == Ipv4L3Protocol::DROP_NO_ROUTE) g_cnt[id].noroute++; else g_cnt[id].drop++;
+}
+void Attach(Ptr<Node> n) {
+  uint32_t id = n->GetId();
+  Ptr<Ipv4L3Protocol> ip = n->GetObject<Ipv4L3Protocol>();
+  if (!ip) return;
+  g_cnt[id];
+  ip->TraceConnectWithoutContext("UnicastForward", MakeBoundCallback(&OnFwd, id));
+  ip->TraceConnectWithoutContext("Rx", MakeBoundCallback(&OnRx, id));
+  ip->TraceConnectWithoutContext("Tx", MakeBoundCallback(&OnTx, id));
+  ip->TraceConnectWithoutContext("Drop", MakeBoundCallback(&OnDrop, id));
+}
+std::vector<uint64_t> Get(uint32_t id) {
+  Cnt& c = g_cnt[id];
+  return {c.fwd, c.rx, c.tx, c.noroute, c.drop};
+}
+std::string Routes(Ptr<Node> n) {
+  std::ostringstream os;
+  Ptr<OutputStreamWrapper> w = Create<OutputStreamWrapper>(&os);
+  Ptr<Ipv4> ip = n->GetObject<Ipv4>();
+  if (ip && ip->GetRoutingProtocol()) ip->GetRoutingProtocol()->PrintRoutingTable(w, Time::S);
+  return os.str();
+}
+}
+"""
+
+
+def parse_ns3_routes(text, idx_ifn):
+    """PrintRoutingTable matni -> {route_key} (Linux /proc/net/route bilan bir xil kalitlar)."""
+    from lab.engines.nodestats import route_key
+    out = set()
+    for line in text.splitlines():
+        v = line.split()
+        if len(v) < 8 or v[0].count(".") != 3 or not v[0][0].isdigit():
+            continue
+        try:
+            net = ipaddress.ip_network(f"{v[0]}/{v[2]}", strict=False)
+        except ValueError:
+            continue
+        if net.is_loopback or net.prefixlen == 32:
+            continue
+        ifn = idx_ifn.get(int(v[-1]), f"if{v[-1]}") if v[-1].isdigit() else v[-1]
+        out.add(route_key(net, None if v[1] == "0.0.0.0" else v[1], ifn))
+    return out
+
+
 def emit(**kw):
     sys.stdout.write(json.dumps(kw) + "\n")
     sys.stdout.flush()
@@ -99,18 +158,42 @@ def main(inp_path, out_path):
     _lst_static = ns.Ipv4ListRoutingHelper()
     _lst_static.Add(ns.Ipv4StaticRoutingHelper(), 0)
     stack.SetRoutingHelper(_lst_static)
-    rip_stack = None
+    # RIP taymerlari (config.rip_timers / startup `timers basic`) — har xil taymerli
+    # routerlar guruhi uchun alohida RipHelper (atributlar helper darajasida).
+    from lab.model import rip_timers
+    rip_stacks, _keep = {}, []
+    for n in rip_nodes:
+        tm = rip_timers(devs[n])
+        key = (tm["update"], tm["timeout"], tm["garbage"])
+        if key not in rip_stacks:
+            rip = ns.RipHelper()
+            rip.Set("UnsolicitedRoutingUpdate", ns.TimeValue(ns.Seconds(key[0])))
+            rip.Set("TimeoutDelay", ns.TimeValue(ns.Seconds(key[1])))
+            rip.Set("GarbageCollectionDelay", ns.TimeValue(ns.Seconds(key[2])))
+            lst = ns.Ipv4ListRoutingHelper()
+            lst.Add(ns.Ipv4StaticRoutingHelper(), 0)
+            lst.Add(rip, -10)
+            st_ = ns.InternetStackHelper()
+            st_.SetRoutingHelper(lst)
+            rip_stacks[key] = st_
+            _keep += [rip, lst]
     if rip_nodes:
-        rip = ns.RipHelper()
-        lst = ns.Ipv4ListRoutingHelper()
-        lst.Add(ns.Ipv4StaticRoutingHelper(), 0)
-        lst.Add(rip, -10)
-        rip_stack = ns.InternetStackHelper()
-        rip_stack.SetRoutingHelper(lst)
-        emit(log=f"RIPv2 (ns-3): {', '.join(sorted(rip_nodes))}")
+        emit(log=f"RIPv2 (ns-3): {', '.join(sorted(rip_nodes))}; taymerlar (update/timeout/garbage): "
+                 f"{', '.join('/'.join(map(str, k)) for k in rip_stacks)}")
     for name, d in devs.items():
         if d["type"] in L3:
-            (rip_stack if name in rip_nodes else stack).Install(nodes[name])
+            if name in rip_nodes:
+                tm = rip_timers(d)
+                rip_stacks[(tm["update"], tm["timeout"], tm["garbage"])].Install(nodes[name])
+            else:
+                stack.Install(nodes[name])
+    import cppyy
+    cppyy.cppdef(_NODESTATS_CPP)
+    nl = cppyy.gbl.netlab
+    from lab.engines.nodestats import L3_NS, RouteTracker, convergence
+    stat_nodes = [n for n, d in devs.items() if d["type"] in L3_NS]
+    for n in stat_nodes:
+        nl.Attach(nodes[n])
 
     # Eslatma: ns-3'da mavjud bo'lmagan atributga SetAttribute — C++ abort (Python
     # istisnosi emas). Noaniq atributlar uchun doim SetAttributeFailSafe.
@@ -485,6 +568,27 @@ def main(inp_path, out_path):
                                      "queue_ab": qa.GetNPackets() + na, "queue_ba": qb.GetNPackets() + nb,
                                      "drops_ab": cur[1] - p0[1], "drops_ba": cur[3] - p0[3]})
 
+    idx_ifn = {}
+    for (dn, port), (_ipv4, idx, _ii) in iface.items():
+        idx_ifn.setdefault(dn, {})[idx] = f"{dn}-eth{port}"
+    node_series = {n: [] for n in stat_nodes}
+    rtrack = RouteTracker()
+    node_prev = {}
+
+    def sample_nodes(dt):
+        for n in stat_nodes:
+            rts = parse_ns3_routes(str(nl.Routes(nodes[n])), idx_ifn.get(n, {}))
+            rtrack.update(now, n, rts)
+            cur = [int(x) for x in nl.Get(nodes[n].GetId())]
+            p0 = node_prev.get(n, cur)
+            node_prev[n] = cur
+            d = [c - p for c, p in zip(cur, p0)]
+            disc = sum(link_series[lid][-1][f"drops_{dd}"] for lid, lo in link_objs.items() if link_series.get(lid)
+                       for side, dd in ((0, "ab"), (1, "ba")) if lo["ends"][side]["dev"] == n)
+            node_series[n].append({"t": round(now, 3), "routes": len(rts),
+                                   "fwd_pps": round(d[0] / max(dt, 1e-9), 1), "rx_pps": round(d[1] / max(dt, 1e-9), 1),
+                                   "tx_pps": round(d[2] / max(dt, 1e-9), 1), "noroute": d[3], "discards": d[4] + disc})
+
     def flows_for(app):
         fwd, rev = [], []
         for fid, st in mon.GetFlowStats():
@@ -501,6 +605,9 @@ def main(inp_path, out_path):
         dl = sum(s.delaySum.GetSeconds() for _f, s in fl); jt = sum(s.jitterSum.GetSeconds() for _f, s in fl)
         return tx, rx, rxb, dl, jt
 
+    for n in stat_nodes:        # t=0 holat
+        rtrack.update(0, n, parse_ns3_routes(str(nl.Routes(nodes[n])), idx_ifn.get(n, {})))
+        node_prev[n] = [int(x) for x in nl.Get(nodes[n].GetId())]
     for mark in marks:
         while ev_i < len(events) and float(events[ev_i].get("t", 0)) <= now + 1e-9:
             e = events[ev_i]; ev_i += 1
@@ -551,6 +658,7 @@ def main(inp_path, out_path):
                                 if pt["delay_ms"] is not None and drr > 0 else None)
             series[app["id"]].append(pt)
         sample_links(dt)
+        sample_nodes(dt)
         emit(progress=round(now / duration, 3))
 
     if os.environ.get("NETLAB_NS3_DEBUG"):
@@ -576,6 +684,8 @@ def main(inp_path, out_path):
     ns.Simulator.Destroy()
     out = {"engine": "ns3", "engine_label": "ns-3 (diskret-hodisali simulyatsiya)",
            "duration": duration, "flows": flows, "links": link_series, "events": applied,
+           "nodes": node_series, "route_events": rtrack.events,
+           "convergence": convergence(applied, rtrack.events, duration),
            "wall_s": round(time.time() - t_wall, 2),
            "notes": ["dinamik routing: ripd → ns-3 RIPv2 (haqiqiy konvergensiya); qolganlari — analitik bilan bir xil SPF modeli statik marshrut sifatida (hodisada darhol qayta hisoblanadi)",
                      "TCP: Cubic, MSS 1448, bufer 4/6 MB (Linux'ga yaqin)",

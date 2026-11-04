@@ -172,9 +172,26 @@ duration*) — analitik va Mininet dvigatellarida:
 - `convergence` — har topologiya hodisasi uchun `converged_s`: hodisadan keyingi oxirgi
   marshrut o'zgarishigacha bo'lgan vaqt va qatnashgan qurilmalar.
 
-Masalan, `rip_ring` da r1-r2 kabeli uzilganda: analitik model 15 s (`rip_convergence_s`),
-real FRR RIP esa 19 s (keyingi periodik update) ko'rsatdi; OSPF (`ospf_lab`,
-hello=1 s) — soniya ichida.
+ns-3 da ham bor: `Ipv4L3Protocol` trace'lari (UnicastForward/Rx/Tx/Drop) C++ ichida
+(cppyy) sanaladi, marshrutlar `PrintRoutingTable` dan olinadi.
+
+Masalan, `rip_ring` da r1-r2 kabeli uzilganda (standart taymerlar): analitik 15 s,
+real FRR 19 s, ns-3 RIPv2 34 s (oxirgi o'zgarishgacha); OSPF (`ospf_lab`, hello=1 s) —
+soniya ichida.
+
+### RIP taymerlari
+
+Router `config.rip_timers = {"update": 10, "timeout": 60, "garbage": 40}` (yoki
+startup'dagi `timers basic 10 60 40`). Uchala dvigatel bir xil qiymatni oladi:
+
+| | Qanday qo'llanadi | update=10 da natija (`rip_ring`) |
+|---|---|---|
+| Mininet (FRR) | `vtysh … router rip / timers basic U T G` | konvergensiya 4 s |
+| ns-3 | `RipHelper` `UnsolicitedRoutingUpdate`/`TimeoutDelay`/`GarbageCollectionDelay` | trafik uzilishi 4 s |
+| Analitik | muqobil yo'l keyingi periodik update'da: o'rtacha `update/2` (`rip_convergence_s` bilan almashtirish mumkin) | 5 s |
+
+Parametrik tadqiqot: `{"kind": "router", "router": "r1", "all": true, "field": "rip_update"}`
+— konvergensiya vaqti vs update taymeri (analitik / ns-3).
 
 Kabelning `queue` parametri (paket) uchala dvigatelda navbat chegarasi: ns-3'da L3
 tomonda `PfifoFastQueueDisc(MaxSize=queue)`, Mininet'da netem `limit` yoki (netem
@@ -216,7 +233,7 @@ gacha o'zgartirsangiz, quyidagilar ko'rinadi:
 
 | Routing | ns-3 | Analitik |
 |---|---|---|
-| RIP (`ripd`) | ns-3 RIPv2: ~24 s trafik yo'q, zaxira yo'l keyingi periodik update'da (≤30 s) o'rganiladi | `rip_convergence_s` (standart 15 s) — eski yo'llar ishlatiladi |
+| RIP (`ripd`) | ns-3 RIPv2: ~24 s trafik yo'q, zaxira yo'l keyingi periodik update'da (≤30 s) o'rganiladi | `update/2` (`rip_timers`, standart 15 s) yoki `rip_convergence_s` — eski yo'llar ishlatiladi |
 | OSPF (`ospfd`) | SPF darhol qayta hisoblanadi — uzilish yo'q | uzilish yo'q |
 
 Daemonni routerning Sozlama oynasida almashtirib (`ripd` ↔ `ospfd`), ikkala holatni

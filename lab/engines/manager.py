@@ -177,12 +177,30 @@ class RunManager:
             if engine == "mininet":
                 raise ValueError("AP radio tadqiqoti Mininet dvigatelida qo'llab-quvvatlanmaydi (radio yo'q)")
             p2["devices"][ap].setdefault("config", {})[field] = float(v) if field == "tx_power" else int(v)
+        elif kind == "router":
+            r = param.get("router")
+            d = p2["devices"].get(r) or {}
+            if d.get("type") != "router" or field not in ("rip_update", "rip_timeout"):
+                raise ValueError("router yoki maydon noto'g'ri (rip_update | rip_timeout)")
+            if engine == "mininet":
+                raise ValueError("RIP taymer tadqiqoti Mininet dvigatelida qo'llab-quvvatlanmaydi (FRR qayta ishga tushadi)")
+            targets = [r] if not param.get("all") else [n for n, x in p2["devices"].items() if x.get("type") == "router"]
+            for n in targets:
+                cfg = p2["devices"][n].setdefault("config", {})
+                tm = dict(cfg.get("rip_timers") or {})
+                tm[field.split("_", 1)[1]] = int(v)
+                if field == "rip_update" and int(tm.get("timeout", 180)) <= int(v):
+                    tm["timeout"] = int(v) * 6
+                cfg["rip_timers"] = tm
         else:
-            raise ValueError("param.kind: link | app | ap")
+            raise ValueError("param.kind: link | app | ap | router")
 
     @staticmethod
     def _param_label(param):
-        return f"{param.get('link') or param.get('app') or param.get('ap')}.{param.get('field')}"
+        who = param.get("link") or param.get("app") or param.get("ap") or param.get("router")
+        if param.get("kind") == "router" and param.get("all"):
+            who = "routerlar"
+        return f"{who}.{param.get('field')}"
 
     def start_study(self, project, scenario_name, engine, param, values, param2=None, values2=None):
         """Parametrik tadqiqot (ketma-ket ishga tushirishlar). Bitta parametr — chiziqli grafik;

@@ -62,6 +62,24 @@ def device_mac(dev_id, port):
     return "00:00:00:%02x:%02x:%02x" % ((dev_id >> 8) & 0xFF, dev_id & 0xFF, port & 0xFF)
 
 
+RIP_DEFAULTS = {"update": 30, "timeout": 180, "garbage": 120}
+_RIP_TIMERS_RE = re.compile(r"^\s*timers\s+basic\s+(\d+)\s+(\d+)\s+(\d+)", re.M)
+
+
+def rip_timers(dev):
+    """RIP taymerlari (soniya): config.rip_timers > startup'dagi `timers basic U T G` >
+    standart (30/180/120, FRR va ns-3 bilan bir xil)."""
+    cfg = dev.get("config") or {}
+    out = dict(RIP_DEFAULTS)
+    m = _RIP_TIMERS_RE.search(cfg.get("startup") or "")
+    if m:
+        out.update(update=int(m.group(1)), timeout=int(m.group(2)), garbage=int(m.group(3)))
+    for k, v in (cfg.get("rip_timers") or {}).items():
+        if k in out and v not in (None, ""):
+            out[k] = int(v)
+    return out
+
+
 def link_ports(project, dev):
     """Qurilmaning band portlari: {port: (link_id, peer_dev, peer_port)}."""
     out = {}
@@ -121,6 +139,14 @@ def validate_project(p):
             prog = cfg.get("program")
             if prog and prog not in (p.get("p4_programs") or {}):
                 errors.append(f"{name}: P4 dastur '{prog}' loyihada yo'q")
+        rt = cfg.get("rip_timers")
+        if rt:
+            try:
+                u, to, g = (int(rt.get(k, RIP_DEFAULTS[k])) for k in ("update", "timeout", "garbage"))
+                if not (1 <= u <= 3600 and u < to <= 7200 and 1 <= g <= 7200):
+                    raise ValueError
+            except (ValueError, TypeError, AttributeError):
+                errors.append(f"{name}: rip_timers noto'g'ri (update 1..3600, timeout > update, garbage >= 1)")
         for r in cfg.get("routes") or []:
             try:
                 ipaddress.ip_network(r.get("prefix", ""), strict=False)
