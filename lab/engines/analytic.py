@@ -20,7 +20,7 @@ import math
 import time
 
 from lab.drivers.demo_driver import Net, _ms
-from lab.model import normalize_link_params, parse_rate, rip_timers
+from lab.model import dscp_class, normalize_link_params, parse_rate, rip_timers
 from lab.mobility import apply_positions, has_moves, positions_at
 from lab.wifi import ap_config, channels_overlap, ess_key, max_range_m, meters_per_px
 from lab.wifi import estimate as wifi_estimate
@@ -224,15 +224,35 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             f["res"] = resources(f["path"])
             for key, w in f["res"]:
                 load[key] += f["offered"] * w
+        # QoS: `prio` kabelida yuqori sinf (DSCP >= 40) birinchi xizmat qilinadi — oddiy sinf
+        # faqat qolgan sig'imni oladi; fifo/fq_codel — umumiy (proporsional) kesish.
+        def qdisc_of(key):
+            return ((proj["links"][key[0]].get("params") or {}).get("qdisc") or "fifo") if key[0] != "air" else "fifo"
+        load_hi = {k2: 0.0 for k2 in cap}
+        for f in flows:
+            if "offered" in f and dscp_class(f["app"].get("dscp")) == 0:
+                for key, w in f["res"]:
+                    load_hi[key] += f["offered"] * w
         scale = {k2: (min(1.0, cap[k2] / v) if v > 0 else 1.0) for k2, v in load.items()}
+        scale_cls = {}
+        for k2, v in load.items():
+            if qdisc_of(k2) == "prio":
+                hi, lo = load_hi[k2], v - load_hi[k2]
+                s_hi = min(1.0, cap[k2] / hi) if hi > 0 else 1.0
+                left = max(cap[k2] - hi * s_hi, 0.0)
+                scale_cls[k2] = (s_hi, min(1.0, left / lo) if lo > 0 else 1.0)
         used = {k2: 0.0 for k2 in cap}
+        used_hi = {k2: 0.0 for k2 in cap}
         for f in flows:
             if "offered" in f:
-                s_min = min([scale[key] for key, _w in f["res"]] or [1.0])
+                cls = dscp_class(f["app"].get("dscp"))
+                s_min = min([scale_cls[key][cls] if key in scale_cls else scale[key] for key, _w in f["res"]] or [1.0])
                 f["rate"] = f["offered"] * s_min
                 f["overload_drop"] = 1 - s_min
                 for key, w in f["res"]:
                     used[key] += f["rate"] * w
+                    if cls == 0:
+                        used_hi[key] += f["rate"] * w
         # 2) TCP — max-min adolat (progressive filling) qolgan sig'imda
         tcp = [f for f in flows if f.get("active") and f["ok"] and f["app"]["type"] == "tcp"]
         for f in tcp:
@@ -318,23 +338,33 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         for f in tcp:
             for key, w in f["res"]:
                 used[key] += f["rate"] * w
-        tcp_on = {h for f in tcp for h in f["path"] if f["rate"] > 0 and f["cap"] == float("inf")}
+        # TCP navbati faqat TOR JOYDA (to'yingan hop) yig'iladi — yo'ldagi boshqa hoplarda emas
+        tcp_on = {h for f in tcp for h in f["path"]
+                  if f["rate"] > 0 and f["cap"] == float("inf") and used[h] >= 0.97 * cap[h]}
         air_sat = {k2[1] for k2 in cap if k2[0] == "air" and used[k2] >= 0.97}
 
         # 3) kechikish / yo'qotish
-        def hop_delay(h, pkt_bits):
+        def hop_delay(h, pkt_bits, cls=1):
             lid, _d = h
             p = proj["links"][lid].get("params") or {}
             c = cap[h]
             tx = pkt_bits / c
             rho = min(used[h] / c, 0.999)
             qmax = int(p.get("queue", 1000)) * 12000 / c
+            qd = p.get("qdisc") or "fifo"
+            if qd == "prio" and cls == 0:
+                # yuqori sinf: faqat o'z sinfi navbati (M/M/1) + bitta oddiy paket qoldiq xizmati
+                rho_h = min(used_hi[h] / c, 0.999)
+                q = min(rho_h / (1 - rho_h) * tx, qmax) + (12000 / c if used[h] > used_hi[h] else 0)
+                return _ms(p.get("delay", "1ms")) / 1000 + tx + q, q
+            q_cap = 0.005 + tx if qd == "fq_codel" else float("inf")   # CoDel: navbat ~ target 5 ms'da
             if lid in wifi_of and wifi_of[lid][0] in air_sat:   # efir to'yingan — navbat o'sadi
                 return _ms(p.get("delay", "1ms")) / 1000 + tx + 0.25 * qmax, 0.25 * qmax
             if scale.get(h, 1) < 1 or h in tcp_on:          # to'yingan: navbat to'la (UDP) / yarim (TCP)
                 q = qmax if scale.get(h, 1) < 1 else 0.25 * qmax   # TCP: taxminiy turg'un navbat
             else:
                 q = min(rho / (1 - rho) * tx, qmax)
+            q = min(q, q_cap)
             return _ms(p.get("delay", "1ms")) / 1000 + tx + q, q
 
         for f in flows:
@@ -345,8 +375,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             if f["ok"]:
                 bits = int(a.get("size", 1000 if a["type"] != "ping" else 64)) * 8 if a["type"] != "tcp" else 12000
                 d_fwd, q_sum = 0.0, 0.0
+                fcls = dscp_class(a.get("dscp"))
                 for h in f["path"]:
-                    dd, q = hop_delay(h, bits); d_fwd += dd; q_sum += q
+                    dd, q = hop_delay(h, bits, fcls); d_fwd += dd; q_sum += q
                 link_loss = 1 - math.prod(1 - float((proj["links"][lid].get("params") or {}).get("loss", 0)) / 100
                                           for lid, _d in f["path"])
                 tot_loss = 1 - (1 - link_loss) * (1 - f.get("overload_drop", 0))
@@ -355,7 +386,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                           jitter_ms=round(q_sum * 1000 * 0.15 + 0.01, 3),
                           loss_pct=round(tot_loss * 100 if a["type"] != "tcp" else link_loss * 100, 2))
                 if a["type"] == "ping":
-                    d_back = sum(hop_delay(h, bits)[0] for h in f["back"])
+                    d_back = sum(hop_delay(h, bits, fcls)[0] for h in f["back"])
                     pt["rtt_ms"] = round((d_fwd + d_back) * 1000, 3)
                 if "thr_fixed" in f:
                     pt["thr_bps"] = round(f["thr_fixed"])

@@ -216,11 +216,36 @@ Mininet'da `iperf3 -n`.
 
 | | VoIP MOS | HTTP sahifa | FTP 5 MB |
 |---|---|---|---|
-| Analitik | 3.29 (TCP navbatni to'ldiradi) | 0.75 s | 5.5 s |
+| Analitik | 4.12 | 0.75 s | 5.5 s |
 | ns-3 | 4.08 | 0.76 s | 4.7 s |
 | Mininet (real, netem'siz) | 4.39 | 1.05 s (iperf3 boshqaruv ulanishi ham) | 5.1 s |
 
 Tadqiqot maydonlari: `app.codec`, `app.page`, `app.think`, `app.file`.
+
+### QoS: navbat intizomi va DSCP
+
+Kabel `params.qdisc`: `fifo` (standart), `prio` (qat'iy ustuvorlik), `fq_codel`
+(oqimlar bo'yicha adolat + CoDel AQM). Ilova `dscp` (0..63); `voip` standart EF=46.
+Yuqori sinf — DSCP >= 40 (EF, CS5..CS7).
+
+| Dvigatel | prio | fq_codel |
+|---|---|---|
+| Analitik | yuqori sinf UDP birinchi xizmat qilinadi; navbati faqat o'z sinfi (M/M/1) | navbat ~5 ms (CoDel target) |
+| ns-3 | `PrioQueueDisc` (EF → socket priority 4 → band 0) | `FqCoDelQueueDisc` |
+| Mininet | HTB ierarxiyasi: 5:10 (prio 0, rate=bw) / 5:20 (prio 1) + u32 DSCP filtr — `sch_prio` shart emas | `fq_codel` (kernelda bo'lsa; bo'lmasa fifo + ogohlantirish) |
+
+Mininet'da TOS: `iperf3 -S`, `ping -Q`. Tadqiqot maydoni: `link.qdisc`.
+
+`ospf_lab`, l4 (10 Mbit/s) da VoIP + FTP 20 MB + 9 Mbit/s video — VoIP MOS:
+
+| | fifo | prio | fq_codel |
+|---|---|---|---|
+| Analitik | 3.02 | 4.39 | 4.39 |
+| ns-3 | 1.66 | 4.38 | 4.36 |
+
+Real Mininet (10 Mbit/s kabel, 14 Mbit/s UDP yuklama): fifo MOS 1.96 → prio 4.28.
+
+Eslatma: analitik modelda TCP navbati endi faqat tor joyda (to'yingan hop) hisoblanadi.
 
 ### Ikki parametrli tadqiqot (issiqlik xaritasi)
 

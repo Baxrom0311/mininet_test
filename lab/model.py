@@ -34,7 +34,20 @@ DEVICE_TYPES = {
 
 FRR_DAEMONS = ["ospfd", "bgpd", "ripd", "isisd", "ospf6d", "eigrpd", "pimd", "ldpd", "bfdd"]
 
-DEFAULT_LINK = {"bw": 100, "delay": "1ms", "jitter": "0ms", "loss": 0, "queue": 1000, "medium": "wire"}
+DEFAULT_LINK = {"bw": 100, "delay": "1ms", "jitter": "0ms", "loss": 0, "queue": 1000, "medium": "wire",
+                "qdisc": "fifo"}
+# Navbat intizomi (QoS): fifo — bitta DropTail; prio — qat'iy ustuvorlik (DSCP >= 40: EF/CS5-7
+# yuqori sinf); fq_codel — oqimlar bo'yicha adolatli + CoDel AQM (navbat ~5 ms).
+QDISCS = ("fifo", "prio", "fq_codel")
+HIGH_DSCP = 40
+
+
+def dscp_class(dscp):
+    """0 — yuqori (EF/CS5..CS7), 1 — oddiy."""
+    try:
+        return 0 if int(dscp or 0) >= HIGH_DSCP else 1
+    except (TypeError, ValueError):
+        return 1
 
 PROJECT_VERSION = 1
 
@@ -289,6 +302,8 @@ def normalize_link_params(params):
             out[k] = v
     if out["medium"] not in ("wire", "wifi"):
         raise ValueError("medium: wire | wifi")
+    if out["qdisc"] not in QDISCS:
+        raise ValueError(f"qdisc: {' | '.join(QDISCS)}")
     out["bw"] = float(out["bw"])
     out["loss"] = float(out["loss"])
     out["queue"] = int(out["queue"])
@@ -360,6 +375,12 @@ def validate_scenario(project, sc):
             errors.append(f"{w}: tur {APP_TYPES + MODEL_TYPES} dan biri")
         elif a.get("type") in MODEL_TYPES:
             errors += [f"{w}: {e}" for e in validate_app(a, dur)]
+        if a.get("dscp") not in (None, ""):
+            try:
+                if not 0 <= int(a["dscp"]) <= 63:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(f"{w}: dscp 0..63 (EF=46)")
         if a.get("bytes") is not None:
             try:
                 if int(a["bytes"]) <= 0:

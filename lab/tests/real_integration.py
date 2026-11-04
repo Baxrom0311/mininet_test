@@ -364,7 +364,40 @@ def t_apps(drv, caps):
           f"FTP 5 MB 10 Mbit/s kabelda {ap['fayl']['transfer_s']} s")
 
 
-TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "vlan": t_vlan, "natdhcp": t_natdhcp, "apps": t_apps, "sdn": t_sdn, "p4": t_p4}
+def t_qos(drv, caps):
+    """QoS: fifo vs prio (HTB sinflari + DSCP u32 filtr) — VoIP MOS TCP yuklamasi ostida."""
+    import shutil
+    from lab import apps as am
+    from lab.engines import emulation
+    if not shutil.which("iperf3"):
+        print("  skip (iperf3 yo'q)")
+        return
+    out = {}
+    for qd in ("fifo", "prio"):
+        proj = {"version": 1, "name": "qos", "devices": {
+            "h1": host("h1", 1, "10.0.0.1/24"), "h2": host("h2", 2, "10.0.0.2/24"),
+            "s1": {"id": 3, "type": "switch", "x": 0, "y": 0, "config": {"mode": "standalone", "stp": False}}},
+            "links": {"l1": link("h1", 1, "s1", 1, bw=100), "l2": link("s1", 2, "h2", 1, bw=10, queue=500, qdisc=qd)},
+            "p4_programs": {}, "controllers": {}, "scenarios": {}}
+        drv.start(proj)
+        time.sleep(1)
+        if qd == "prio":
+            cl = drv.net.get("s1").cmd("tc class show dev s1-eth2; tc filter show dev s1-eth2 | grep -c flowid")
+            check("5:10" in cl and "5:20" in cl, "prio: HTB sinflari 5:10 / 5:20 va DSCP filtrlari")
+        sc = {"duration": 14, "events": [], "apps": [
+            {"id": "tel", "type": "voip", "src": "h2", "dst": "h1", "codec": "g711", "start": 1, "stop": 13},
+            {"id": "big", "type": "udp", "src": "h1", "dst": "h2", "rate": "14Mbps", "size": 1000, "start": 3, "stop": 13}]}
+        res = am.postprocess(emulation.run(drv, am.expand(sc)), sc)
+        t = res["apps"]["tel"]
+        late = [p for p in res["flows"]["tel"]["series"] if 5 <= p["t"] <= 12]
+        out[qd] = (sum(p["mos"] for p in late) / len(late) if late else 0, t)
+        print(f"    {qd}: MOS (yuklama ostida) {out[qd][0]:.2f}, delay {t['avg_delay_ms']} ms, loss {t['loss_pct']}%")
+        drv.stop()
+    check(out["fifo"][0] < 3.0, f"fifo: 14 Mbit/s UDP 10 Mbit/s kabelda VoIP yomon (MOS {out['fifo'][0]:.2f})")
+    check(out["prio"][0] > 4.0, f"prio: EF ustuvor — VoIP a'lo (MOS {out['prio'][0]:.2f})")
+
+
+TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "vlan": t_vlan, "natdhcp": t_natdhcp, "apps": t_apps, "qos": t_qos, "sdn": t_sdn, "p4": t_p4}
 
 
 def main(argv):

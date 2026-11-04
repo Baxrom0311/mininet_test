@@ -242,6 +242,7 @@ def main(inp_path, out_path):
     jitter_warn = False
     wifi_links = []
     port_q = {}       # (dev, port) -> navbat hajmi ("1000p") — L3 tomonda qdisc uchun
+    port_qd = {}      # (dev, port) -> fifo | prio | fq_codel
     for lid, l in project["links"].items():
         a, b = l["a"], l["b"]
         p = l.get("params") or {}
@@ -283,6 +284,7 @@ def main(inp_path, out_path):
         port_dev[(a["dev"], a["port"])] = d1
         port_dev[(b["dev"], b["port"])] = d2
         port_q[(a["dev"], a["port"])] = port_q[(b["dev"], b["port"])] = q
+        port_qd[(a["dev"], a["port"])] = port_qd[(b["dev"], b["port"])] = p.get("qdisc") or "fifo"
         for side, dv in ((a, d1), (b, d2)):
             if side["dev"] in sw_ports:
                 sw_ports[side["dev"]].setdefault(port_vlan(side["dev"], side["port"]), ns.NetDeviceContainer()).Add(dv)
@@ -383,8 +385,17 @@ def main(inp_path, out_path):
             # navbati kichik. Aks holda (qo'lda AddInterface) qdisc yo'q va TrafficControlLayer
             # to'lgan qurilma navbati oldida paketlarni hisobsiz tashlaydi.
             tch = ns.TrafficControlHelper()
-            tch.SetRootQueueDisc("ns3::PfifoFastQueueDisc", "MaxSize",
-                                 ns.QueueSizeValue(ns.QueueSize(port_q[(dname, port)])))
+            qkind = port_qd.get((dname, port), "fifo")
+            if qkind == "prio":
+                # qat'iy ustuvorlik: EF (TOS 0xb8 -> socket priority 4) -> band 0, qolganlari band 1
+                tch.SetRootQueueDisc("ns3::PrioQueueDisc", "Priomap",
+                                     ns.StringValue("1 1 1 1 0 1 1 1 1 1 1 1 1 1 1 1"))
+            elif qkind == "fq_codel":
+                tch.SetRootQueueDisc("ns3::FqCoDelQueueDisc", "MaxSize",
+                                     ns.QueueSizeValue(ns.QueueSize(port_q[(dname, port)])))
+            else:
+                tch.SetRootQueueDisc("ns3::PfifoFastQueueDisc", "MaxSize",
+                                     ns.QueueSizeValue(ns.QueueSize(port_q[(dname, port)])))
             qdc = tch.Install(dv)
             root_qd[(dname, port)] = qdc.Get(0)
             try:
@@ -468,6 +479,8 @@ def main(inp_path, out_path):
         port = 9000 + i
         start, stop = float(app.get("start", 1)), float(app.get("stop", duration))
         typ = app.get("type", "udp")
+        from lab.model import dscp_class
+        tos = 0xb8 if dscp_class(app.get("dscp")) == 0 else 0     # yuqori sinf -> EF
         addr = ns.InetSocketAddress(ns.Ipv4Address(dip), port).ConvertTo()
         if typ == "ping":
             srv = ns.UdpEchoServerHelper(port)
@@ -490,6 +503,8 @@ def main(inp_path, out_path):
                 oo.SetConstantRate(ns.DataRate(rate_str(app.get("rate", "1Mbps"))), int(app.get("size", 1000)))
                 ca = oo.Install(nodes[src])
         ca.Start(ns.Seconds(start)); ca.Stop(ns.Seconds(stop))
+        if tos and not ca.Get(0).SetAttributeFailSafe("Tos", ns.UintegerValue(tos)):
+            emit(log=f"ilova {app.get('id')}: DSCP (Tos atributi) bu ns-3 ilovasida yo'q — oddiy sinf")
         if typ == "tcp" and app.get("bytes"):
             nl.WatchSink(sa.Get(0), i, int(app["bytes"]))
         apps.append({"id": app.get("id") or f"a{i + 1}", "type": typ, "src": src, "dst": dst, "port": port,

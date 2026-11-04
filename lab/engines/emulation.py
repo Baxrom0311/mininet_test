@@ -133,7 +133,8 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
             return f
 
         interval = float(a.get("interval", 0.2 if a["type"] == "ping" else 0.5))
-        ping_argv = ["ping", "-D", "-n", "-i", str(max(interval, 0.2)), "-w", str(dur), "-s",
+        tos = (int(a["dscp"]) << 2) if a.get("dscp") not in (None, "") else 0
+        ping_argv = ["ping", "-D", "-n"] + (["-Q", str(tos)] if tos else []) + ["-i", str(max(interval, 0.2)), "-w", str(dur), "-s",
                      str(max(int(a.get("size", 56)) - 8, 8) if a["type"] == "ping" else 56), dip]
         if not (a["type"] == "tcp" and a.get("bytes")):     # qisqa uzatishlarga parallel ping shart emas
             at(start, lambda a=a, argv=ping_argv, rec=rec: reader(spawn(a["src"], argv), ping_parser(rec)))
@@ -142,7 +143,7 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
             continue
         srv = spawn(a["dst"], ["iperf3", "-s", "-1", "-p", str(port), "-i", "1", "--forceflush"])
         nbytes = int(a.get("bytes") or 0) if a["type"] == "tcp" else 0
-        cli = ["iperf3", "-c", dip, "-p", str(port), "-i", "1", "--forceflush"] + (
+        cli = ["iperf3", "-c", dip, "-p", str(port), "-i", "1", "--forceflush"] + (["-S", str(tos)] if tos else []) + (
             ["-n", str(nbytes)] if nbytes else ["-t", str(dur)])
         if nbytes:
             rec["bytes"] = nbytes

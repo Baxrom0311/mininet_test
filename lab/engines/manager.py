@@ -22,7 +22,7 @@ import time
 
 from lab.model import normalize_link_params, parse_rate, validate_project, validate_scenario
 
-STUDY_LINK_FIELDS = ("bw", "delay", "loss", "queue")
+STUDY_LINK_FIELDS = ("bw", "delay", "loss", "queue", "qdisc")
 STUDY_APP_FIELDS = ("rate", "size", "codec", "page", "think", "file")
 MAX_STUDY_VALUES = 25
 

@@ -95,7 +95,7 @@ def kernel_caps():
         dp = forced
     else:
         dp = "kernel" if os.path.isdir("/sys/module/openvswitch") else "user"
-    netem = vlan = False
+    netem = vlan = fq = False
     a, b = "nlprobe0", "nlprobe1"
     try:
         if subprocess.run(["ip", "link", "add", a, "type", "veth", "peer", "name", b], capture_output=True).returncode == 0:
@@ -103,10 +103,12 @@ def kernel_caps():
                                    capture_output=True).returncode == 0
             vlan = subprocess.run(["ip", "link", "add", "link", a, "name", a + ".9", "type", "vlan", "id", "9"],
                                   capture_output=True).returncode == 0
+            fq = subprocess.run(["tc", "qdisc", "replace", "dev", a, "root", "fq_codel"],
+                                capture_output=True).returncode == 0
             subprocess.run(["ip", "link", "del", a], capture_output=True)
     except FileNotFoundError:
         pass
-    _KCAPS = {"ovs_datapath": dp, "netem": netem, "vlan": vlan}
+    _KCAPS = {"ovs_datapath": dp, "netem": netem, "vlan": vlan, "fq_codel": fq}
     return _KCAPS
 
 
@@ -287,11 +289,41 @@ def _nl_intf():
         from mininet.link import TCIntf
 
         class NLIntf(TCIntf):
-            def config(self, pfifo_limit=None, **params):
+            def config(self, pfifo_limit=None, qdisc="fifo", **params):
                 r = super().config(**params)
-                if pfifo_limit and params.get("bw") is not None:
+                bw = params.get("bw")
+                if bw is None:
+                    return r
+                limit = int(pfifo_limit or params.get("max_queue_size") or 1000)
+                if qdisc == "prio":
+                    self._qos_prio(float(bw), limit, params)
+                elif qdisc == "fq_codel":
+                    self.tc("%s qdisc replace dev %s parent 5:1 handle 10: fq_codel limit " + str(limit))
+                elif pfifo_limit:
                     self.tc("%s qdisc replace dev %s parent 5:1 handle 10: pfifo limit " + str(int(pfifo_limit)))
                 return r
+
+            def _qos_prio(self, bw, limit, params):
+                """Qat'iy ustuvorlik HTB bilan (sch_prio shart emas): 5:1 (bw) ostida
+                5:10 — yuqori sinf (prio 0, kafolatli rate=bw), 5:20 — oddiy (prio 1, faqat qolgani);
+                u32 filtr DSCP >= 40 (EF/CS5..CS7) -> 5:10. Barglar — netem (bo'lsa) yoki pfifo."""
+                self.tc("%s qdisc del dev %s parent 5:1 handle 10:")
+                for cid, prio, rate in (("5:10", 0, bw), ("5:20", 1, 0.008)):
+                    self.tc("%s class replace dev %s parent 5:1 classid " +
+                            f"{cid} htb rate {rate:.3f}Mbit ceil {bw:.3f}Mbit prio {prio} burst 15k")
+                    leaf = cid.split(":")[1]
+                    if params.get("delay") or params.get("loss"):
+                        net = "netem" + (f" delay {params['delay']}" if params.get("delay") else "") + \
+                              (f" {params['jitter']}" if params.get("delay") and params.get("jitter") else "") + \
+                              (f" loss {params['loss']}%" if params.get("loss") else "") + f" limit {limit}"
+                        self.tc(f"%s qdisc replace dev %s parent {cid} handle {leaf}: {net}")
+                    else:
+                        self.tc(f"%s qdisc replace dev %s parent {cid} handle {leaf}: pfifo limit {limit}")
+                self.tc("%s filter del dev %s parent 5: >/dev/null 2>&1")
+                for tos in (0xa0, 0xb8, 0xc0, 0xe0):      # CS5, EF, CS6, CS7 (DSCP >= 40)
+                    self.tc("%s filter add dev %s parent 5: protocol ip prio 1 u32 match ip dsfield " +
+                            f"{tos:#x} 0xfc flowid 5:10")
+                self.tc("%s filter add dev %s parent 5: protocol ip prio 9 u32 match u32 0 0 flowid 5:20")
         _NLINTF = NLIntf
     return _NLINTF
 
@@ -924,6 +956,11 @@ exit 0
             ok = est["ok"]
         if self._datapath == "user":
             opts["txo"] = False      # TCIntf.config har safar `ethtool -K tx on` qiladi — userspace OVS'da TCP buziladi
+        qd = p.get("qdisc") or "fifo"
+        if qd == "fq_codel" and not kernel_caps().get("fq_codel"):
+            self.bus.log("warn", f"{lid}: kernelda sch_fq_codel yo'q — fifo ishlatiladi")
+            qd = "fifo"
+        opts["qdisc"] = qd           # har doim (fifo ham) — eski qiymat intf.params'da qolib ketmasin
         if not kernel_caps()["netem"]:
             # sch_netem yo'q: Mininet delay/jitter/loss VA navbat (limit) uchun netem ishlatadi.
             # Navbat — HTB leaf ostida pfifo bilan (NLIntf), qolganlari e'tiborsiz.

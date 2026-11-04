@@ -262,6 +262,32 @@ with TestClient(create_app("demo")) as c:
               f"FTP 5MB {ftp.get('transfer_s')} s")
         c.delete(f"/api/runs/ospf_lab/{rid}")
 
+    # ---- QoS: fifo / prio / fq_codel — VoIP MOS TCP+UDP yuklamasi ostida (tadqiqot: l4.qdisc) ----
+    qp = c.get("/api/projects/ospf_lab?example=true").json()
+    qp["scenarios"]["qos"] = {"duration": 30, "events": [], "apps": [
+        {"id": "tel", "type": "voip", "src": "pc1", "dst": "srv2", "codec": "g711", "start": 1, "stop": 29},
+        {"id": "fayl", "type": "ftp", "src": "pc1", "dst": "srv1", "file": "20MB", "start": 3, "stop": 29},
+        {"id": "video", "type": "udp", "src": "srv1", "dst": "pc2", "rate": "9Mbps", "size": 1000, "start": 15, "stop": 25}]}
+    for eng in want:
+        st = c.post("/api/studies", json={"project": qp, "scenario": "qos", "engine": eng,
+                                          "param": {"kind": "link", "link": "l4", "field": "qdisc"},
+                                          "values": ["fifo", "prio", "fq_codel"]}).json()
+        t0 = time.time()
+        runs = []
+        while time.time() - t0 < 600:
+            runs = [r for r in c.get("/api/runs/ospf_lab").json()["runs"] if r.get("study_id") == st.get("study_id")]
+            if len(runs) == 3 and not any(r.get("status") == "running" for r in runs):
+                break
+            time.sleep(0.5)
+        mos = {}
+        for r in runs:
+            full = c.get(f"/api/runs/ospf_lab/{r['run_id']}").json()
+            mos[full.get("study_value")] = (full.get("apps") or {}).get("tel", {}).get("avg_mos")
+            c.delete(f"/api/runs/ospf_lab/{r['run_id']}")
+        check(all(mos.get(k) for k in ("fifo", "prio", "fq_codel")) and mos["fifo"] < 3.5
+              and mos["prio"] > 4.2 and mos["fq_codel"] > 4.0,
+              f"{eng}: QoS tadqiqoti — VoIP MOS fifo {mos.get('fifo')}, prio {mos.get('prio')}, fq_codel {mos.get('fq_codel')}")
+
     # ---- DHCP + NAT ----
     npj = c.get("/api/projects/nat_dhcp_lab?example=true").json()
     check(c.post("/api/validate", json=npj).json()["errors"] == [], "nat_dhcp_lab: validatsiya")
