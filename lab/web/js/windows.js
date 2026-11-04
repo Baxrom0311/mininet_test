@@ -196,6 +196,14 @@
       pane.append(h('div', { class: 'f-row' }, [field('Standart', std), field('Diapazon', band)]),
         h('div', { class: 'f-row' }, [field('Kanal kengligi', width), field('Uzatish quvvati (dBm)', txp)]),
         h('div', { class: 'f-row' }, [field('SSID', ssid), field('Kanal (bir kanaldagi yaqin AP\'lar efirni bo\'lishadi)', chSel)]),
+        (() => {   // ESS: bir xil SSID + diapazon + kanal — stansiyalar shu AP'lar orasida roaming qiladi
+          const key = (n, dv) => { const c = NL.wifi.apConfig(dv); return [(c.ssid || 'netlab-' + n), c.band, c.channel].join('|'); };
+          const mine = key(name, d);
+          const ess = Object.entries(S.project.devices).filter(([n, dv]) => dv.type === 'wifiap' && n !== name && key(n, dv) === mine).map(([n]) => n);
+          return h('div', { class: 'note', text: ess.length
+            ? `ESS: ${[name, ...ess].join(', ')} — bir xil SSID va kanal. Harakatlanuvchi stansiyalar joriy AP qamrovidan chiqqach eng kuchli AP'ga o'tadi (roaming; ns-3 va analitik).`
+            : 'Roaming uchun boshqa AP\'ga ham xuddi shu SSID va kanalni bering (ESS).' });
+        })(),
         h('div', { class: 'isec' }, [h('h4', { text: 'Stansiyalar (radio modeli, joriy joylashuv)' }),
           h('table', {}, [h('tr', {}, ['Qurilma', 'Masofa', 'RSSI dBm', 'SNR dB', 'MCS', 'Mbit/s'].map(x => h('th', { text: x }))), ...rows])]),
         h('div', { class: 'note', text: 'Simsiz ulash: kabel asbobi (C) bilan AP va host/server/router ni bosing — avtomatik Wi-Fi bo\'ladi. AP\'ning simli porti (switch/server ga) oddiy kabel.' }));

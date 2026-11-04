@@ -22,7 +22,8 @@ import time
 from lab.drivers.demo_driver import Net, _ms
 from lab.model import normalize_link_params, parse_rate
 from lab.mobility import apply_positions, has_moves, positions_at
-from lab.wifi import ap_config, channels_overlap, max_range_m, meters_per_px
+from lab.wifi import ap_config, channels_overlap, ess_key, max_range_m, meters_per_px
+from lab.wifi import estimate as wifi_estimate
 from lab.wifi import link_estimate as wifi_link_estimate
 
 MSS_BITS = 1448 * 8
@@ -62,6 +63,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                and not ({"ospfd", "isisd", "ospf6d"} & set((d.get("config") or {}).get("daemons") or []))}
     stale = None   # (eski loyiha nusxasi, qachongacha)
     movers = has_moves(sc)
+    handover = {}   # stansiya -> aloqa uzilgan vaqt (roaming kutilmoqda)
     steps = int(math.ceil(duration))
     for k in range(steps):
         t0, t1 = float(k), float(min(k + 1, duration))
@@ -82,6 +84,48 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             log(f"t={t0:.0f}s: {e['action']} {e.get('link') or e.get('device')}")
         if movers:     # harakat: oraliq o'rtasidagi pozitsiya
             apply_positions(proj, positions_at(project, sc, (t0 + t1) / 2))
+        # roaming (ESS = bir xil SSID + diapazon + kanal): boshida eng kuchli AP; keyin "yopishqoq"
+        # klient — joriy AP bilan aloqa uzilgach 1 qadam (beacon yo'qolishi + skan) uzilish, so'ng
+        # eng kuchli AP'ga o'tadi (ns-3 StaWifiMac xatti-harakatiga mos)
+        for lid, l in proj["links"].items():
+            if (l.get("params") or {}).get("medium") != "wifi":
+                continue
+            side = "a" if proj["devices"][l["a"]["dev"]]["type"] == "wifiap" else "b"
+            sta = l["b" if side == "a" else "a"]["dev"]
+            cur_ap = l[side]["dev"]
+            key = ess_key(cur_ap, proj["devices"][cur_ap])
+            sd = proj["devices"][sta]
+
+            def best_ap():
+                cands = []
+                for an, ad in proj["devices"].items():
+                    if ad["type"] == "wifiap" and ess_key(an, ad) == key:
+                        e_ = wifi_estimate(math.hypot(ad["x"] - sd["x"], ad["y"] - sd["y"]) * meters_per_px(proj), ap_config(ad))
+                        if e_["ok"]:
+                            cands.append((e_["rssi_dbm"], an))
+                return max(cands)[1] if cands else None
+
+            def repoint(new_ap):
+                used_ports = {x[e]["port"] for x in proj["links"].values() for e in ("a", "b") if x[e]["dev"] == new_ap}
+                l[side] = {"dev": new_ap, "port": max(used_ports | {0}) + 1}
+
+            if k == 0:
+                b0 = best_ap()
+                if b0 and b0 != cur_ap:
+                    repoint(b0); applied.append({"t": t0, "action": "roam", "device": sta, "from": cur_ap, "to": b0})
+                continue
+            est_now = wifi_link_estimate(proj, lid)
+            if est_now and est_now["ok"]:
+                handover.pop(sta, None)
+            elif sta not in handover:
+                handover[sta] = t0              # bu qadam — uzilish (beacon'lar yo'qoldi)
+            else:
+                b1 = best_ap()
+                if b1 and b1 != cur_ap:
+                    repoint(b1)
+                    applied.append({"t": t0, "action": "roam", "device": sta, "from": cur_ap, "to": b1})
+                    log(f"t={t0:.0f}s: roaming {sta}: {cur_ap} -> {b1}")
+                    handover.pop(sta, None)
         if stale and t0 < stale[1]:
             stale[0]["devices"] = proj["devices"]   # eski routing jadvali, lekin joriy pozitsiyalar
             n = _StaleNet(proj, stale[0], rip_set)
@@ -279,4 +323,5 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                       "dinamik routing: demo modeli (dinamik daemonli routerlar o'zaro barcha subnetlarni biladi)",
                       "RIP: kabel uzilgandan keyin rip_convergence_s (standart 15s) davomida eski yo'llar",
                       "Wi-Fi: SNR→MCS (ns-3 ga kalibrlangan), efir vaqti bo'yicha adolat (A-MPDU), TCP ACK efiri ~9%",
-                      "Wi-Fi: bir kanalda va bir-birini eshitadigan AP'lar umumiy efirni bo'lishadi; harakat — oraliq o'rtasidagi pozitsiya"]}
+                      "Wi-Fi: bir kanalda va bir-birini eshitadigan AP'lar umumiy efirni bo'lishadi; harakat — oraliq o'rtasidagi pozitsiya",
+                      "Wi-Fi roaming: ESS (SSID+diapazon+kanal) ichida, joriy AP uzilgach 1s uzilish bilan eng kuchli AP'ga"]}

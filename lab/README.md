@@ -237,8 +237,26 @@ bosqichma-bosqich tushadi:
 
 Aloqa uzilgach, ping ham to'xtaydi.
 
-**Hali yo'q:** stansiyaning eng yaqin AP'ga avtomatik o'tishi (roaming). Stansiya o'z
-kabeli ulangan AP'da qoladi.
+### Roaming (AP almashish)
+
+Bir xil **SSID, diapazon va kanal**ga ega AP'lar bitta ESS hisoblanadi. Harakatlanuvchi
+stansiya joriy AP qamrovidan chiqqanda eng kuchli signalli AP'ga o'tadi ("yopishqoq
+klient" — AP'ni faqat aloqa uzilgach almashtiradi). Wi-Fi kabeli stansiya ulangan
+**boshlang'ich** AP'ni bildiradi, keyingi almashishlar avtomatik.
+- **ns-3:** StaWifiMac beacon'lar yo'qolgach o'zi skanerlab, qayta ulanadi. Har
+  soniyada stansiyaning BSSID'i o'qiladi va AP almashsa, natijaga `roam` hodisasi
+  yoziladi (grafikda "⇄ mob1→ap2" belgisi).
+- **Analitik:** aloqa uzilgach 1 s uzilish, so'ng eng kuchli AP'ga o'tadi.
+- **Mininet:** roaming yo'q (radio emulyatsiya qilinmaydi).
+
+ns-3 faqat o'z kanalida skanerlaydi, shuning uchun ESS'dagi AP'lar bir kanalda bo'lishi
+kerak. `wifi_roaming` → `yurish` ssenariysi: mob1 100 m oraliqdagi ap1 dan ap2 ga yuradi
+(20 Mbit/s video).
+
+| | Uzilish | Roaming ap1 → ap2 | Video oldin / keyin |
+|---|---|---|---|
+| ns-3 | t = 27 s | t = 28 s (RTT 32 ms, keyin 4 ms) | 20 / 20 Mbit/s |
+| Analitik | t = 26 s | t = 27 s | 20 / 20 Mbit/s |
 
 **ns-3'da kuzatilgan holat.** Bir kanaldagi qo'shni AP bor va downlink yuklamasi kanal
 sig'imiga yaqin bo'lsa, stansiya bilan aloqa butunlay uzilib qolishi mumkin.
@@ -262,7 +280,8 @@ masalan `5,10,15,20,25` dBm qiymatlarida uzoqdagi stansiya tezligini ko'ring.
 - `ospf_lab`: ikki LAN, ikki FRR router, OSPF area 0. Ssenariylar: `asosiy`, `uzilish`, `tez_kabel`.
 - `rip_ring`: uch router uchburchak, RIPv2. `uzilish` ssenariysi — konvergensiya tahlili.
 - `wifi_ofis`: Wi-Fi AP, uch noutbuk turli masofada, simli server. Ssenariylar: `yolgiz`, `yuklama`.
-- `wifi_kampus`: ikki AP (bir kanalda), switch, server, harakatlanuvchi mob1. Ssenariylar: `xalaqit`, `yurish`.
+- `wifi_kampus`: ikki AP (36 va 40-kanal), switch, server, harakatlanuvchi mob1. Ssenariylar: `xalaqit`, `yurish`.
+- `wifi_roaming`: bitta ESS'dagi ikki AP; mob1 ap1 dan ap2 ga yuradi va roaming qiladi.
 - `p4_l2_lab`: uchta host, P4 L2 switch, `dmac` jadvali.
 - `sdn_router_lab`: SDN switch + SDN router (`l3_router` ilovasi).
 
@@ -301,5 +320,5 @@ token majburiy. Token URL'ini begonalarga bermang.
 - Real driver Ubuntu'da Mininet 2.3, OVS 2.17+, FRR 8+ va p4lang paketlari bilan ishlash uchun yozilgan. Bu repo'da u faqat statik tekshirilgan (CI'da Mininet yo'q). Birinchi ishga tushirishda xato chiqsa, **Hodisalar** panelidagi logni yuboring.
 - Router qurilmasini tarmoq ishlayotganda qayta nomlab bo'lmaydi.
 - Mininet dvigateli (`engines/emulation.py`) faqat statik tekshirilgan — birinchi real ishga tushirishda xato chiqishi mumkin.
-- Wi-Fi: AP'lar o'rtasida avtomatik roaming va qo'shni (ustma-ust tushmaydigan) kanallarning qisman xalaqiti modellashtirilmaydi.
+- Wi-Fi: qo'shni (ustma-ust tushmaydigan) kanallarning qisman xalaqiti va roaming'da kanallararo skanerlash modellashtirilmaydi.
 - Rejada: LTE/5G, harakatlanuvchi stansiyalar, bir nechta parametrli tadqiqot (2D), ns-3'da kabel yuklamasi statistikasi, VLAN/trunk, pcap yuklab olish.

@@ -170,6 +170,22 @@ with TestClient(create_app("demo")) as c:
               f"{eng}: harakat — {v.get(4, 0):.0f} -> {v.get(22, 0):.0f} -> {v.get(38, 0):.0f} Mbit/s")
         c.delete(f"/api/runs/wifi_kampus/{rid}")
 
+    # ---- Wi-Fi roaming: mob1 ap1 -> ap2 (bitta ESS) ----
+    rp2 = c.get("/api/projects/wifi_roaming?example=true").json()
+    for eng in want:
+        rid = c.post("/api/runs", json={"project": rp2, "scenario": "yurish", "engine": eng}).json()["run_id"]
+        t0 = time.time()
+        while time.time() - t0 < 300:
+            if not any(r.get("status") == "running" for r in c.get("/api/runs/wifi_roaming").json()["runs"]):
+                break
+            time.sleep(0.5)
+        r = c.get(f"/api/runs/wifi_roaming/{rid}").json()
+        roams = [e for e in r.get("events", []) if e.get("action") == "roam"]
+        v = {int(x["t"]): x["thr_bps"] / 1e6 for x in r["flows"]["v"]["series"]}
+        check(len(roams) == 1 and roams[0]["to"] == "ap2" and 20 <= roams[0]["t"] <= 34 and v.get(10, 0) > 15 and v.get(40, 0) > 15,
+              f"{eng}: roaming ap1->ap2 t={roams[0]['t'] if roams else '?'}s, video {v.get(10, 0):.0f} -> {v.get(40, 0):.0f} Mbit/s")
+        c.delete(f"/api/runs/wifi_roaming/{rid}")
+
     if "ns3" not in want:
         print("  --   ns-3 o'rnatilmagan (pip install ns3) — ns-3 testi o'tkazib yuborildi")
 

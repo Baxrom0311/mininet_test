@@ -234,6 +234,10 @@ Packet-Tracer/OPNET-style UI where the user builds a topology and runs it live o
   pool (union-find). Mobility: `move` events (`lab/mobility.py`, canvas px, linear) — ns-3 updates
   positions every 0.5 s (samples stay 1 s; rate uses time since last sample), analytic per step,
   mininet via `MininetDriver.wifi_refresh()` each second.
+- Roaming: ESS = same (SSID, band, channel) (`wifi.ess_key`). ns-3 StaWifiMac re-associates by itself;
+  the runner polls `GetBssid(0)` each sample and emits `roam` events. APs without stations are still
+  installed (beacons). Analytic: sticky client — best AP at t=0, then 1 step outage after the current
+  link fails, then re-point the link to the strongest ESS AP. Mininet: no roaming.
 - The real driver could not be executed in CI/this repo's sandbox (no Mininet/OVS/root netns); it was
   checked against Mininet 2.3 sources only. Treat first real runs as integration testing.
 

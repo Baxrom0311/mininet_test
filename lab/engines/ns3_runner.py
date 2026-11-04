@@ -174,6 +174,8 @@ def main(inp_path, out_path):
     # joylashuv = kanvas koordinatasi * meters_per_px. Model lab/wifi.py bilan bir xil.
     shared_ch = {}
     placed = set()          # mobility o'rnatilgan (Wi-Fi ishtirokchi) qurilmalar
+    ap_macs = []            # (Mac48Address, AP nomi) — roaming kuzatuvi uchun
+    sta_macs = {}           # stansiya -> (StaWifiMac, kabel id, boshlang'ich AP)
     if wifi_links:
         from lab.wifi import REF_LOSS, ap_config, meters_per_px
         mpp = meters_per_px(project)
@@ -181,6 +183,9 @@ def main(inp_path, out_path):
         for lid, l in wifi_links:
             ap_end, sta_end = (l["a"], l["b"]) if devs[l["a"]["dev"]]["type"] == "wifiap" else (l["b"], l["a"])
             by_ap.setdefault(ap_end["dev"], []).append((lid, ap_end, sta_end))
+        for n_, d_ in devs.items():      # stansiyasiz AP'lar ham beacon yuborsin (roaming uchun)
+            if d_["type"] == "wifiap":
+                by_ap.setdefault(n_, [])
         mob_nodes, mob_pos = ns.NodeContainer(), ns.ListPositionAllocator()
 
         def place(n):
@@ -213,10 +218,11 @@ def main(inp_path, out_path):
             for _lid, _ae, se in members:
                 stas.Add(nodes[se["dev"]])
             mac.SetType("ns3::StaWifiMac", "Ssid", ns.SsidValue(ssid))
-            sdevs = wifi.Install(phy, mac, stas)
+            sdevs = wifi.Install(phy, mac, stas) if members else None
             mac.SetType("ns3::ApWifiMac", "Ssid", ns.SsidValue(ssid))
             ap_dev = wifi.Install(phy, mac, ns.NodeContainer(nodes[ap])).Get(0)
             sw_ports[ap].Add(ap_dev)
+            ap_macs.append((ns.Mac48Address.ConvertFrom(ap_dev.GetAddress()), ap))
             place(ap)
             for i, (lid, ae, se) in enumerate(members):
                 sd = sdevs.Get(i)
@@ -225,6 +231,7 @@ def main(inp_path, out_path):
                 place(se["dev"])
                 link_objs[lid] = {"devs": [sd, ap_dev], "errs": [], "ends": [se], "loss": 0.0,
                                   "chan": None, "wifi": True}
+                sta_macs[se["dev"]] = (ns.DynamicCast[ns.WifiNetDevice](sd).GetMac(), lid, ap)
             emit(log=f"Wi-Fi {ap}: {cfg['standard']} {cfg['band']} GHz kanal {cfg['channel']} / {cfg['width']} MHz, "
                      f"{cfg['tx_power']:.0f} dBm, {len(members)} stansiya")
         mob = ns.MobilityHelper()
@@ -412,6 +419,7 @@ def main(inp_path, out_path):
     series = {a["id"]: [] for a in apps}
     now = 0.0
     last_sample = 0.0       # oxirgi namuna vaqti (harakat bo'lsa qadam 0.5s, namuna esa 1s)
+    roam_state = {}         # stansiya -> joriy AP
     ev_i = 0
     applied = []
 
@@ -449,6 +457,19 @@ def main(inp_path, out_path):
             continue   # oraliq nuqta (hodisa/harakat) — namuna olinmaydi
         dt = now - last_sample
         last_sample = now
+        # roaming: bir xil SSID'li (ESS) AP'lar orasida ns-3 o'zi qayta ulanadi — BSSID'ni kuzatamiz
+        for sta, (smac, _lid, ap0) in sta_macs.items():
+            cur_ap = None
+            if ns.DynamicCast[ns.StaWifiMac](smac).IsAssociated():
+                b = smac.GetBssid(0)
+                cur_ap = next((n_ for m_, n_ in ap_macs if m_ == b), None)
+            if not cur_ap:
+                continue                      # hozir ulanmagan (handover jarayonida)
+            prev_ap = roam_state.get(sta, ap0)   # boshlang'ich — kabel ulangan AP
+            if cur_ap != prev_ap:
+                applied.append({"t": now, "action": "roam", "device": sta, "from": prev_ap, "to": cur_ap})
+                emit(log=f"t={now:.0f}s: roaming {sta}: {prev_ap} -> {cur_ap}")
+            roam_state[sta] = cur_ap
         mon.CheckForLostPackets()
         for app in apps:
             fwd, rev = flows_for(app)

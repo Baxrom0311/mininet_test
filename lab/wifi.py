@@ -108,6 +108,13 @@ def meters_per_px(project):
         return 0.25
 
 
+def ess_key(name, dev):
+    """ESS: bir xil SSID + diapazon + kanal — stansiya shu AP'lar orasida roaming qiladi
+    (ns-3 StaWifiMac faqat o'z kanalida skanerlaydi, shuning uchun kanal ham bir xil bo'lishi kerak)."""
+    c = ap_config(dev)
+    return (c["ssid"] or f"netlab-{name}", c["band"], c["channel"])
+
+
 def link_estimate(project, lid):
     """Wi-Fi kabeli (params.medium == 'wifi') uchun taxmin; oddiy kabel bo'lsa None."""
     l = project["links"].get(lid)

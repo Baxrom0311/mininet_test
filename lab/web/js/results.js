@@ -473,7 +473,8 @@
       const x = X(e.t);
       svg.appendChild(NL.s('line', { x1: x, x2: x, y1: m.t, y2: H - m.b, class: 'evline' }));
       const t = NL.s('text', { x: x + 4, y: m.t + 11, class: 'evlbl' });
-      t.textContent = ({ link_down: '✕ ', link_up: '✓ ', link_params: '⚙ ', move: '➜ ' }[e.action] || '') + (e.link || e.device || '');
+      t.textContent = ({ link_down: '✕ ', link_up: '✓ ', link_params: '⚙ ', move: '➜ ', roam: '⇄ ' }[e.action] || '') +
+        (e.action === 'roam' ? `${e.device}→${e.to}` : (e.link || e.device || ''));
       svg.appendChild(t);
     });
     // chiziqlar (null — uzilish)
