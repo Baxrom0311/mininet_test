@@ -49,6 +49,16 @@ class Net:
         self.p = project
         self.devs = project["devices"]
         self._if_cache = {}
+        self._stp = None
+        self.l2_why = None
+
+    def stp(self):
+        """Spanning tree holati (lab.stp.compute) — blocking portlar va storm domenlari.
+        project["_stp_hold"] — konvergensiya davomida hali forwarding bo'lmagan portlar."""
+        if self._stp is None:
+            from lab.stp import compute
+            self._stp = compute(self.p, self.p.get("_stp_hold") or ())
+        return self._stp
 
     def ifaces(self, dev):
         """[(port, ifname, ipaddress.IPv4Interface | None)] — fizik port + uning VLAN
@@ -108,12 +118,19 @@ class Net:
         first = self.link_on(dev, port)
         if not first or not self.link_ok(first[0]):
             return out
+        st = self.stp()
         q = deque([(first[1], first[2], tag, [(first[0], first[3])])])
         seen = set()
         while q:
             cur, inport, wtag, path = q.popleft()
             if not self.is_l2(cur):
                 out.setdefault((cur, inport, wtag), path)
+                continue
+            if cur in st["storm"]:          # L2 halqa STP'siz — kadrlar cheksiz aylanadi
+                self.l2_why = (f"{cur}: L2 halqa (STP o'chiq): broadcast storm "
+                               f"[{', '.join(st['storm_cycle'].get(cur, []))}]")
+                return {}
+            if (cur, inport) in st["blocked"]:  # STP blocking port kadrni qabul qilmaydi
                 continue
             cd = self.devs[cur]
             v = vlan_ingress(switch_port_cfg(cd, inport), wtag)
@@ -124,7 +141,7 @@ class Net:
                 if p2 == inport:
                     continue
                 ok, etag = vlan_egress(switch_port_cfg(cd, p2), v)
-                if not ok:
+                if not ok or (cur, p2) in st["blocked"]:
                     continue
                 nxt = self.link_on(cur, p2)
                 if nxt and self.link_ok(nxt[0]):
@@ -228,7 +245,7 @@ class Net:
                     if pp == np and parse_ifname(nifn)[2] == tg and nip and nip.ip == nh:
                         target = (nd, path, nip.ip)
             if not target:
-                return False, f"{cur}: {nh} ARP javob bermadi (Destination Host Unreachable)", hops, links, delay
+                return False, self.l2_why or f"{cur}: {nh} ARP javob bermadi (Destination Host Unreachable)", hops, links, delay
             nd, path, nip = target
             links += path
             for lid, _dir in path:
@@ -509,6 +526,10 @@ class DemoDriver(BaseDriver):
                              "rows": [[p, 0, m, int(time.time() - ts)] for m, (p, ts) in fdb.items()]})
                 secs.append({"title": "OpenFlow jadvallari", "kind": "text",
                              "text": " cookie=0x0, table=0, priority=0 actions=NORMAL\n(demo rejimi)"})
+                from lab.stp import inspect_section
+                sec = inspect_section(self.project, name)
+                if sec:
+                    secs.append(sec)
             if t == "p4switch":
                 prog = (d.get("config") or {}).get("program")
                 src = (self.project.get("p4_programs") or {}).get(prog, "")

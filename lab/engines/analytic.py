@@ -74,6 +74,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     done_at, setup_left = {}, {}
     node_series = {dv: [] for dv, d in proj["devices"].items() if d["type"] in L3_NS}
     rtrack = RouteTracker()
+    from lab.stp import compute as stp_compute, convergence_time as stp_conv_time, stp_enabled
+    stp_on = any(stp_enabled(d) for d in proj["devices"].values())
+    stp_up, stp_fwd, stp_hold = {}, None, {}
     steps = int(math.ceil(duration))
     for k in range(steps):
         t0, t1 = float(k), float(min(k + 1, duration))
@@ -136,6 +139,30 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     applied.append({"t": t0, "action": "roam", "device": sta, "from": cur_ap, "to": b1})
                     log(f"t={t0:.0f}s: roaming {sta}: {cur_ap} -> {b1}")
                     handover.pop(sta, None)
+        if stp_on:
+            # STP konvergensiyasi: blocking/disabled -> forwarding o'tayotgan portlar `hold` da
+            # (802.1D: 2*forward_delay [+max_age], RSTP ~1 s); forwarding -> blocking — darhol.
+            up_now = {lid: l.get("up") is not False for lid, l in proj["links"].items()}
+            failed = [lid for lid, u in up_now.items() if stp_up.get(lid, True) and not u]
+            changed = up_now != stp_up
+            stp_up = up_now
+            proj.pop("_stp_hold", None)
+            if changed or stp_fwd is None:
+                st_new = stp_compute(proj)
+                fwd_new = {(x, p_) for x, b in st_new["bridges"].items() for p_, v in b["ports"].items()
+                           if v["state"] == "forwarding"}
+                if stp_fwd is not None:
+                    for x, p_ in fwd_new - stp_fwd:
+                        stp_hold[(x, p_)] = t0 + stp_conv_time(proj, x, failed, sc)
+                        log(f"STP: {x} port {p_} -> forwarding {stp_hold[(x, p_)] - t0:.0f} s dan keyin")
+                    for key in list(stp_hold):
+                        if key not in fwd_new:
+                            stp_hold.pop(key)
+                stp_fwd = fwd_new
+            for key in [k_ for k_, t_ in stp_hold.items() if t0 + 1e-9 >= t_]:
+                stp_hold.pop(key)
+            if stp_hold:
+                proj["_stp_hold"] = sorted(stp_hold)
         if stale and t0 < stale[1]:
             stale[0]["devices"] = proj["devices"]   # eski routing jadvali, lekin joriy pozitsiyalar
             n = _StaleNet(proj, stale[0], rip_set)
@@ -417,6 +444,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     cnt[dst_]["rx"] += pps
                     if i_ < len(hops) - 1:
                         cnt[dst_]["fwd"] += pps
+        if stp_on:      # STP port holatlari -> route_events (konvergensiya vaqti uchun)
+            for x, b in n.stp()["bridges"].items():
+                rtrack.update(t0, x, {f"port{p_} {v['role']}/{v['state']}" for p_, v in b["ports"].items()})
         for dv in node_series:
             rts = {route_key(r[0], r[1], r[2]) for r in n.routes(dv)}
             rtrack.update(t0, dv, rts)

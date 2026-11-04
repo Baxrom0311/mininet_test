@@ -292,6 +292,8 @@ def validate_project(p):
             errors.append(f"P4 dastur '{pname}': noto'g'ri nom")
     from lab.services import validate_services   # (aylanma import bo'lmasin)
     errors += validate_services(p)
+    from lab.stp import validate as validate_stp
+    errors += validate_stp(p)
     return errors
 
 
