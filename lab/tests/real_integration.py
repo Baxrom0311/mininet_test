@@ -201,7 +201,39 @@ def t_emu(drv, caps):
     check(res["events"], f"hodisa qo'llandi: {res['events']}")
 
 
-TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "sdn": t_sdn, "p4": t_p4}
+def t_queue(drv, caps):
+    """Navbat (pfifo/netem limit) va tashlanishlar; update_link'dan keyin TCP (offload) ishlaydi."""
+    import shutil
+    from lab.engines import emulation
+    if not shutil.which("iperf3"):
+        print("  skip (iperf3 yo'q)")
+        return
+    proj = {"version": 1, "name": "q", "devices": {
+        "h1": host("h1", 1, "10.0.0.1/24"), "h2": host("h2", 2, "10.0.0.2/24"),
+        "s1": {"id": 3, "type": "switch", "x": 0, "y": 0, "config": {"mode": "standalone", "stp": False}}},
+        "links": {"l1": link("h1", 1, "s1", 1, bw=50), "l2": link("s1", 2, "h2", 1, bw=10, queue=100)},
+        "p4_programs": {}, "controllers": {}, "scenarios": {}}
+    drv.start(proj)
+    time.sleep(1)
+    sc = {"duration": 6, "apps": [{"id": "udp", "type": "udp", "src": "h1", "dst": "h2", "rate": "20Mbps",
+                                   "size": 1000, "start": 1, "stop": 5}], "events": []}
+    res = emulation.run(drv, sc)
+    pts = [p for p in res["links"]["l2"] if 2 <= p["t"] <= 5]
+    qmax = max((p["queue_ab"] for p in pts), default=0)
+    drops = sum(p["drops_ab"] for p in pts)
+    print("    l2 queue_ab", [p["queue_ab"] for p in pts], "drops_ab", [p["drops_ab"] for p in pts])
+    check(50 <= qmax <= 110, f"navbat ~queue=100 paket (max {qmax})")
+    # 20 Mbit/s -> 10 Mbit/s: ~1250 paket/s ortiqcha, 4 soniya
+    check(3500 < drops < 6500, f"ortiqcha 10 Mbit/s tashlanadi ({drops} paket, kutilgan ~5000)")
+    drv.update_link("l2", params={**proj["links"]["l2"]["params"], "bw": 8})
+    out = drv.net.get("h2").cmd("iperf3 -s -1 -D")
+    time.sleep(0.5)
+    out = drv.net.get("h1").cmd("timeout 10 iperf3 -c 10.0.0.2 -t 2 -f m")
+    m = re.findall(r"([\d.]+) Mbits/sec\s+\d*\s*receiver", out)
+    check(bool(m) and 5 < float(m[-1]) < 9, f"update_link(bw=8) dan keyin TCP ishlaydi: {m}")
+
+
+TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "sdn": t_sdn, "p4": t_p4}
 
 
 def main(argv):

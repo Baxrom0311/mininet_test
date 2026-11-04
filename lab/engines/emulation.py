@@ -25,8 +25,40 @@ def _mult(u):
     return {"": 1, "K": 1e3, "M": 1e6, "G": 1e9}[u]
 
 
+_OVS_TYPES = ("switch", "sdnrouter", "wifiap")
+
+
+def _fix_userspace_drops(project, link_series, sw_pk, sw_prev):
+    """Userspace (netdev) OVS port socket'i ENOBUFS'da paketni qayta yuboradi — har
+    urinish qdisc drops'ga qo'shiladi (~1.5x ortiqcha). Switch uchun haqiqiy yo'qotish
+    = kirgan - chiqqan paketlar (shu soniyada); qdisc drops shu songa proporsional
+    kichraytiriladi. Faqat switch tomonidagi (egress) yo'nalishlar tuzatiladi."""
+    per_sw = {}     # switch -> [(lid, dir)], rx, tx
+    for lid, (rxa, txa, rxb, txb) in sw_pk.items():
+        l = project["links"][lid]
+        p0 = sw_prev.get(lid, (rxa, txa, rxb, txb))
+        sw_prev[lid] = (rxa, txa, rxb, txb)
+        for side, d, rx, tx, rx0, tx0 in (("a", "ab", rxa, txa, p0[0], p0[1]), ("b", "ba", rxb, txb, p0[2], p0[3])):
+            dev = l[side]["dev"]
+            if project["devices"][dev]["type"] not in _OVS_TYPES:
+                continue
+            e = per_sw.setdefault(dev, {"dirs": [], "rx": 0, "tx": 0})
+            e["dirs"].append((lid, d))
+            e["rx"] += rx - rx0
+            e["tx"] += tx - tx0
+    for e in per_sw.values():
+        qd = sum(link_series[lid][-1][f"drops_{d}"] for lid, d in e["dirs"] if link_series[lid])
+        true = max(e["rx"] - e["tx"], 0)
+        if qd <= 0:
+            continue
+        f = min(true / qd, 1.0)
+        for lid, d in e["dirs"]:
+            pt = link_series[lid][-1]
+            pt[f"drops_{d}"] = round(pt[f"drops_{d}"] * f)
+
+
 def run(driver, sc, progress=lambda f: None, log=lambda m: None):
-    from lab.drivers.mininet_driver import _read_net_dev   # lazy
+    from lab.drivers.mininet_driver import QdiscSampler, _read_net_dev   # lazy
     if not driver.running or driver.name != "real":
         raise RuntimeError("Mininet dvigateli uchun real driverda tarmoq ishlab turishi kerak")
     with driver.lock:
@@ -151,6 +183,8 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
     # kabel yuklamasi
     link_series = {lid: [] for lid in project["links"]}
     prev = {}
+    sw_prev = {}
+    userspace = getattr(driver, "_datapath", "kernel") == "user"
     from lab.mobility import has_moves, positions_at
     movers = has_moves(sc)
     k = 0
@@ -164,6 +198,8 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
             except Exception as ex:  # noqa: BLE001
                 log(f"harakat xatosi: {ex}")
         cache = {}
+        sw_pk = {}
+        qs = QdiscSampler()
         for lid, l in project["links"].items():
             pa, pb = pid[l["a"]["dev"]], pid[l["b"]["dev"]]
             for p_ in (pa, pb):
@@ -173,11 +209,18 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
             ib = cache[pb].get(ifname(l["b"]["dev"], l["b"]["port"]))
             if not ia or not ib:
                 continue
-            cur = (ia[3], ib[3])
+            qa = qs.read(pa).get(ifname(l["a"]["dev"], l["a"]["port"]), (0, 0, 0, 0))
+            qb = qs.read(pb).get(ifname(l["b"]["dev"], l["b"]["port"]), (0, 0, 0, 0))
+            cur = (ia[3], ib[3], qa[2], qb[2])
             p0 = prev.get(lid, cur); prev[lid] = cur
             ab, ba = (cur[0] - p0[0]) * 8, (cur[1] - p0[1]) * 8
             bw = float((l.get("params") or {}).get("bw", 100)) * 1e6
-            link_series[lid].append({"t": float(k), "ab_bps": ab, "ba_bps": ba, "util": round(min(max(ab, ba) / bw, 1), 4)})
+            link_series[lid].append({"t": float(k), "ab_bps": ab, "ba_bps": ba, "util": round(min(max(ab, ba) / bw, 1), 4),
+                                     "queue_ab": qa[0], "queue_ba": qb[0],
+                                     "drops_ab": max(cur[2] - p0[2], 0), "drops_ba": max(cur[3] - p0[3], 0)})
+            sw_pk[lid] = (ia[1], ia[4], ib[1], ib[4])     # rx/tx paketlar (a, b tomon)
+        if userspace:
+            _fix_userspace_drops(project, link_series, sw_pk, sw_prev)
         progress(k / duration)
 
     time.sleep(2.0)    # oxirgi iperf3 intervallari

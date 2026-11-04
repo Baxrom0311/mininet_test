@@ -34,7 +34,9 @@ URL'ini ekranga chiqaradi.
 | Holat | Nima qilinadi |
 |---|---|
 | `openvswitch` yadro moduli yo'q (WSL2 standart yadrosi, konteynerlar) | OVS **userspace datapath** (`datapath=netdev`) ishlatiladi; veth'larda TX checksum offload `ethtool -K … tx off` bilan o'chiriladi (aks holda TCP/UDP o'tmaydi, faqat ping o'tadi) |
-| `sch_netem` yo'q | kabel `bw` (HTB) ishlaydi, `delay/jitter/loss` e'tiborsiz qoldiriladi va bir marta ogohlantiriladi |
+| `sch_netem` yo'q | kabel `bw` (HTB) va `queue` (HTB ostida `pfifo limit`) ishlaydi, `delay/jitter/loss` e'tiborsiz qoldiriladi va bir marta ogohlantiriladi |
+| userspace OVS port navbati | port socket'i navbatdagi paketlar uchun sndbuf sarflaydi (standart ~94 paket) — `net.core.wmem_default` 16 MB ga oshiriladi va OVS bir marta qayta ishga tushiriladi |
+| OVS daemon ishlamayapti (systemd yo'q) | `ovs-ctl start` bilan avtomatik ishga tushiriladi |
 | os-ken skripti boshqa Python versiyasiga tegishli | import qila oladigan interpreter (`python3.12 -m os_ken.cmd.manager` …) avtomatik tanlanadi |
 
 Majburlash: `NETLAB_OVS_DATAPATH=kernel|user`.
@@ -42,7 +44,7 @@ Majburlash: `NETLAB_OVS_DATAPATH=kernel|user`.
 Haqiqiy tarmoq integratsiya testi (root kerak; FRR/os-ken/BMv2 bo'lmasa tegishli qism o'tkazib yuboriladi):
 
 ```bash
-sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu sdn p4
+sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue sdn p4
 ```
 
 ### Istalgan kompyuter (demo rejim, Mininet'siz)
@@ -147,6 +149,21 @@ NetLab'da ham xuddi shunday:
 | **Analitik** | Oqim modeli: UDP qat'iy tezlikda, TCP max-min adolat + Mathis formulasi, navbat M/M/1. ~0.1 s | Tez "nima bo'ladi?" tahlili, katta topologiyalar |
 | **ns-3** | Diskret-hodisali simulyatsiya (OPNET bilan bir xil tamoyil): paket darajasida, virtual vaqtda, deterministik (seed) | Ilmiy natija, takrorlanuvchan tajriba, real vaqtdan tez |
 | **Mininet** | Haqiqiy emulyatsiya: iperf3/ping haqiqiy Linux TCP/UDP, FRR, OVS, P4, SDN orqali o'tadi | Protokol va konfiguratsiyani "haqiqatda" tekshirish |
+
+**Kabel statistikasi** (OPNET'dagi *queue size* / *dropped packets*): har natijada
+`links.<kabel>` — soniyalik nuqtalar, uchala dvigatelda bir xil maydonlar bilan:
+
+| Maydon | Ma'nosi | Analitik | ns-3 | Mininet |
+|---|---|---|---|---|
+| `ab_bps` / `ba_bps` | yo'nalish bo'yicha yuklama | oqim modeli | qurilma TX navbati | `/proc/net/dev` |
+| `util` | max(ab, ba) / bw | ✓ | ✓ | ✓ |
+| `queue_ab` / `queue_ba` | jo'natuvchi tomondagi navbat (paket) | M/M/1 (1500 B) | pfifo qdisc + qurilma navbati | `tc -s qdisc` root qlen |
+| `drops_ab` / `drops_ba` | shu soniyada navbat to'lib tashlangan paketlar | ortiqcha UDP / 1000 B | qdisc + qurilma drops | `tc` drops (userspace OVS'da switch kirdi-chiqdi bo'yicha tuzatilgan) |
+
+Kabelning `queue` parametri (paket) uchala dvigatelda navbat chegarasi: ns-3'da L3
+tomonda `PfifoFastQueueDisc(MaxSize=queue)`, Mininet'da netem `limit` yoki (netem
+bo'lmasa) HTB ostidagi `pfifo limit`. Jonli tarmoqda `stats` hodisasi ham
+`queue_ab/queue_ba/qdrops` maydonlarini beradi.
 
 ### Ikki parametrli tadqiqot (issiqlik xaritasi)
 

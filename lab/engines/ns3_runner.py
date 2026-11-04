@@ -120,6 +120,7 @@ def main(inp_path, out_path):
     sw_ports = {n: ns.NetDeviceContainer() for n, d in devs.items() if d["type"] in L2}
     jitter_warn = False
     wifi_links = []
+    port_q = {}       # (dev, port) -> navbat hajmi ("1000p") — L3 tomonda qdisc uchun
     for lid, l in project["links"].items():
         a, b = l["a"], l["b"]
         p = l.get("params") or {}
@@ -160,6 +161,7 @@ def main(inp_path, out_path):
             errs.append(em)
         port_dev[(a["dev"], a["port"])] = d1
         port_dev[(b["dev"], b["port"])] = d2
+        port_q[(a["dev"], a["port"])] = port_q[(b["dev"], b["port"])] = q
         for side, dv in ((a, d1), (b, d2)):
             if side["dev"] in sw_ports:
                 sw_ports[side["dev"]].Add(dv)
@@ -248,11 +250,30 @@ def main(inp_path, out_path):
     # IP manzillar
     emit(log="IP manzillar")
     iface = {}        # (dev, port) -> (ipv4, idx, IPv4Interface)
+    root_qd = {}      # (dev, port) -> QueueDisc
     for (dname, port), dv in port_dev.items():
         d = devs[dname]
         if d["type"] not in L3:
             continue
         ipv4 = nodes[dname].GetObject[ns.Ipv4]()
+        if (dname, port) in port_q:
+            # Linux kabi: navbat (queue) IP qatlamidagi qdisc'da — pfifo limit=queue, qurilma
+            # navbati kichik. Aks holda (qo'lda AddInterface) qdisc yo'q va TrafficControlLayer
+            # to'lgan qurilma navbati oldida paketlarni hisobsiz tashlaydi.
+            tch = ns.TrafficControlHelper()
+            tch.SetRootQueueDisc("ns3::PfifoFastQueueDisc", "MaxSize",
+                                 ns.QueueSizeValue(ns.QueueSize(port_q[(dname, port)])))
+            qdc = tch.Install(dv)
+            root_qd[(dname, port)] = qdc.Get(0)
+            try:
+                _dq = dv.GetObject[ns.NetDevice]()
+                for cls in ("PointToPointNetDevice", "SimpleNetDevice"):
+                    d_ = ns.DynamicCast[getattr(ns, cls)](_dq)
+                    if d_:
+                        d_.GetQueue().SetAttribute("MaxSize", ns.QueueSizeValue(ns.QueueSize("4p")))
+                        break
+            except Exception:  # noqa: BLE001
+                pass
         idx = ipv4.AddInterface(dv)
         ip = (((d.get("config") or {}).get("interfaces") or {}).get(f"{dname}-eth{port}") or {}).get("ip")
         if ip:
@@ -423,6 +444,47 @@ def main(inp_path, out_path):
     ev_i = 0
     applied = []
 
+    # kabel statistikasi: har yo'nalish = jo'natuvchi qurilmaning TX navbati (DropTail)
+    def _txq(dv):
+        for cls in ("PointToPointNetDevice", "SimpleNetDevice"):
+            try:
+                d = ns.DynamicCast[getattr(ns, cls)](dv)
+                if d:
+                    return d.GetQueue()
+            except Exception:  # noqa: BLE001
+                pass
+        return None
+    def _qd_stats(qd):
+        if not qd:
+            return 0, 0
+        try:
+            return qd.GetNPackets(), qd.GetStats().nTotalDroppedPackets
+        except Exception as ex:  # noqa: BLE001
+            if os.environ.get("NETLAB_NS3_DEBUG"):
+                emit(log=f"qdisc stats: {ex}")
+            return 0, 0
+    link_q = {lid: [_txq(dv) for dv in lo["devs"]] for lid, lo in link_objs.items()}
+    link_qd = {lid: [root_qd.get((e["dev"], e["port"])) for e in lo["ends"]] for lid, lo in link_objs.items()}
+    link_series = {lid: [] for lid in link_q}
+    link_prev = {}
+
+    def sample_links(dt):
+        for lid, (qa, qb) in link_q.items():
+            if qa is None or qb is None:
+                continue
+            (na, da), (nb, db) = (_qd_stats(x) for x in link_qd[lid])
+            cur = (qa.GetTotalReceivedBytes() - qa.GetTotalDroppedBytes(), qa.GetTotalDroppedPackets() + da,
+                   qb.GetTotalReceivedBytes() - qb.GetTotalDroppedBytes(), qb.GetTotalDroppedPackets() + db)
+            p0 = link_prev.get(lid, (0, 0, 0, 0))
+            link_prev[lid] = cur
+            ab = (cur[0] - p0[0]) * 8 / max(dt, 1e-9)
+            ba = (cur[2] - p0[2]) * 8 / max(dt, 1e-9)
+            bw = float((project["links"][lid].get("params") or {}).get("bw", 100)) * 1e6
+            link_series[lid].append({"t": round(now, 3), "ab_bps": round(ab), "ba_bps": round(ba),
+                                     "util": round(min(max(ab, ba) / bw, 1.0), 4),
+                                     "queue_ab": qa.GetNPackets() + na, "queue_ba": qb.GetNPackets() + nb,
+                                     "drops_ab": cur[1] - p0[1], "drops_ba": cur[3] - p0[3]})
+
     def flows_for(app):
         fwd, rev = [], []
         for fid, st in mon.GetFlowStats():
@@ -488,6 +550,7 @@ def main(inp_path, out_path):
                 pt["rtt_ms"] = (round(pt["delay_ms"] + (rdl - rdl0) / drr * 1000, 3)
                                 if pt["delay_ms"] is not None and drr > 0 else None)
             series[app["id"]].append(pt)
+        sample_links(dt)
         emit(progress=round(now / duration, 3))
 
     if os.environ.get("NETLAB_NS3_DEBUG"):
@@ -512,7 +575,7 @@ def main(inp_path, out_path):
         flows[app["id"]] = {**app, "series": series[app["id"]], "summary": summ}
     ns.Simulator.Destroy()
     out = {"engine": "ns3", "engine_label": "ns-3 (diskret-hodisali simulyatsiya)",
-           "duration": duration, "flows": flows, "events": applied,
+           "duration": duration, "flows": flows, "links": link_series, "events": applied,
            "wall_s": round(time.time() - t_wall, 2),
            "notes": ["dinamik routing: ripd → ns-3 RIPv2 (haqiqiy konvergensiya); qolganlari — analitik bilan bir xil SPF modeli statik marshrut sifatida (hodisada darhol qayta hisoblanadi)",
                      "TCP: Cubic, MSS 1448, bufer 4/6 MB (Linux'ga yaqin)",

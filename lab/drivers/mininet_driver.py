@@ -105,6 +105,53 @@ def kernel_caps():
     return _KCAPS
 
 
+WMEM_USERSPACE = 16 * 1024 * 1024
+
+
+def _sysctl(key, value=None):
+    path = "/proc/sys/" + key.replace(".", "/")
+    try:
+        if value is None:
+            with open(path) as f:
+                return f.read().strip()
+        with open(path, "w") as f:
+            f.write(str(value))
+        return str(value)
+    except OSError:
+        return None
+
+
+def _ovs_ok():
+    try:
+        return subprocess.run(["ovs-vsctl", "--timeout=3", "show"], capture_output=True,
+                              timeout=6).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def ensure_ovs():
+    """ovsdb-server/ovs-vswitchd ishlamayotgan bo'lsa ishga tushiradi
+    (WSL2/konteynerda systemd yo'q — servis o'zi turmaydi)."""
+    if _ovs_ok():
+        return True
+    for cmd in (["/usr/share/openvswitch/scripts/ovs-ctl", "start", "--system-id=random"],
+                ["service", "openvswitch-switch", "start"]):
+        if os.path.exists(cmd[0]) or _which(cmd[0]):
+            _run(cmd, timeout=60)
+            if _ovs_ok():
+                return True
+    return False
+
+
+def restart_ovs():
+    ctl = "/usr/share/openvswitch/scripts/ovs-ctl"
+    if os.path.exists(ctl):
+        _run([ctl, "restart", "--system-id=random"], timeout=60)
+    else:
+        _run(["service", "openvswitch-switch", "restart"], timeout=60)
+    return ensure_ovs()
+
+
 _CTRL_CMD = None
 
 
@@ -151,6 +198,52 @@ def _read_net_dev(pid):
     return out
 
 
+def _netns_id(pid):
+    try:
+        return os.readlink(f"/proc/{pid}/ns/net")
+    except OSError:
+        return None
+
+
+def _read_qdisc(pid):
+    """Namespace'dagi barcha interfeyslar navbati (tc -s -j qdisc):
+    {ifname: (backlog_pkts, backlog_bytes, drops_total, overlimits)}.
+    root qdisc qlen/drops (HTB bolalarini ham qamraydi)."""
+    out = {}
+    argv = ["tc", "-s", "-j", "qdisc", "show"]
+    if _netns_id(pid) != _netns_id(os.getpid()):
+        argv = ["mnexec", "-a", str(pid)] + argv
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+        data = json.loads(r.stdout or "[]")
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return out
+    for q in data:
+        dev = q.get("dev")
+        if not dev:
+            continue
+        if q.get("root"):   # root (htb) statistikasi bolalar (pfifo/netem) drops'ini ham o'z ichiga oladi
+            out[dev] = (int(q.get("qlen", 0)), int(q.get("backlog", 0)), int(q.get("drops", 0)),
+                        int(q.get("overlimits", 0)))
+    return out
+
+
+class QdiscSampler:
+    """Har netns uchun bitta tc chaqiruvi; read(pid) — kesh (shu sikl ichida)."""
+
+    def __init__(self):
+        self._by_ns = {}
+
+    def reset(self):
+        self._by_ns = {}
+
+    def read(self, pid):
+        ns = _netns_id(pid)
+        if ns not in self._by_ns:
+            self._by_ns[ns] = _read_qdisc(pid)
+        return self._by_ns[ns]
+
+
 _PROTO_RULES = [
     ("ARP", re.compile(r"^ARP")),
     ("STP", re.compile(r"STP|802\.1d", re.I)),
@@ -175,6 +268,27 @@ def classify(summary):
 
 
 _TCPDUMP_LINE = re.compile(r"^(\d+\.\d+)\s+(\S+)\s+(In|Out|B|M|P)\s+(.*)$")
+
+
+_NLINTF = None
+
+
+def _nl_intf():
+    """TCIntf + netem'siz navbat cheklovi: HTB leaf (5:1) ostiga `pfifo limit N`.
+    Mininet max_queue_size'ni faqat netem orqali qo'yadi — netem yo'q yadrolarda
+    (WSL2) navbat uzunligi aks holda cheksiz (txqueuelen) bo'lib qoladi."""
+    global _NLINTF
+    if _NLINTF is None:
+        from mininet.link import TCIntf
+
+        class NLIntf(TCIntf):
+            def config(self, pfifo_limit=None, **params):
+                r = super().config(**params)
+                if pfifo_limit and params.get("bw") is not None:
+                    self.tc("%s qdisc replace dev %s parent 5:1 handle 10: pfifo limit " + str(int(pfifo_limit)))
+                return r
+        _NLINTF = NLIntf
+    return _NLINTF
 
 
 def _mn_classes():
@@ -329,6 +443,9 @@ class MininetDriver(BaseDriver):
             raise DriverError("Real driver root talab qiladi: sudo python3 -m lab.netlab")
         if not caps["mininet"] or not caps["ovs"]:
             raise DriverError("Mininet/Open vSwitch o'rnatilmagan (sudo bash lab/install_lab.sh)")
+        if not ensure_ovs():
+            raise DriverError("Open vSwitch ishga tushmadi (ovsdb-server/ovs-vswitchd): "
+                              "sudo /usr/share/openvswitch/scripts/ovs-ctl start")
         types = {d["type"] for d in project["devices"].values()}
         if "router" in types and not caps["frr"]:
             raise DriverError("FRR router bor, lekin FRRouting o'rnatilmagan (install_lab.sh --frr)")
@@ -359,6 +476,17 @@ class MininetDriver(BaseDriver):
             self._netem_warned = False
             if self._datapath == "user":
                 self.bus.log("info", "OVS kernel moduli yo'q — userspace datapath (netdev) ishlatiladi")
+                # netdev OVS port socket'i (AF_PACKET) qdisc'dagi paketlar uchun ham sndbuf
+                # sarflaydi: standart 208 KB ~94 paketdan keyin paketlar qdisc'ga yetmay
+                # hisobsiz tashlanadi -> kabel `queue` parametri ishlamaydi. Vaqtincha oshiramiz.
+                # Socket ovs-vswitchd ishga tushganda bir marta ochiladi — shuning uchun
+                # sysctl'dan keyin daemon bir marta qayta ishga tushiriladi (qiymat qoldiriladi).
+                cur = _sysctl("net.core.wmem_default")
+                if cur and int(cur) < WMEM_USERSPACE:
+                    _sysctl("net.core.wmem_default", WMEM_USERSPACE)
+                    self.bus.log("info", f"net.core.wmem_default {cur} -> {WMEM_USERSPACE} "
+                                         "(port navbati uchun), Open vSwitch qayta ishga tushirilmoqda")
+                    restart_ovs()
                 if not _which("ethtool"):
                     self.bus.log("warn", "ethtool yo'q — userspace OVS'da TCP/UDP ishlamasligi mumkin "
                                          "(apt install ethtool)")
@@ -609,14 +737,18 @@ class MininetDriver(BaseDriver):
             est = wifi_link_estimate(self.project, lid)
             opts.update(bw=max(est["thr_mbps"], 0.1), delay="1ms", jitter="0.5ms", loss=None)
             ok = est["ok"]
+        if self._datapath == "user":
+            opts["txo"] = False      # TCIntf.config har safar `ethtool -K tx on` qiladi — userspace OVS'da TCP buziladi
         if not kernel_caps()["netem"]:
-            # sch_netem yo'q: Mininet TCIntf delay/jitter/loss VA navbat (limit) uchun netem ishlatadi
-            for k in ("delay", "jitter", "loss", "max_queue_size"):
+            # sch_netem yo'q: Mininet delay/jitter/loss VA navbat (limit) uchun netem ishlatadi.
+            # Navbat — HTB leaf ostida pfifo bilan (NLIntf), qolganlari e'tiborsiz.
+            opts["pfifo_limit"] = opts.pop("max_queue_size", None)
+            for k in ("delay", "jitter", "loss"):
                 opts.pop(k, None)
             if not self._netem_warned:
                 self._netem_warned = True
-                self.bus.log("warn", "Kernelda netem yo'q: kabellarda faqat tezlik (HTB) emulyatsiya qilinadi — "
-                                     "kechikish, jitter, loss va navbat uzunligi e'tiborsiz qoldiriladi")
+                self.bus.log("warn", "Kernelda netem yo'q: kabellarda tezlik (HTB) va navbat (pfifo) emulyatsiya "
+                                     "qilinadi — kechikish, jitter va loss e'tiborsiz qoldiriladi")
         return opts, ok
 
     def _add_link_obj(self, lid, l):
@@ -634,7 +766,7 @@ class MininetDriver(BaseDriver):
         if DEVICE_TYPES[db["type"]]["ns"]:
             kw["addr2"] = device_mac(db["id"], b["port"])
         link = self.net.addLink(self.net.get(a["dev"]), self.net.get(b["dev"]), cls=TCLink,
-                                **kw, **opts)
+                                cls1=_nl_intf(), cls2=_nl_intf(), **kw, **opts)
         self._links[lid] = link
         if l.get("up") is False or not radio_ok:
             link.intf1.ifconfig("down")
@@ -1166,6 +1298,7 @@ class MininetDriver(BaseDriver):
             now = time.time()
             for pid in pids:
                 pids[pid] = _read_net_dev(pid)
+            qs = QdiscSampler()
             out = {}
             for lid, l, pa, pb in items:
                 ia = pids[pa].get(ifname(l["a"]["dev"], l["a"]["port"]))
@@ -1186,5 +1319,8 @@ class MininetDriver(BaseDriver):
                             "ba_pps": round(max(cur[4] - p[4], 0) / dt, 1),
                             "util": round(min(max(ab, ba) / bw, 1.0), 4),
                             "drops": cur[5]}
+                qa = qs.read(pa).get(ifname(l["a"]["dev"], l["a"]["port"]), (0, 0, 0, 0))
+                qb = qs.read(pb).get(ifname(l["b"]["dev"], l["b"]["port"]), (0, 0, 0, 0))
+                out[lid].update(queue_ab=qa[0], queue_ba=qb[0], qdrops=qa[2] + qb[2])
             if out:
                 self.bus.publish({"type": "stats", "links": out})

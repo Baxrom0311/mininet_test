@@ -86,6 +86,24 @@ with TestClient(create_app("demo")) as c:
         check(during and max(during) < 1e5, f"{eng}: kabel uzilganda video to'xtaydi")
         check(after and min(after) > 4e6, f"{eng}: tiklangandan keyin video qaytadi")
         c.delete(f"/api/runs/ospf_lab/{rid}")
+        # kabel navbati/tashlanish: 14 Mbit/s video 10 Mbit/s r1-r2 (l4) kabelida
+        sc_over = {**p["scenarios"]["asosiy"], "duration": 8,
+                   "apps": [{"id": "v", "type": "udp", "src": "pc1", "dst": "srv2", "rate": "14Mbps",
+                             "size": 1000, "start": 1, "stop": 7}]}
+        p_over = {**p, "scenarios": {**p["scenarios"], "ortiqcha": sc_over}}
+        rid = c.post("/api/runs", json={"project": p_over, "scenario": "ortiqcha", "engine": eng}).json()["run_id"]
+        t0 = time.time()
+        while time.time() - t0 < 240:
+            if not any(r.get("status") == "running" for r in c.get("/api/runs/ospf_lab").json()["runs"]):
+                break
+            time.sleep(0.5)
+        r = c.get(f"/api/runs/ospf_lab/{rid}").json()
+        l4 = [x for x in (r.get("links") or {}).get("l4", []) if 3 <= x["t"] <= 6]
+        q = [x.get("queue_ab", 0) for x in l4]
+        d = [x.get("drops_ab", 0) for x in l4]
+        check(l4 and min(q) > 800 and 350 < sum(d) / len(d) < 650,
+              f"{eng}: l4 navbati to'la (~1000) va ~500 paket/s tashlanadi: q={q} drops={d}")
+        c.delete(f"/api/runs/ospf_lab/{rid}")
     # ---- parametrik tadqiqot (analitik): kabel tezligi oshsa FTP o'tkazuvchanligi oshadi ----
     st = c.post("/api/studies", json={"project": p, "scenario": "asosiy", "engine": "analytic",
                                       "param": {"kind": "link", "link": "l4", "field": "bw"},

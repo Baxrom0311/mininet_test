@@ -301,8 +301,14 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             series[a["id"]].append(pt)
         for lid in proj["links"]:
             ab, ba = used[(lid, "ab")], used[(lid, "ba")]
-            link_series[lid].append({"t": t1, "ab_bps": round(ab), "ba_bps": round(ba),
-                                     "util": round(min(max(ab, ba) / cap[(lid, "ab")], 1.0), 4)})
+            pt = {"t": t1, "ab_bps": round(ab), "ba_bps": round(ba),
+                  "util": round(min(max(ab, ba) / cap[(lid, "ab")], 1.0), 4)}
+            for d in ("ab", "ba"):
+                h = (lid, d)
+                q_s = hop_delay(h, 12000)[1] if used[h] > 0 else 0.0
+                pt[f"queue_{d}"] = round(q_s * cap[h] / 12000, 1)          # navbatdagi paketlar (1500 B)
+                pt[f"drops_{d}"] = round(max(load[h] - cap[h], 0) / 8000 * (t1 - t0))   # ortiqcha UDP (1000 B)
+            link_series[lid].append(pt)
         progress((k + 1) / steps)
 
     flows_out = {}
