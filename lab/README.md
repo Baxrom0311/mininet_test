@@ -44,7 +44,7 @@ Majburlash: `NETLAB_OVS_DATAPATH=kernel|user`.
 Haqiqiy tarmoq integratsiya testi (root kerak; FRR/os-ken/BMv2 bo'lmasa tegishli qism o'tkazib yuboriladi):
 
 ```bash
-sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv vlan natdhcp sdn p4
+sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv vlan natdhcp apps qos bgp stp fw fw_emu sdn p4
 ```
 
 ### Istalgan kompyuter (demo rejim, Mininet'siz)
@@ -383,6 +383,138 @@ javoblar qaytmaydi.
 Router `config.routes` (statik marshrutlar) Mininet'da kernel marshruti sifatida ham
 qo'llanadi (zebra uni ko'radi).
 
+## Routing, L2 va xavfsizlik: BGP, STP, Firewall
+
+### BGP: avtonom tizimlar (eBGP / iBGP)
+
+Router `daemons` ichida `bgpd` va tuzilgan `config.bgp`:
+
+```json
+"bgp": {"asn": 65001, "router_id": "2.2.2.2",
+        "neighbors": [{"ip": "10.12.0.1", "remote_as": 65001, "next_hop_self": true},
+                      {"ip": "203.0.113.2", "remote_as": 65002}],
+        "networks": ["10.1.0.0/24"], "redistribute": ["connected", "ospf", "static"]}
+```
+
+- **sessiya** — ikkala tomon bir-birini (IP + `remote_as`) ko'rsatsa UP. eBGP — qo'shni
+  to'g'ridan-to'g'ri ulangan subnetda; iBGP — IGP/statik marshrut bilan yetadi.
+- **e'lon** — `networks` (prefiks RIB'da bo'lsa, FRR import-check kabi) + `redistribute`.
+- **eBGP** — AS_PATH oldiga o'z AS'i, AS halqasi rad etiladi; **iBGP** — faqat lokal/eBGP
+  marshrutlar uzatiladi (route reflector yo'q), next-hop o'zgarmaydi (`next_hop_self` bo'lmasa).
+- tanlash: qisqa AS_PATH > eBGP > iBGP; AD: eBGP 20, OSPF 110, RIP 120, iBGP 200.
+- IGP (OSPF/RIP) AS chegarasidan o'tmaydi (ikkala routerda har xil `asn` bo'lsa).
+
+| Dvigatel | Qanday |
+|---|---|
+| Mininet | FRR `bgpd`; `config.bgp` → `vtysh -f` (`router bgp`, `no bgp ebgp-requires-policy`, `neighbor … timers connect 5`, `address-family ipv4 unicast`). Inspect: `show bgp summary`, `show ip bgp` |
+| Analitik / demo | `lab/bgp.py` path-vector modeli; uzilishda marshrut darhol olib tashlanadi, tiklanganda `bgp_convergence_s` (standart 2 s) dan keyin qaytadi. Demo terminal: `show bgp summary`, `show ip bgp` |
+| ns-3 | BGP yo'q — model hisoblagan marshrutlar statik o'rnatiladi (hodisada darhol qayta hisoblanadi) |
+
+Namuna: `bgp_lab` — AS65001 (r1, r2: OSPF + iBGP, pc1) va AS65002 (r3, srv1), r2–r3 eBGP.
+Ssenariy `ebgp_uzilish`: t=10 s da eBGP kabeli uziladi, t=20 s da tiklanadi.
+
+| | uzilishda marshrut olib tashlanishi | tiklanish konvergensiyasi | video uzilishi |
+|---|---|---|---|
+| Real FRR (Mininet) | 0.2 s (interfeys DOWN → sessiya darhol tushadi) | 2.0 s | 11 s |
+| Analitik | darhol | 2.0 s | 12 s |
+| ns-3 (statik) | darhol | darhol | 10 s |
+
+Testlar: `python3 -m lab.tests.smoke_bgp` (demo + analitik + ns-3),
+`sudo python3 -m lab.tests.real_bgp` (real FRR).
+
+Cheklovlar: modelda IGP qo'shnisining barcha interfeys subnetlari o'rganiladi (OSPF `network`
+bayonotlari tahlil qilinmaydi); BGP atributlari (local-pref, MED, community), route reflector,
+multipath va policy (route-map) modellashtirilmaydi — real FRR'da startup orqali yozish mumkin.
+
+### STP / RSTP (switch halqalari)
+
+Switch `config`:
+
+```json
+"stp": true, "stp_mode": "stp", "stp_priority": 4096,
+"ports": {"2": {"stp_cost": 100}}
+```
+
+- `stp_mode`: `stp` (802.1D, standart) yoki `rstp` (802.1w).
+- `stp_priority`: 0..61440, 4096 ga karrali (standart 32768); eng kichik (priority, id) — root.
+- `ports.<n>.stp_cost`: port yo'l narxi; bo'lmasa kabel tezligidan (802.1D-1998: 10 Mbit/s
+  → 100, 100 Mbit/s → 19, 1 Gbit/s → 4, 10 Gbit/s → 2). Real driver bu narxni OVS'ga
+  yozadi (veth o'zini "10 Gbit/s" deb ko'rsatadi).
+
+Model (`lab/stp.py`): root bridge, root port, designated/alternate portlar; alternate —
+blocking. STP'siz switchlar halqa hosil qilsa — **broadcast storm**: domen ishlamaydi,
+ping/traceroute sababni ko'rsatadi (`L2 halqa (STP o'chiq): broadcast storm [l1, l2, l3]`),
+ns-3 aniq xato beradi. Inspect → "STP (spanning tree)" (rol/holat, bridge/root id);
+real driverda `ovs-appctl stp/show` (yoki `rstp/show`) va model bashorati yonma-yon.
+
+| Dvigatel | Qanday | Konvergensiya (`stp_lab`, faol kabel uzilganda) |
+|---|---|---|
+| Mininet (OVS) | `stp_enable` / `rstp_enable`, `stp-priority`, `stp-system-id` = device_mac(id, 0), `stp-path-cost` | STP ~23 s, RSTP < 1 s (o'lchangan) |
+| Analitik | blocking → forwarding o'tish `hold`: 802.1D 2×forward_delay = 30 s (bilvosita nosozlik +max_age 20 s), RSTP 1 s; `stp_convergence_s` — qo'lda | 30 s / 1 s |
+| ns-3 | BridgeNetDevice'da STP yo'q: model daraxti bo'yicha blocking segment ma'lumot uchun yopiladi (ErrorModel), hodisada qayta hisoblanadi; MAC yozuvlari 2 s (TCN FDB tozalashi o'rniga) | 30 s / 1 s |
+
+Port holati o'zgarishlari `route_events` ga (`dev` = switch, `port2 root/forwarding`)
+yoziladi — `convergence` (OPNET "convergence duration") L2 uchun ham ko'rinadi.
+
+Eslatma: 802.1D da kabel **tiklanganda** ham uzilish bo'ladi — yangi root port 30 s
+listening/learning kutadi, eski root port esa darhol blocking bo'ladi (RSTP'da ~1 s).
+
+Namuna: `stp_lab` — s1 (root, priority 4096), s2, s3 uchburchak; s3:2 blocking.
+Ssenariy `uzilish`: t=10 s da l2 (s1-s3) uziladi, t=50 s da tiklanadi.
+
+Testlar: `python3 -m lab.tests.smoke_stp` (demo + analitik + ns-3),
+`sudo flock /tmp/netlab-real.lock python3 -m lab.tests.real_stp` (real OVS STP va RSTP).
+
+### Firewall / ACL (stateful, iptables)
+
+Router, host yoki server `config.firewall`:
+
+```json
+"firewall": {"default": "drop",
+             "rules": [
+               {"chain": "forward", "action": "accept", "state": "established"},
+               {"chain": "forward", "action": "accept", "in": "r1-eth1"},
+               {"chain": "forward", "action": "accept", "proto": "tcp", "dst": "10.0.2.10/32", "dport": 80},
+               {"chain": "forward", "action": "reject", "proto": "icmp", "in": "r1-eth3", "dst": "10.0.1.0/24"}]}
+```
+
+- **Semantika — iptables bilan bir xil:** zanjir (`input` / `forward` / `output`) ichida
+  birinchi mos qoida; mos qoida bo'lmasa — siyosat. `default` routerda `forward`,
+  host/serverda `input` zanjiriga tegishli; aniq siyosat: `"policy": {"input": "drop"}`.
+- Maydonlar: `proto` (`any` / `tcp` / `udp` / `icmp`), `src`/`dst` (subnet), `dport`/`sport`
+  (faqat tcp/udp), `in`/`out` (interfeys), `state` (`new` / `established`).
+- **Stateful:** `established` qoidasi javob paketlarini o'tkazadi — "ichkaridan tashqariga
+  ruxsat, tashqaridan yangi ulanish yo'q". Bu qoida bo'lmasa javoblar ham tashlanadi.
+- **`reject` va `drop`:** `reject` — TCP uchun RST, boshqalar uchun ICMP host-prohibited
+  (ping darhol "Destination Host Prohibited" deydi); `drop` — jim tashlash (timeout).
+
+| Dvigatel | Qanday |
+|---|---|
+| Mininet | qurilma namespace'ida o'z zanjirlari `NETLAB-IN/FWD/OUT` (INPUT/FORWARD/OUTPUT dan sakrash); NAT (`nat` jadvali) alohida qoladi; jonli o'zgartirish — zanjirlar qayta yoziladi. Inspect → **har qoida hisoblagichi** (paket/bayt, `iptables -L -v`) |
+| Analitik / demo | paket yo'li bo'yicha: manba OUTPUT, oraliq routerlar FORWARD, manzil INPUT; NAT'dan keyingi hoplarda manba almashtiriladi; tcp/ping javobi `established` sifatida tekshiriladi (`lab/firewall.py`) |
+| ns-3 | iptables yo'q — model bloklagan oqim ishga tushirilmaydi (natijada 100% yo'qotish, `blocked` sababi bilan) |
+
+**Portlar.** Ilovaga `dport` bering (`{"type": "tcp", "dport": 80, ...}`); bo'lmasa port
+`5201 + ilova tartib raqami` (Mininet'dagi iperf3 porti bilan bir xil). Mininet'da iperf3
+server/klient aynan shu portda ishlaydi; bir (server, port) dagi bir nechta TCP ilova
+(masalan HTTP sahifalari) bitta doimiy iperf3 server'ni bo'lishadi. Eslatma: iperf3 UDP
+testi shu portga TCP boshqaruv ulanishini ham ochadi — real tarmoqda UDP ilova uchun shu
+portda TCP ham ruxsat etilgan bo'lishi kerak.
+
+Namuna: `firewall_lab` — LAN (pc1, pc2), DMZ veb-server (srv1:80), Internet (inet).
+Ssenariy `trafik`: `web_in` (inet → srv1:80) va LAN oqimlari o'tadi, `ssh_in` (:22)
+tashlanadi, `ping_in` (inet → pc1) reject. Real Mininet sinovi: TCP :80 47 Mbit/s, :22
+"Connection timed out", hisoblagichlar (established qoidasi 37 404 paket, default drop 6),
+jonli qoida qo'shish va olib tashlash.
+
+```bash
+python3 -m lab.tests.smoke_fw
+```
+
+```bash
+sudo python3 -m lab.tests.real_fw
+```
+
 ## Wi-Fi (simsiz tarmoq)
 
 Kabel asbobi (`C`) bilan Wi-Fi AP'ni va host/server/router'ni ketma-ket bosing —
@@ -497,6 +629,9 @@ masalan `5,10,15,20,25` dBm qiymatlarida uzoqdagi stansiya tezligini ko'ring.
 - `sdn_router_lab`: SDN switch + SDN router (`l3_router` ilovasi).
 - `vlan_lab`: VLAN 10/20, trunk, router-on-a-stick, izolyatsiya. Ssenariy: `vlanlar`.
 - `nat_dhcp_lab`: DHCP server + NAT (masquerade) + provayder. Ssenariy: `internet`.
+- `bgp_lab`: AS65001 (OSPF + iBGP) va AS65002, eBGP r2-r3. Ssenariy: `ebgp_uzilish`.
+- `stp_lab`: uch switch halqasi (STP, s1 root), bloklangan port va konvergensiya.
+- `firewall_lab`: LAN, DMZ veb-server (:80), internet; stateful firewall qoidalari.
 
 ## Klaviatura
 

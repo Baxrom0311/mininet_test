@@ -859,11 +859,35 @@ exit 0
             cmds.append(f"iptables -t nat -A POSTROUTING -o {out} -j MASQUERADE")
         return cmds
 
+    def _apply_stp(self, name):
+        """STP/RSTP -> OVS: rejim, priority, bridge id (system-id = device_mac(id, 0) — model bilan
+        bir xil tartib), port yo'l narxlari (veth "10G" ko'rinadi — narx kabel bw'dan yoziladi)."""
+        from lab.stp import bridge_priority, port_cost, stp_enabled, stp_mode
+        d = self.project["devices"][name]
+        node = self.net.get(name)
+        if not stp_enabled(d):
+            node.cmd(f"ovs-vsctl set bridge {name} stp_enable=false rstp_enable=false")
+            return
+        mac = device_mac(d["id"], 0)
+        pr = bridge_priority(d)
+        rstp = stp_mode(d) == "rstp"
+        cmds = [f"ovs-vsctl set bridge {name} stp_enable={'false' if rstp else 'true'} "
+                f"rstp_enable={'true' if rstp else 'false'} "
+                + (f"other_config:rstp-priority={pr} other_config:rstp-address={mac}" if rstp else
+                   f"other_config:stp-priority={pr} other_config:stp-system-id={mac}")]
+        for port, (lid, _peer, _pp) in sorted(link_ports(self.project, name).items()):
+            key = "rstp-path-cost" if rstp else "stp-path-cost"
+            cmds.append(f"ovs-vsctl set port {ifname(name, port)} other_config:{key}={port_cost(self.project, name, port, lid)}")
+        out = node.cmd(" ; ".join(c + " 2>&1" for c in cmds))
+        if out.strip():
+            self.bus.log("warn", f"STP: {out.strip()[-300:]}", name)
+
     def _apply_vlans(self, name):
         """Switch portlari VLAN rejimi -> OVS (tag / trunks / vlan_mode)."""
         d = self.project["devices"][name]
         if d["type"] not in VLAN_TYPES:
             return
+        self._apply_stp(name)
         node = self.net.get(name)
         cmds = []
         for port in sorted(link_ports(self.project, name)):
@@ -1426,7 +1450,13 @@ exit 0
                     rows = [l.split() for l in fdb[1:] if l.strip()]
                     secs.append(self._table("MAC jadvali (FDB)", ["Port", "VLAN", "MAC", "Yosh (s)"], rows))
                     if (d.get("config") or {}).get("stp"):
-                        secs.append(self._text("STP", _run(["ovs-appctl", "stp/show", name])))
+                        from lab.stp import inspect_section, stp_mode
+                        cmd = "rstp/show" if stp_mode(d) == "rstp" else "stp/show"
+                        secs.append(self._text(f"STP (OVS {cmd})", _run(["ovs-appctl", cmd, name])))
+                        sec = inspect_section(self.project, name)
+                        if sec:
+                            sec["title"] = "STP (model bashorati)"
+                            secs.append(sec)
                 secs.append(self._text("OpenFlow jadvallari (dump-flows)",
                                        _run(["ovs-ofctl", "-O", "OpenFlow13", "dump-flows", name])))
                 secs.append(self._text("OpenFlow portlari (hardware)",

@@ -242,6 +242,18 @@ def main(inp_path, out_path):
         pc = switch_port_cfg(devs[dev], port)
         return pc["vlan"] if pc["mode"] == "access" else 0
     sw_ports = {n: {} for n, d in devs.items() if d["type"] in L2}
+    # STP: ns-3 BridgeNetDevice'da spanning tree yo'q — model daraxti (lab.stp) bo'yicha
+    # blocking portlar bridge'ga ulanmaydi; STP'siz halqa — ns-3 cheksiz aylanadi -> xato.
+    from lab.stp import compute as stp_compute
+    _st = stp_compute(project)
+    if _st["storm"]:
+        sw_ = sorted(_st["storm"])[0]
+        raise RuntimeError(f"ns-3: L2 halqa (STP o'chiq) — broadcast storm: {', '.join(sorted(_st['storm']))} "
+                           f"[{', '.join(_st['storm_cycle'].get(sw_, []))}]. Switch'larda stp: true qiling")
+    if _st["blocked"]:
+        emit(log="STP (model daraxti): blocking portlar " + ", ".join(f"{a}:{b}" for a, b in sorted(_st["blocked"]))
+                 + " — blocking segment ma'lumot uchun yopiladi (ErrorModel=1), hodisalarda daraxt "
+                   "qayta hisoblanadi (802.1D 30/50 s, RSTP ~1 s)")
     jitter_warn = False
     wifi_links = []
     port_q = {}       # (dev, port) -> navbat hajmi ("1000p") — L3 tomonda qdisc uchun
@@ -369,6 +381,10 @@ def main(inp_path, out_path):
 
     emit(log=f"kabellar: {len(link_objs)}")
     bridge = ns.BridgeHelper()
+    if _st["bridges"]:
+        # STP topologiya o'zgarishi (TCN) FDB'ni tozalaydi; ns-3 bridge'da TCN yo'q — MAC yozuvlari
+        # qisqa yashaydi (aks holda 300 s eski port bo'yicha yuborilib qoladi)
+        bridge.SetDeviceAttribute("ExpirationTime", ns.TimeValue(ns.Seconds(2)))
     for n, by_vlan in sw_ports.items():
         for _vl, cont in sorted(by_vlan.items()):
             if cont.GetN():
@@ -578,6 +594,44 @@ def main(inp_path, out_path):
                 state["links"][lid]["up"] = bool(up)
             install_routes()
 
+    # STP: model daraxti; blocking (va konvergensiya kutayotgan) segmentlar ma'lumot uchun yopiq
+    from lab.stp import compute as stp_compute2, convergence_time as stp_conv_time, stp_enabled
+    stp_on = any(stp_enabled(d) for d in devs.values())
+    stp_s = {"up": {}, "fwd": None, "hold": {}}
+
+    def stp_tick(t):
+        if not stp_on:
+            return
+        up_now = {lid: l.get("up") is not False for lid, l in state["links"].items()}
+        failed = [lid for lid, u in up_now.items() if stp_s["up"].get(lid, True) and not u]
+        changed = up_now != stp_s["up"]
+        stp_s["up"] = up_now
+        if changed or stp_s["fwd"] is None:
+            st_new = stp_compute2(state)
+            fwd_new = {(x, p_) for x, b in st_new["bridges"].items() for p_, v in b["ports"].items()
+                       if v["state"] == "forwarding"}
+            if stp_s["fwd"] is not None:
+                for x, p_ in fwd_new - stp_s["fwd"]:
+                    stp_s["hold"][(x, p_)] = t + stp_conv_time(state, x, failed, sc)
+                    emit(log=f"STP: {x} port {p_} -> forwarding {stp_s['hold'][(x, p_)] - t:.0f} s dan keyin")
+                for key in list(stp_s["hold"]):
+                    if key not in fwd_new:
+                        stp_s["hold"].pop(key)
+            stp_s["fwd"] = fwd_new
+        for key in [k_ for k_, t_ in stp_s["hold"].items() if t + 1e-9 >= t_]:
+            stp_s["hold"].pop(key)
+        st = stp_compute2(state, sorted(stp_s["hold"]))
+        for lid, lo in link_objs.items():
+            ends = lo["ends"]
+            if not all(stp_enabled(devs[e_["dev"]]) for e_ in ends):
+                continue
+            up = state["links"][lid].get("up") is not False
+            blk = any((e_["dev"], e_["port"]) in st["blocked"] for e_ in ends)
+            for em in lo["errs"]:
+                em.SetAttribute("ErrorRate", ns.DoubleValue(1.0 if (not up or blk) else lo["loss"]))
+        for x, b in st["bridges"].items():
+            rtrack.update(t, x, {f"port{p_} {v['role']}/{v['state']}" for p_, v in b["ports"].items()})
+
     events = sorted(sc.get("events") or [], key=lambda e: float(e.get("t", 0)))
     initially_down = [lid for lid, l in project["links"].items() if l.get("up") is False]
     for lid in initially_down:
@@ -586,7 +640,9 @@ def main(inp_path, out_path):
     # qadamli ijro: har 1s (va har hodisa vaqtida) to'xtab, FlowMonitor o'lchanadi
     step = float(sc.get("sample", 1.0))
     marks = sorted({round(k * step, 6) for k in range(1, int(math.ceil(duration / step)) + 1)}
-                   | {round(float(e["t"]), 6) for e in events if 0 < float(e.get("t", 0)) < duration})
+                   | {round(float(e["t"]), 6) for e in events if 0 < float(e.get("t", 0)) < duration}
+                   | ({round(float(e["t"]) + dd, 6) for e in events for dd in (1.0, 30.0, 50.0)
+                       if 0 < float(e.get("t", 0)) + dd < duration} if stp_on else set()))
     # harakat: pozitsiyalar har 0.5s da yangilanadi (oraliq nuqtalarda namuna olinmaydi)
     from lab.mobility import has_moves, positions_at
     movers = has_moves(sc)
@@ -707,6 +763,7 @@ def main(inp_path, out_path):
                          params=e.get("params") if act == "link_params" else None)
             applied.append({"t": now, **e})
             emit(log=f"t={now:.1f}s: {act} {e.get('link') or e.get('device')}")
+        stp_tick(now)
         if movers:
             update_positions(now)
         ns.Simulator.Stop(ns.Seconds(mark - now))
