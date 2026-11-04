@@ -94,6 +94,7 @@ def expand(sc):
                 apps.append({"id": f"{aid}.{role}", "type": "udp", "src": s_, "dst": d_, "rate": rate, "size": size,
                              "start": st, "stop": sp, "group": aid, "role": role,
                              "dscp": int(a["dscp"]) if a.get("dscp") not in (None, "") else 46,   # EF
+                             **({"dport": int(a["dport"])} if a.get("dport") not in (None, "") else {}),
                              "label": f"{a.get('label') or aid} [{role}]"})
         elif t == "http":
             page = parse_bytes(a.get("page", "500KB"))
@@ -102,6 +103,7 @@ def expand(sc):
             while t0 < sp - 1e-9 and k < MAX_PAGES:
                 apps.append({"id": f"{aid}.p{k + 1}", "type": "tcp", "src": a["dst"], "dst": a["src"], "bytes": page,
                              **({"dscp": int(a["dscp"])} if a.get("dscp") not in (None, "") else {}),
+                         **({"dport": int(a["dport"])} if a.get("dport") not in (None, "") else {}),
                              "start": round(t0, 3), "stop": sp, "group": aid, "role": "page",
                              "label": f"{a.get('label') or aid} sahifa {k + 1}"})
                 k += 1
@@ -111,6 +113,7 @@ def expand(sc):
             s_, d_ = (a["dst"], a["src"]) if a.get("direction", "download") == "download" else (a["src"], a["dst"])
             apps.append({"id": f"{aid}.xfer", "type": "tcp", "src": s_, "dst": d_, "bytes": size, "start": st, "stop": sp,
                          **({"dscp": int(a["dscp"])} if a.get("dscp") not in (None, "") else {}),
+                         **({"dport": int(a["dport"])} if a.get("dport") not in (None, "") else {}),
                          "group": aid, "role": "xfer", "label": f"{a.get('label') or aid} [{a.get('direction', 'download')}]"})
         else:
             apps.append(a)

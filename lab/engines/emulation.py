@@ -108,6 +108,11 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
         t = threading.Thread(target=go, daemon=True); t.start(); threads.append(t)
 
     apps = []
+    port_users, shared_ports, port_count = {}, {}, {}
+    for a in sc.get("apps") or []:
+        if a.get("dport") not in (None, "") and a.get("type") == "tcp":
+            k_ = (a["dst"], int(a["dport"]))
+            port_count[k_] = port_count.get(k_, 0) + 1
     for i, a in enumerate(sc.get("apps") or []):
         aid = a.get("id") or f"a{i + 1}"
         dip = a.get("dst_ip") or ip_of(a["dst"])
@@ -122,6 +127,13 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
             log(f"{aid}: {a['dst']} da IP yo'q — o'tkazib yuborildi")
             continue
         port = 5201 + i
+        if a.get("dport") not in (None, "") and a["type"] != "ping":
+            key = (a["dst"], int(a["dport"]))
+            if a["type"] == "udp" and key in port_users:
+                log(f"{aid}: {a['dst']}:{a['dport']} band (UDP) — {port} port ishlatiladi")
+            else:
+                port = int(a["dport"])         # firewall qoidalari haqiqiy port bo'yicha ishlashi uchun
+                port_users.setdefault(key, []).append(aid)
         dur = max(int(round(stop - start)), 1)
 
         def ping_parser(rec=rec):
@@ -141,7 +153,16 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
         if a["type"] == "ping":
             rec["expected_per_s"] = 1.0 / max(interval, 0.2)
             continue
-        srv = spawn(a["dst"], ["iperf3", "-s", "-1", "-p", str(port), "-i", "1", "--forceflush"])
+        shared = shared_ports.get((a["dst"], port))
+        if shared is None:
+            # bir (dst, port) da bir nechta TCP ilova (masalan HTTP sahifalari, port 80) — bitta doimiy server
+            multi = a["type"] == "tcp" and port_count.get((a["dst"], port), 0) > 1
+            srv = spawn(a["dst"], ["iperf3", "-s"] + ([] if multi else ["-1"]) + ["-p", str(port), "-i", "1", "--forceflush"])
+            shared_ports[(a["dst"], port)] = srv
+            if a["type"] == "tcp":
+                reader(srv, lambda _l: None)     # server chiqishi ham o'qilsin (pipe to'lmasin)
+        else:
+            srv = shared
         nbytes = int(a.get("bytes") or 0) if a["type"] == "tcp" else 0
         cli = ["iperf3", "-c", dip, "-p", str(port), "-i", "1", "--forceflush"] + (["-S", str(tos)] if tos else []) + (
             ["-n", str(nbytes)] if nbytes else ["-t", str(dur)])

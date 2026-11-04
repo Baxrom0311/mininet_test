@@ -26,6 +26,9 @@ from lab.wifi import ap_config, channels_overlap, ess_key, max_range_m, meters_p
 from lab.wifi import estimate as wifi_estimate
 from lab.wifi import link_estimate as wifi_link_estimate
 from lab.engines.nodestats import L3_NS, RouteTracker, convergence, route_key
+from lab.firewall import _why as fw_why
+from lab.firewall import check_path as fw_check_path
+from lab.firewall import check_roundtrip as fw_roundtrip
 
 MSS_BITS = 1448 * 8
 
@@ -52,7 +55,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     for i, a in enumerate(sc.get("apps") or []):
         apps.append({**a, "id": a.get("id") or f"a{i + 1}",
                      "label": a.get("label") or f"{a.get('type')} {a.get('src')}→{a.get('dst')}",
-                     "start": float(a.get("start", 1)), "stop": min(float(a.get("stop", duration)), duration)})
+                     "start": float(a.get("start", 1)), "stop": min(float(a.get("stop", duration)), duration),
+                     # firewall uchun port: dport yoki Mininet dvigateli bilan bir xil iperf3 porti
+                     "_dport": int(a["dport"]) if a.get("dport") not in (None, "") else 5201 + i})
     events = sorted(sc.get("events") or [], key=lambda e: float(e.get("t", 0)))
     series = {a["id"]: [] for a in apps}
     link_series = {lid: [] for lid in proj["links"]}
@@ -197,6 +202,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     # TCP: qaytuvchi ACK'lar ham efir oladi (~9%)
                     out.append((("air", wifi_of[lid][0]), (1.09 if tcp else 1.0) / wifi_of[lid][1]))
             return out
+        has_fw = any((d.get("config") or {}).get("firewall") for d in proj["devices"].values())
         flows = []   # har aktiv ilova uchun holat
         for a in apps:
             st = {"app": a, "ok": False, "path": [], "back": [], "rate": 0.0}
@@ -208,6 +214,16 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     ok2, _w2, _h2, back, _d2 = (n.reply(a["src"], sip.ip, a["dst"], ipaddress.ip_address(dip), _h)
                                                 if ok else (False, "", [], [], 0))
                     st.update(ok=ok and ok2, why=why, path=path, back=back)
+                    if ok and ok2 and has_fw:
+                        pkt = {"proto": "icmp" if a["type"] == "ping" else a["type"], "src": str(sip.ip),
+                               "dst": dip, "dport": None if a["type"] == "ping" else a["_dport"], "sport": 40000}
+                        if a["type"] == "udp":      # bir tomonlama
+                            okf, v_, w_, c_, r_ = fw_check_path(n, a["src"], dip, _h, pkt)
+                            whyf = None if okf else fw_why(v_, w_, c_, r_, pkt)
+                        else:                      # tcp/ping: so'rov + javob (stateful)
+                            okf, whyf, _v = fw_roundtrip(n, a["src"], sip.ip, a["dst"], dip, _h, pkt)
+                        if not okf:
+                            st.update(ok=False, why=whyf)
                 st["active"] = True
             flows.append(st)
 

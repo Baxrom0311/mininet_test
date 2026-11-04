@@ -466,6 +466,28 @@ def main(inp_path, out_path):
                 return str(ii.ip)
         return None
 
+    fw_on = any((d.get("config") or {}).get("firewall") for d in devs.values())
+    if fw_on:
+        emit(log="eslatma: firewall ns-3 da paket darajasida yo'q — model bo'yicha bloklangan oqimlar ishga tushirilmaydi")
+
+    fw_block = {}       # ilova -> (sabab, start, stop)
+
+    def fw_blocked(app, i, dip):
+        from lab.firewall import check_path, check_roundtrip, _why
+        n_ = Net(state)
+        sip_ = n_.ip_of(app["src"])
+        ok_, _w, h_, _l, _d = n_.forward(app["src"], ipaddress.ip_address(dip))
+        if not ok_ or not sip_:
+            return None
+        t_ = app.get("type", "udp")
+        pkt = {"proto": "icmp" if t_ == "ping" else t_, "src": str(sip_.ip), "dst": dip, "sport": 40000,
+               "dport": None if t_ == "ping" else (int(app["dport"]) if app.get("dport") not in (None, "") else 5201 + i)}
+        if t_ == "udp":
+            okf, v, w, c, r = check_path(n_, app["src"], dip, h_, pkt)
+            return None if okf else _why(v, w, c, r, pkt)
+        okf, why, _v = check_roundtrip(n_, app["src"], sip_.ip, app["dst"], dip, h_, pkt)
+        return None if okf else why
+
     apps = []
     for i, app in enumerate(sc.get("apps") or []):
         src, dst = app.get("src"), app.get("dst")
@@ -479,6 +501,13 @@ def main(inp_path, out_path):
         port = 9000 + i
         start, stop = float(app.get("start", 1)), float(app.get("stop", duration))
         typ = app.get("type", "udp")
+        if fw_on:
+            # ns-3 da iptables yo'q: model (lab.firewall) bloklagan oqim ishga tushirilmaydi
+            blocked = fw_blocked(app, i, dip)
+            if blocked:
+                emit(log=f"ilova {app.get('id')}: firewall bloklaydi ({blocked}) — ishga tushirilmaydi")
+                fw_block[app.get("id") or f"a{i + 1}"] = (blocked, start, min(stop, duration))
+                start = stop = duration + 1.0
         from lab.model import dscp_class
         tos = 0xb8 if dscp_class(app.get("dscp")) == 0 else 0     # yuqori sinf -> EF
         addr = ns.InetSocketAddress(ns.Ipv4Address(dip), port).ConvertTo()
@@ -740,6 +769,14 @@ def main(inp_path, out_path):
             summ["avg_rtt_ms"] = round((dl / rx + rdl / rrx) * 1000, 3)
         flows[app["id"]] = {**{k: v for k, v in app.items() if k != "sink_key"},
                             "series": series[app["id"]], "summary": summ}
+        if app["id"] in fw_block:
+            why_, st_, sp_ = fw_block[app["id"]]
+            flows[app["id"]].update(
+                start=st_, stop=sp_, blocked=why_,
+                series=[{"t": float(t), "thr_bps": 0, "delay_ms": None, "jitter_ms": None, "loss_pct": 100.0}
+                        for t in range(int(st_) + 1, int(sp_) + 1)],
+                summary={"avg_thr_bps": 0, "avg_delay_ms": None, "avg_jitter_ms": None, "loss_pct": 100.0,
+                         "blocked": why_})
         if "sink_key" in app:
             dt_ = float(nl.DoneAt(app["sink_key"]))
             flows[app["id"]]["done_t"] = round(dt_, 4) if dt_ >= 0 else None
