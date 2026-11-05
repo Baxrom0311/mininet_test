@@ -425,6 +425,8 @@ def validate_scenario(project, sc):
                 parse_rate(a["rate"])
             except ValueError as e:
                 errors.append(f"{w}: {e}")
+    from lab.failures import validate as validate_failures
+    errors += validate_failures(project, sc)
     for i, e in enumerate(sc.get("events") or []):
         w = f"hodisa {i + 1}"
         if e.get("action") not in EVENT_ACTIONS:

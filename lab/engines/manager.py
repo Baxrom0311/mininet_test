@@ -198,12 +198,25 @@ class RunManager:
                 if field == "rip_update" and int(tm.get("timeout", 180)) <= int(v):
                     tm["timeout"] = int(v) * 6
                 cfg["rip_timers"] = tm
+        elif kind == "failure":
+            f = sc2.get("failures")
+            if not f or field not in ("mtbf_s", "mttr_s", "seed"):
+                raise ValueError("ssenariyda failures yo'q yoki maydon noto'g'ri (mtbf_s | mttr_s | seed)")
+            if field == "seed":
+                f["seed"] = int(v)
+            else:
+                grp = param.get("group") or ("links" if f.get("links") else "devices")
+                if not f.get(grp):
+                    raise ValueError(f"failures.{grp} yo'q")
+                f[grp][field] = float(v)
         else:
-            raise ValueError("param.kind: link | app | ap | router")
+            raise ValueError("param.kind: link | app | ap | router | failure")
 
     @staticmethod
     def _param_label(param):
         who = param.get("link") or param.get("app") or param.get("ap") or param.get("router")
+        if param.get("kind") == "failure":
+            who = "failures" if param.get("field") == "seed" else f"failures.{param.get('group') or 'links'}"
         if param.get("kind") == "router" and param.get("all"):
             who = "routerlar"
         return f"{who}.{param.get('field')}"
@@ -272,7 +285,10 @@ class RunManager:
         log = lambda m: self._pub(run_id, log=m)                  # noqa: E731
         t0 = time.time()
         from lab import apps as appmodels
-        sc_user, sc = sc, appmodels.expand(sc)      # voip/http/ftp -> udp/tcp
+        from lab import failures as failmodel
+        sc_user = sc
+        sc_fail = failmodel.expand(project, sc)     # MTBF/MTTR -> link_down/link_up hodisalari
+        sc = appmodels.expand(sc_fail)              # voip/http/ftp -> udp/tcp
         try:
             if engine == "analytic":
                 from lab.engines import analytic
@@ -284,6 +300,7 @@ class RunManager:
                 res = emulation.run(self.driver, sc, prog, log)
             res.update(status="done")
             res = appmodels.postprocess(res, sc_user)     # MOS, sahifa/fayl vaqti
+            res = failmodel.postprocess(res, sc_user, sc_fail, project)   # mavjudlik (availability)
         except Exception as e:  # noqa: BLE001
             res = {"engine": engine, "status": "error", "error": f"{type(e).__name__}: {e}", "flows": {}}
             log(f"XATO: {e}")
