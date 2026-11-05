@@ -132,6 +132,8 @@ jobs:
           python -m lab.tests.smoke_perf
           python -m lab.tests.smoke_report
           python -m lab.tests.smoke_survivability_n2
+      - name: IPv6 model and ns-3 packet regression
+        run: python -m unittest lab.tests.smoke_ipv6 -v
 
   docker-build:
     runs-on: ubuntu-latest

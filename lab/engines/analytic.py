@@ -54,8 +54,10 @@ class _StaleNet(Net):
 
 def run(project, sc, progress=lambda f: None, log=lambda m: None):
     t_wall = time.time()
+    from lab.addressing import project_for_family
+    project = project_for_family(project, sc.get("ip_version", 4))
     from lab.services import resolve_dhcp
-    proj = copy.deepcopy(resolve_dhcp(project)[0])    # DHCP mijozlar — lizing manzillari
+    proj = resolve_dhcp(project)[0]    # family selection already made an independent copy
     duration = float(sc.get("duration", 30))
     apps = []
     for i, a in enumerate(sc.get("apps") or []):
@@ -590,7 +592,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             flows_out[a["id"]].update(group=a["group"], role=a.get("role"))
         if a["id"] in last_path:
             flows_out[a["id"]].update(path=last_path[a["id"]][0], why=last_path[a["id"]][1])
-    return {"engine": "analytic", "engine_label": "Analitik (oqim modeli)", "duration": duration,
+    return {"engine": "analytic", "engine_label": "Analitik (oqim modeli)",
+            "ip_version": sc.get("ip_version", 4), "duration": duration,
             "flows": flows_out, "links": link_series, "events": applied,
             "nodes": node_series, "route_events": rtrack.events,
             "convergence": convergence(applied, rtrack.events, duration), "wall_s": round(time.time() - t_wall, 3),

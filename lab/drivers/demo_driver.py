@@ -41,7 +41,10 @@ def _ms(v):
 class Net:
     """Loyiha modelidan L3 forwarding hisoblovchi yordamchi."""
 
-    def __init__(self, project, resolve=True):
+    def __init__(self, project, resolve=True, ip_version=None):
+        if ip_version is not None:
+            from lab.addressing import project_for_family
+            project = project_for_family(project, ip_version)
         if resolve:
             from lab.services import has_dhcp_clients, resolve_dhcp
             if has_dhcp_clients(project):
@@ -49,6 +52,11 @@ class Net:
         self.p = project
         self.devs = project["devices"]
         self._if_cache = {}
+        versions = {ipaddress.ip_interface(ic["ip"]).version
+                    for d in self.devs.values()
+                    for ic in ((d.get("config") or {}).get("interfaces") or {}).values()
+                    if ic.get("ip") and ic["ip"] != "dhcp"}
+        self.ip_version = 6 if versions == {6} else 4
         self._stp = None
         self._lag = None
         self.flow_key = None     # bond hash kaliti (analitik: (manba, manzil, ilova)); None — manba qurilma
@@ -70,7 +78,7 @@ class Net:
         return self._stp
 
     def ifaces(self, dev):
-        """[(port, ifname, ipaddress.IPv4Interface | None)] — fizik port + uning VLAN
+        """[(port, ifname, IPv4Interface | IPv6Interface | None)] — fizik port + uning VLAN
         subinterfeyslari (`<dev>-eth<port>.<vlan>`, config.interfaces'da IP bilan)."""
         if dev in self._if_cache:
             return self._if_cache[dev]
@@ -205,7 +213,8 @@ class Net:
         if d["type"] != "router":
             return set()
         # bgpd — IGP emas: alohida path-vector modeli (lab/bgp.py), faqat sozlangan qo'shnilar bilan
-        return {x for x in (d.get("config") or {}).get("daemons", []) if x in DYNAMIC and x != "bgpd"}
+        supported = {"ospf6d", "isisd"} if self.ip_version == 6 else set(DYNAMIC) - {"bgpd", "ospf6d"}
+        return set((d.get("config") or {}).get("daemons", [])) & supported
 
     def adjacency(self, dev):
         """L3 qo'shnilar: [(port, ifname, my_ip, neighbor, neighbor_ip, link_path)]"""
@@ -237,6 +246,8 @@ class Net:
 
     def bgp(self):
         """(router -> BGP marshrutlari, router -> sessiyalar) — bir marta hisoblanadi (kesh)."""
+        if self.ip_version == 6:
+            return {}, {}
         if getattr(self, "_bgp_cache", None) is None:
             from lab.bgp import compute
             self._bgp_cache = compute(self)
@@ -265,7 +276,7 @@ class Net:
                 gw = ipaddress.ip_address(cfg["gateway"])
                 ifn = next((x[2] for x in rt if x[1] is None and gw in x[0]), None)
                 if ifn:
-                    rt.append((ipaddress.ip_network("0.0.0.0/0"), gw, ifn, "static"))
+                    rt.append((ipaddress.ip_network("::/0" if gw.version == 6 else "0.0.0.0/0"), gw, ifn, "static"))
             except ValueError:
                 pass
         mine = self.dyn_daemons(dev)
@@ -312,7 +323,7 @@ class Net:
                 best = (net, via, ifn, proto)
         return best
 
-    def forward(self, src_dev, dst, max_hops=16):
+    def forward(self, src_dev, dst, max_hops=64):
         """src_dev'dan dst IP'ga yo'l: (ok, sabab, hops[], link_path[], delay_ms).
         hops: [(device, ip)], link_path: [(link_id, dir)]. Net davomida keshlanadi
         (LAG bo'lsa oqim hash'i — flow_key — kalitga kiradi)."""
@@ -345,7 +356,8 @@ class Net:
                     if pp == np and parse_ifname(nifn)[2] == tg and nip and nip.ip == nh:
                         target = (nd, path, nip.ip)
             if not target:
-                return False, self.l2_why or f"{cur}: {nh} ARP javob bermadi (Destination Host Unreachable)", hops, links, delay
+                neighbor = "NDP" if dst.version == 6 else "ARP"
+                return False, self.l2_why or f"{cur}: {nh} {neighbor} javob bermadi (Destination Host Unreachable)", hops, links, delay
             nd, path, nip = target
             links += path
             for lid, _dir in path:
@@ -358,6 +370,8 @@ class Net:
         """Yo'ldagi NAT routerlar: [(router, outside_ip)] — paket ichki interfeysdan kirib
         outside interfeysdan chiqqan joylar (manba shu IP'ga almashtiriladi)."""
         chain = []
+        if dst.version == 6:
+            return chain
         for nd, ip_in in hops[:-1]:          # oxirgi hop — manzil qurilmaning o'zi
             out = ((self.devs[nd].get("config") or {}).get("nat") or {}).get("outside")
             if not out:
@@ -696,7 +710,11 @@ class DemoDriver(BaseDriver):
         with self.lock:
             if not self.project or name not in self.project["devices"]:
                 return "qurilma o'chirilgan\n"
-            n = Net(copy.deepcopy(self.project))
+            family = 6 if any(x in ("-6", "ipv6", "ping6") or ":" in x for x in line.split()) else 4
+            n = Net(copy.deepcopy(self.project), ip_version=family)
+        line = line.replace("ip -6 ", "ip ").replace("show ipv6 route", "show ip route")
+        if line.startswith("ping6 "):
+            line = "ping " + line[6:]
         d = n.devs[name]
         t = d["type"]
         argv = line.split()
@@ -819,7 +837,7 @@ class DemoDriver(BaseDriver):
             with self.lock:
                 if not self.project:
                     break
-                n = Net(copy.deepcopy(self.project))
+                n = Net(copy.deepcopy(self.project), ip_version=dst.version)
             sent += 1
             src_ip = n.ip_of(name)
             ok, why, hops, links, d1 = n.forward(name, dst)
@@ -872,7 +890,7 @@ class DemoDriver(BaseDriver):
 
     def _trace_job(self, sh, name, dst, _count, stop):
         with self.lock:
-            n = Net(copy.deepcopy(self.project))
+            n = Net(copy.deepcopy(self.project), ip_version=dst.version)
         ok, why, hops, links, delay = n.forward(name, dst)
         sh.out(f"traceroute to {dst}, 16 hops max\n")
         self._emit_path(links, "UDP", f"UDP traceroute -> {dst}")

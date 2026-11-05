@@ -118,6 +118,8 @@ class RunManager:
         sc = (project.get("scenarios") or {}).get(scenario_name)
         if not sc:
             raise ValueError(f"ssenariy '{scenario_name}' yo'q")
+        if engine == "mininet" and sc.get("ip_version", 4) == 6:
+            raise ValueError("IPv6 faqat analytic va ns3 dvigatellarida qo'llab-quvvatlanadi")
         errs = validate_project(project) + validate_scenario(project, sc)
         if errs:
             raise ValueError("; ".join(errs[:5]))
@@ -229,6 +231,8 @@ class RunManager:
         sc = (project.get("scenarios") or {}).get(scenario_name)
         if not sc:
             raise ValueError(f"ssenariy '{scenario_name}' yo'q")
+        if engine == "mininet" and sc.get("ip_version", 4) == 6:
+            raise ValueError("IPv6 faqat analytic va ns3 dvigatellarida qo'llab-quvvatlanadi")
         errs = validate_project(project) + validate_scenario(project, sc)
         if errs:
             raise ValueError("; ".join(errs[:5]))

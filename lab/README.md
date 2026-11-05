@@ -1,5 +1,57 @@
 # NetLab — Mininet asosidagi vizual tarmoq laboratoriyasi
 
+## IPv6 model va ns-3
+
+Interfeysda IPv4 `ip` bilan birga IPv6 `ip6`, hostda `gateway6` yoziladi.
+Statik `routes` ichida IPv6 `prefix` va `via` bir oilada bo‘lishi kerak.
+Ssenariy `ip_version: 6` bilan IPv6’ni tanlaydi; standart qiymat 4.
+Bir run bitta oilani ishlatadi, dual-stack loyiha ikki oilani alohida runlarda solishtiradi.
+
+```bash
+python3 -m lab.topogen ring --routers 20 --hosts 1 --flows 4 --ipv6 > /tmp/dual.json
+python3 -m unittest lab.tests.smoke_ipv6 -v
+```
+
+Generator asl IPv4 ssenariylariga tegmaydi va `_ipv6` nusxalarini qo‘shadi.
+IPv6 subnetlari `fd00:1::/48` ULA ichidagi /64’lardir. ns-3.44 RFC 3849
+`2001:db8::/32` paketlarini routerda ataylab tashlaydi; shu sabab ULA ishlating.
+`ospf6d`/`isisd` modelda hop asosidagi IGP hisobidir, ns-3’da statik forwardingga
+o‘rnatiladi; haqiqiy OSPFv3/IS-IS protokol paketlari yoki konvergensiyasi emas.
+IPv6 TCP/UDP, echo (ns-3’da UDP echo), route statistikasi va link down/up ishlaydi.
+Bu host yadrosining IPv6 imkoniyatini talab qilmaydi.
+
+IPv6 Mininet ssenariylari hozircha aniq xato bilan rad etiladi. DHCPv6, NAT66,
+BGP IPv6 AF, VRRPv3 IPv6 va multicast qo‘shilmadi. Dual-stack loyihadagi
+IPv4 DHCP/NAT/BGP/VRRP/PIM sozlamalari IPv6 run’ga ko‘chirilmaydi. UI’da manzil
+maydonlarini qo‘shish alohida ish; JSON importi va API orqali foydalanish mumkin.
+Demo terminalda `ping -6 <IPv6>`, `ping6 <IPv6>` va `ip -6 route` ishlatiladi.
+
+## Katta real FRR topologiyalari uchun benchmark
+
+Dedicated root Linux hostda (Mininet cleanup global):
+
+```bash
+sudo python3 -m lab.benchmarks.real_scale --routers 10 20 40 \
+  --hosts 1 --flows 4 --duration 10 --rss-budget-mb 2048 --output /tmp/scale.json
+```
+
+Vosita `/tmp/netlab-real.lock` bilan real testlarni ketma-ketlashtiradi. Har hajmda
+FRR OSPF Full qo‘shnilarini, hostlar orasidagi ping va har oqimda haqiqiy trafikni
+tekshiradi; startup/readiness vaqti, RSS, CPU, process/thread/FD sonini o‘lchaydi.
+Daemonlashgan FRR network namespace orqali hisobga olinadi; umumiy OVS RSS alohida.
+0.5 s namunalar aniq kernel high-water mark emas. Pcap capture o‘chiq.
+RSS budjeti tugallangan run’ni baholaydi, startup uchun qat’iy xotira limiti emas.
+`--timeout` run’ni cheklaydi, `finally` driver cleanup’ni bajaradi.
+
+Exit 2 — prerequisite yetishmaydi; exit 1 — test/budjet xatosi. Bitta muvaffaqiyatli
+20-router test hostning maksimal sig‘imini isbotlamaydi. Hozirgi cloud instance’da
+root/Mininet/FRR yo‘q: real resurs raqamlari o‘lchanmagan. Dalillar:
+[`docs/validation/ipv6-scale.md`](../docs/validation/ipv6-scale.md).
+
+ns-3 Python wheel’ida muhitga xos cheklov bor: virtualenvning to‘liq yo‘lida
+`test` bo‘lsa kutubxona qidiruvi ularni chiqarib yuboradi. Masalan `.venv` yoki
+`/workspace/venvs/netlab` ishlating; `mininet_test` ichidagi virtualenv mos kelmasligi mumkin.
+
 NetLab — tarmoqni sichqoncha bilan quradigan, keyin **haqiqiy Linux tarmoq
 stekida** ishga tushiradigan ilova. Packet Tracer / OPNET uslubidagi vosita, lekin
 qurilmalar ichida haqiqiy dasturlar ishlaydi: router'larda FRRouting, switch'larda
