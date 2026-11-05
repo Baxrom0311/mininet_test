@@ -43,24 +43,38 @@ _NODESTATS_CPP = r"""
 #include <sstream>
 namespace netlab {
 using namespace ns3;
+// Hisoblagichlar node id bo'yicha vektorda (har paketda std::map qidiruvi yo'q). TX = mahalliy
+// yuborilgan (SendOutgoing) + uzatilgan (UnicastForward, MulticastForward) — Linux OutRequests +
+// ForwDatagrams kabi.
+// "Tx" trace ishlatilmaydi: unga ulanilsa ns-3 har hop'da paketni nusxalab sarlavha qo'shadi.
 struct Cnt { uint64_t fwd = 0, rx = 0, tx = 0, noroute = 0, drop = 0; };
-static std::map<uint32_t, Cnt> g_cnt;
-static void OnFwd(uint32_t id, const Ipv4Header&, Ptr<const Packet>, uint32_t) { g_cnt[id].fwd++; }
-static void OnRx(uint32_t id, Ptr<const Packet>, Ptr<Ipv4>, uint32_t) { g_cnt[id].rx++; }
-static void OnTx(uint32_t id, Ptr<const Packet>, Ptr<Ipv4>, uint32_t) { g_cnt[id].tx++; }
-static void OnDrop(uint32_t id, const Ipv4Header&, Ptr<const Packet>, Ipv4L3Protocol::DropReason r,
+static std::vector<Cnt> g_cnt;
+static inline Cnt& C(uint32_t id) { if (id >= g_cnt.size()) g_cnt.resize(id + 1); return g_cnt[id]; }
+static void OnFwd(Cnt* c, const Ipv4Header&, Ptr<const Packet>, uint32_t) { c->fwd++; c->tx++; }
+static void OnOut(Cnt* c, const Ipv4Header&, Ptr<const Packet>, uint32_t) { c->tx++; }
+static void OnRx(Cnt* c, Ptr<const Packet>, Ptr<Ipv4>, uint32_t) { c->rx++; }
+static void OnDrop(Cnt* c, const Ipv4Header&, Ptr<const Packet>, Ipv4L3Protocol::DropReason r,
                    Ptr<Ipv4>, uint32_t) {
-  if (r == Ipv4L3Protocol::DROP_NO_ROUTE) g_cnt[id].noroute++; else g_cnt[id].drop++;
+  if (r == Ipv4L3Protocol::DROP_NO_ROUTE) c->noroute++; else c->drop++;
 }
+void Reserve(uint32_t n) { g_cnt.reserve(n + 1); g_cnt.resize(n + 1); }
 void Attach(Ptr<Node> n) {
   uint32_t id = n->GetId();
   Ptr<Ipv4L3Protocol> ip = n->GetObject<Ipv4L3Protocol>();
   if (!ip) return;
-  g_cnt[id];
-  ip->TraceConnectWithoutContext("UnicastForward", MakeBoundCallback(&OnFwd, id));
-  ip->TraceConnectWithoutContext("Rx", MakeBoundCallback(&OnRx, id));
-  ip->TraceConnectWithoutContext("Tx", MakeBoundCallback(&OnTx, id));
-  ip->TraceConnectWithoutContext("Drop", MakeBoundCallback(&OnDrop, id));
+  Cnt* c = &C(id);   // Reserve() oldindan chaqiriladi — vektor qayta joylashmaydi
+  ip->TraceConnectWithoutContext("UnicastForward", MakeBoundCallback(&OnFwd, c));
+  ip->TraceConnectWithoutContext("SendOutgoing", MakeBoundCallback(&OnOut, c));
+  ip->TraceConnectWithoutContext("MulticastForward", MakeBoundCallback(&OnOut, c));   // har chiqish interfeysi
+  ip->TraceConnectWithoutContext("Rx", MakeBoundCallback(&OnRx, c));
+  ip->TraceConnectWithoutContext("Drop", MakeBoundCallback(&OnDrop, c));
+}
+// barcha tugunlar hisoblagichlari bitta chaqiruvda (Python<->C++ o'tishlari kamroq)
+std::vector<uint64_t> GetAll(const std::vector<uint32_t>& ids) {
+  std::vector<uint64_t> out;
+  out.reserve(ids.size() * 5);
+  for (uint32_t id : ids) { Cnt& c = C(id); out.insert(out.end(), {c.fwd, c.rx, c.tx, c.noroute, c.drop}); }
+  return out;
 }
 // cheklangan uzatish (FTP/HTTP): PacketSink Rx -> maqsad baytga yetgan aniq vaqt
 static std::map<uint32_t, std::pair<uint64_t, uint64_t>> g_sink;
@@ -103,7 +117,7 @@ std::vector<double> McGet(uint32_t key, uint32_t gkey) {
   return {m.bytes, m.pkts, m.dsum, m.jsum, g_mctx[gkey]};
 }
 std::vector<uint64_t> Get(uint32_t id) {
-  Cnt& c = g_cnt[id];
+  Cnt& c = C(id);
   return {c.fwd, c.rx, c.tx, c.noroute, c.drop};
 }
 std::string Routes(Ptr<Node> n) {
@@ -134,6 +148,17 @@ def parse_ns3_routes(text, idx_ifn):
         ifn = idx_ifn.get(int(v[-1]), f"if{v[-1]}") if v[-1].isdigit() else v[-1]
         out.add(route_key(net, None if v[1] == "0.0.0.0" else v[1], ifn))
     return out
+
+
+def _set_err(em, rate):
+    """RateErrorModel: rate=0 da o'chiriladi (har paketda tasodifiy son chizilmaydi; natija bir xil —
+    har model o'z RNG oqimiga ega)."""
+    from ns import ns
+    em.SetAttribute("ErrorRate", ns.DoubleValue(float(rate)))
+    if float(rate) > 0:
+        em.Enable()
+    else:
+        em.Disable()
 
 
 def emit(**kw):
@@ -175,7 +200,19 @@ def main(inp_path, out_path):
     # TCP: Linux (Mininet) ga yaqin standartlar — ns-3 o'zi MSS=536, bufer=128KB
     # ishlatadi, bu oyna bilan o'tkazuvchanlikni sun'iy cheklaydi va dvigatellar
     # natijalarini solishtirib bo'lmas qiladi.
-    ns.Config.SetDefault("ns3::TcpSocket::SegmentSize", ns.UintegerValue(1448))
+    # Tezkor rejim (ixtiyoriy, `ns3_fast: true` yoki NETLAB_NS3_FAST=1): jumbo MTU 9000 / MSS 8948 —
+    # TCP paketlari ~6x kam (ns-3 vaqti paketlar soniga proporsional). Navbatlar BAYT bo'yicha
+    # teng qoldiriladi (paket soni x1500/9000). Natija TAXMINIY: o'tkazuvchanlik deyarli bir xil,
+    # paket darajasidagi kechikish/jitter va kichik navbatlarda yo'qotish farq qilishi mumkin.
+    # Wi-Fi bo'lsa qo'llanmaydi (MSDU 2304 — fragmentatsiya bo'lardi).
+    fast = bool(sc.get("ns3_fast")) or os.environ.get("NETLAB_NS3_FAST") == "1"
+    if fast and any((l.get("params") or {}).get("medium") == "wifi" for l in project["links"].values()):
+        emit(log="ns3_fast: Wi-Fi kabellari bor — tezkor rejim qo'llanmadi")
+        fast = False
+    mtu = 9000 if fast else 1500
+    if fast:
+        emit(log="ns3_fast: MTU 9000 / MSS 8948, navbatlar bayt bo'yicha teng (taxminiy rejim)")
+    ns.Config.SetDefault("ns3::TcpSocket::SegmentSize", ns.UintegerValue(mtu - 52))
     ns.Config.SetDefault("ns3::TcpSocket::SndBufSize", ns.UintegerValue(4 * 1024 * 1024))
     ns.Config.SetDefault("ns3::TcpSocket::RcvBufSize", ns.UintegerValue(6 * 1024 * 1024))
     ns.Config.SetDefault("ns3::TcpL4Protocol::SocketType", ns.StringValue("ns3::TcpCubic"))
@@ -242,6 +279,7 @@ def main(inp_path, out_path):
     nl = cppyy.gbl.netlab
     from lab.engines.nodestats import L3_NS, RouteTracker, convergence
     stat_nodes = [n for n, d in devs.items() if d["type"] in L3_NS]
+    nl.Reserve(max(nd.GetId() for nd in nodes.values()))
     for n in stat_nodes:
         nl.Attach(nodes[n])
 
@@ -289,7 +327,7 @@ def main(inp_path, out_path):
             wifi_links.append((lid, l))
             continue
         rate, delay = rate_str(p.get("bw", 100)), time_str(p.get("delay", "1ms"))
-        q = f"{int(p.get('queue', 1000))}p"
+        q = f"{max(10, round(int(p.get('queue', 1000)) * 1500 / mtu))}p"
         if str(p.get("jitter", "0ms")) not in ("0ms", "0", "0us", "0s", ""):
             jitter_warn = True
         pair = ns.NodeContainer()
@@ -313,11 +351,14 @@ def main(inp_path, out_path):
             pass
         nd = h.Install(pair)
         d1, d2 = nd.Get(0), nd.Get(1)
+        if fast:
+            for dv in (d1, d2):
+                dv.SetMtu(mtu)
         errs = []
         for dv in (d1, d2):
             em = ns.CreateObject[ns.RateErrorModel]()
             em.SetAttribute("ErrorUnit", ns.StringValue("ERROR_UNIT_PACKET"))
-            em.SetAttribute("ErrorRate", ns.DoubleValue(float(p.get("loss", 0)) / 100.0))
+            _set_err(em, float(p.get("loss", 0)) / 100.0)
             dv.SetAttribute("ReceiveErrorModel", ns.PointerValue(em))
             errs.append(em)
         port_dev[(a["dev"], a["port"])] = d1
@@ -665,7 +706,16 @@ def main(inp_path, out_path):
 
     install_mcast()
     fmh = ns.FlowMonitorHelper()
-    mon = fmh.InstallAll()
+    if os.environ.get("NETLAB_NS3_FM", "endpoints") == "all":
+        mon = fmh.InstallAll()
+    else:
+        # FlowMonitor faqat ilovalar uchlarida: oqim statistikasi (tx manbada, rx/kechikish/jitter
+        # qabul qiluvchida) uchlarda yoziladi — har hop'dagi probe'lar (paket tegi, hash) behuda.
+        fm_nodes = ns.NodeContainer()
+        for n_ in sorted({x for a_ in apps for x in (a_["src"], a_["dst"])}, key=lambda n_: devs[n_]["id"]):
+            if devs[n_]["type"] in L3:
+                fm_nodes.Add(nodes[n_])
+        mon = fmh.Install(fm_nodes)
     clf = ns.DynamicCast[ns.Ipv4FlowClassifier](fmh.GetClassifier())
 
     # hodisalar
@@ -684,10 +734,10 @@ def main(inp_path, out_path):
             if "loss" in params:
                 lo["loss"] = float(params["loss"]) / 100.0
                 for em in lo["errs"]:
-                    em.SetAttribute("ErrorRate", ns.DoubleValue(lo["loss"]))
+                    _set_err(em, lo["loss"])
         if up is not None:
             for em in lo["errs"]:
-                em.SetAttribute("ErrorRate", ns.DoubleValue(lo["loss"] if up else 1.0))
+                _set_err(em, lo["loss"] if up else 1.0)
             for end in lo["ends"]:
                 k = (end["dev"], end["port"])
                 if k in iface:
@@ -732,8 +782,8 @@ def main(inp_path, out_path):
             up = state["links"][lid].get("up") is not False
             blk = any((e_["dev"], e_["port"]) in st["blocked"] for e_ in ends)
             for em in lo["errs"]:
-                em.SetAttribute("ErrorRate", ns.DoubleValue(1.0 if (not up or blk) else lo["loss"]))
-        for x, b in st["bridges"].items():
+                _set_err(em, 1.0 if (not up or blk) else lo["loss"])
+        for x, b in sorted(st["bridges"].items()):     # tartib deterministik (set iteratsiyasi hash'ga bog'liq)
             rtrack.update(t, x, {f"port{p_} {v['role']}/{v['state']}" for p_, v in b["ports"].items()})
 
     # Link aggregation: ns-3 da bonding yo'q — bond BITTA "vakil" a'zo kabel orqali yuradi,
@@ -759,10 +809,10 @@ def main(inp_path, out_path):
                     for dv in lo["devs"]:
                         dv.SetAttributeFailSafe("DataRate", r)
                     for em in lo["errs"]:
-                        em.SetAttribute("ErrorRate", ns.DoubleValue(lo["loss"]))
+                        _set_err(em, lo["loss"])
                 else:
                     for em in lo["errs"]:
-                        em.SetAttribute("ErrorRate", ns.DoubleValue(1.0))
+                        _set_err(em, 1.0)
 
     events = sorted(sc.get("events") or [], key=lambda e: float(e.get("t", 0)))
     initially_down = [lid for lid, l in project["links"].items() if l.get("up") is False]
@@ -1051,9 +1101,13 @@ def main(inp_path, out_path):
            "convergence": convergence(applied, rtrack.events, duration),
            "wall_s": round(time.time() - t_wall, 2),
            "notes": ["dinamik routing: ripd → ns-3 RIPv2 (haqiqiy konvergensiya); qolganlari — analitik bilan bir xil SPF modeli statik marshrut sifatida (hodisada darhol qayta hisoblanadi)",
-                     "TCP: Cubic, MSS 1448, bufer 4/6 MB (Linux'ga yaqin)",
+                     f"TCP: Cubic, MSS {mtu - 52}, bufer 4/6 MB (Linux'ga yaqin)",
                      "Wi-Fi: YansWifi + LogDistance(n=3), IdealWifiManager; joylashuv = kanvas * meters_per_px",
                      "jitter parametri modellashtirilmaydi", "P4/SDN mantiqi: switch L2 bridge, SDN router — L3 router sifatida"]}
+    if fast:
+        out["ns3_fast"] = True
+        out["notes"].append("ns3_fast: jumbo MTU 9000 (TCP paketlari ~6x kam) — taxminiy rejim; "
+                            "paket darajasidagi kechikish/jitter aniq rejimdan farq qilishi mumkin")
     with open(out_path, "w") as f:
         json.dump(out, f)
     emit(progress=1.0, log=f"tugadi ({out['wall_s']}s)")
