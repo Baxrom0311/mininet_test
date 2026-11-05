@@ -49,3 +49,22 @@ export interface RunResult {
   study_id?: string; study_param?: any; study_value?: any; study_index?: number; study_param2?: any; study_value2?: any; study_index2?: number
 }
 export type RunListItem = Pick<RunResult, 'run_id' | 'scenario_name' | 'engine' | 'created' | 'wall_s' | 'status' | 'label' | 'study_id' | 'study_param' | 'study_value' | 'study_index' | 'study_param2' | 'study_value2' | 'study_index2'> & { progress?: number }
+/** POST /api/analysis/survivability — yakka nosozliklar ta'siri (N-1) va sig'im rejasi */
+export interface SurvivabilityCase {
+  kind: 'link' | 'device'; target: string; down_links: string[]; score: number
+  broken: { flow: string; label?: string; why?: string | null }[]; broken_demand_pct: number
+  rerouted: string[]; degraded: { flow: string; label?: string; thr_change_pct: number; thr_bps: number; base_thr_bps: number }[]
+  udp_loss: { flow: string; loss_pct: number }[]; overloaded: { link: string; util: number }[]
+  max_util: number; mos: Record<string, { base: number; fail: number }>; convergence: Record<string, number>
+}
+export interface CapacityPlanRow {
+  link: string; dir: 'ab' | 'ba'; bw_mbps: number; base_load_mbps: number; worst_load_mbps: number
+  worst_case: string | null; worst_util: number; worst_tcp_mbps: number; need_mbps: number; upgrade: boolean
+}
+export interface SurvivabilityReport {
+  scenario: string; targets: 'links' | 'devices' | 'both'; wall_s: number; notes: string[]
+  baseline: { flows: Record<string, { label?: string; type: string; thr_bps: number; loss_pct: number | null; alive: boolean; why?: string | null }>
+              down_flows: string[]; links: Record<string, number>; mos: Record<string, number | null> }
+  cases: SurvivabilityCase[]; spof: { kind: 'link' | 'device'; target: string; broken: string[] }[]
+  capacity_plan: CapacityPlanRow[]; upgrades: CapacityPlanRow[]
+}

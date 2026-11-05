@@ -283,6 +283,28 @@ def create_app(driver_name="demo", token=None):
                                 body.get("param") or {}, body.get("values") or [],
                                 body.get("param2") or None, body.get("values2") or None)
 
+    @app.post("/api/analysis/survivability")
+    def survivability(body: dict = Body(...)):
+        """Yakka nosozliklar ta'siri (N-1) + sig'im rejasi — analitik model, sinxron (bir necha soniya)."""
+        from lab.survivability import analyze
+        project = body.get("project") or {}
+        errs = validate_project(project)
+        if errs:
+            raise ValueError("; ".join(errs[:5]))
+        sc = body.get("scenario")
+        sc_obj = (project.get("scenarios") or {}).get(sc) if isinstance(sc, str) else sc
+        if not sc_obj:
+            raise ValueError(f"ssenariy '{sc}' yo'q")
+        errs = validate_scenario(project, sc_obj)
+        if errs:
+            raise ValueError("; ".join(errs[:5]))
+        targets = body.get("targets", "both")
+        if targets not in ("links", "devices", "both"):
+            raise ValueError("targets: links | devices | both")
+        rep = analyze(project, sc_obj, targets, include_hosts=bool(body.get("include_hosts")))
+        rep["scenario"] = sc if isinstance(sc, str) else rep.get("scenario")
+        return rep
+
     @app.get("/api/runs/{project}")
     def run_list(project: str):
         return {"runs": runs.list(project)}

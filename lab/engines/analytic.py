@@ -89,6 +89,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     # cheklangan TCP uzatishlar (FTP fayl / HTTP sahifa): qolgan bayt, tugash vaqti, ulanish+slow start
     remaining = {a["id"]: int(a["bytes"]) for a in apps if a.get("type") == "tcp" and a.get("bytes")}
     done_at, setup_left = {}, {}
+    last_path = {}      # ilova -> oxirgi qadamdagi (yo'l, sabab) — survivability tahlili uchun
     node_series = {dv: [] for dv, d in proj["devices"].items() if d["type"] in L3_NS}
     rtrack = RouteTracker()
     from lab.stp import compute as stp_compute, convergence_time as stp_conv_time, stp_enabled
@@ -309,6 +310,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                         if not okf:
                             st.update(ok=False, why=whyf)
                 st["active"] = True
+                last_path[a["id"]] = ([[lid, d_] for lid, d_ in st["path"]], None if st["ok"] else st.get("why"))
             flows.append(st)
 
         # 1) UDP/ping — inelastik
@@ -570,6 +572,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             flows_out[a["id"]].update(bytes=int(a["bytes"]), done_t=round(done_at[a["id"]], 3) if a["id"] in done_at else None)
         if a.get("group"):
             flows_out[a["id"]].update(group=a["group"], role=a.get("role"))
+        if a["id"] in last_path:
+            flows_out[a["id"]].update(path=last_path[a["id"]][0], why=last_path[a["id"]][1])
     return {"engine": "analytic", "engine_label": "Analitik (oqim modeli)", "duration": duration,
             "flows": flows_out, "links": link_series, "events": applied,
             "nodes": node_series, "route_events": rtrack.events,
