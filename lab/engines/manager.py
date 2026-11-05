@@ -261,24 +261,47 @@ class RunManager:
         pdesc = {**param, "label": self._param_label(param)}
         pdesc2 = {**param2, "label": self._param_label(param2)} if two_d else None
 
+        def one(k, i, j, v, v2, p2, sc2, n):
+            rid = f"{study_id}-v{k + 1:02d}"
+            label = f"{pdesc['label']}={v}" + (f", {pdesc2['label']}={v2}" if two_d else "")
+            with self._lock:
+                self.active[rid] = {"project": pname, "scenario_name": scenario_name, "engine": engine,
+                                    "progress": 0.0, "created": time.time(), "study_id": study_id, "label": label}
+            self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "index": k, "total": n,
+                              "value": label, "run_id": rid})
+            extra = {"study_id": study_id, "study_param": pdesc, "study_value": v, "study_index": i, "label": label}
+            if two_d:
+                extra.update(study_param2=pdesc2, study_value2=v2, study_index2=j)
+            self._worker(rid, pname, p2, scenario_name, sc2, engine, extra=extra)
+
         def go():
             n = len(variants)
-            for k, (i, j, v, v2, p2, sc2) in enumerate(variants):
-                rid = f"{study_id}-v{k + 1:02d}"
-                label = f"{pdesc['label']}={v}" + (f", {pdesc2['label']}={v2}" if two_d else "")
-                with self._lock:
-                    self.active[rid] = {"project": pname, "scenario_name": scenario_name, "engine": engine,
-                                        "progress": 0.0, "created": time.time(), "study_id": study_id, "label": label}
-                self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "index": k, "total": n,
-                                  "value": label, "run_id": rid})
-                extra = {"study_id": study_id, "study_param": pdesc, "study_value": v, "study_index": i, "label": label}
-                if two_d:
-                    extra.update(study_param2=pdesc2, study_value2=v2, study_index2=j)
-                self._worker(rid, pname, p2, scenario_name, sc2, engine, extra=extra)
+            par = self.study_parallelism(engine)
+            if par <= 1:
+                for k, var in enumerate(variants):
+                    one(k, *var, n)
+            else:
+                # ns-3: har ishga tushirish alohida jarayon — variantlar bir vaqtda (CPU yadrolari bo'yicha)
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=par) as ex:
+                    for f in [ex.submit(one, k, *var, n) for k, var in enumerate(variants)]:
+                        f.result()
             self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "done": True, "total": n})
 
         threading.Thread(target=go, daemon=True).start()
         return {"study_id": study_id, "runs": len(variants)}
+
+    @staticmethod
+    def study_parallelism(engine):
+        """Tadqiqotda bir vaqtda nechta ishga tushirish: faqat ns-3 (alohida jarayon; analitik —
+        GIL tufayli foydasiz, Mininet — bitta jonli tarmoq). NETLAB_NS3_PARALLEL bilan; standart —
+        yadrolar soni / 2 (1..4)."""
+        if engine != "ns3":
+            return 1
+        env = os.environ.get("NETLAB_NS3_PARALLEL", "").strip()
+        if env.isdigit():
+            return max(1, int(env))
+        return max(1, min(4, (os.cpu_count() or 2) // 2))
 
     def _worker(self, run_id, pname, project, sc_name, sc, engine, extra=None):
         prog = lambda f: self._pub(run_id, progress=round(f, 3))  # noqa: E731
