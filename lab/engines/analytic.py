@@ -209,7 +209,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 fwd_new = {(x, p_) for x, b in st_new["bridges"].items() for p_, v in b["ports"].items()
                            if v["state"] == "forwarding"}
                 if stp_fwd is not None:
-                    for x, p_ in fwd_new - stp_fwd:
+                    for x, p_ in sorted(fwd_new - stp_fwd):
                         stp_hold[(x, p_)] = t0 + stp_conv_time(proj, x, failed, sc)
                         log(f"STP: {x} port {p_} -> forwarding {stp_hold[(x, p_)] - t0:.0f} s dan keyin")
                     for key in list(stp_hold):
