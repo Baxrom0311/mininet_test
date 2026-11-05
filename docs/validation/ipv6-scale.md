@@ -6,7 +6,7 @@ VRRP, LAG, failures, survivability va ns-3 tezlik kodlari saqlandi.
 
 ## Bajarilgan
 
-- `python -m unittest lab.tests.smoke_ipv6 -v`: 11 test. O‘ntasi model/demo/
+- `python -m unittest lab.tests.smoke_ipv6 -v`: 12 test. O‘n bittasi model/demo/
   validation/resource sampler, bittasi ikki alohida ns-3 jarayonida IPv4 va IPv6
   TCP/UDP/echo, link uzilishi/tiklanishi, route events va forwarding counterlarini
   tekshiradi. Hech qaysi assertion o‘chirilmadi.
@@ -38,8 +38,9 @@ Sampled process RSS, shared OVS RSS va cgroup cheklovlarini alohida talqin qilin
 - `lab/addressing.py` oilani tanlash/copy/filter qoidalarini bir joyda ushlaydi.
 - `lab/engines/ns3_addressing.py` stack, manzil, endpoint, route va link-state
   farqlarini ajratadi. ns-3 trafik, queue va feature kodlari takrorlanmadi.
-- Analitik setupdagi ortiqcha deepcopy olib tashlandi; family selection nusxasi
-  foydalanuvchi loyihasini o‘zgartirmasligi test bilan tekshirildi.
+- Analitik modelda boshlang‘ich koordinatalar va mutable run holati alohida
+  nusxalarda saqlandi. Deepcopy’ni olib tashlash Wi-Fi harakatini buzishi
+  regressiya tekshiruvida aniqlandi va bu optimizatsiya qaytarildi.
 - Real benchmark unit test yoki demo natijasini real o‘lchov deb ko‘rsatmaydi.
 
 Haqiqiy IPv6 kernel/FRR sinovi va GUI’ni qo‘lda sinash bu bosqichda bajarilmadi.

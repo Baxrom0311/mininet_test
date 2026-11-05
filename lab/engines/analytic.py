@@ -57,7 +57,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     from lab.addressing import project_for_family
     project = project_for_family(project, sc.get("ip_version", 4))
     from lab.services import resolve_dhcp
-    proj = resolve_dhcp(project)[0]    # family selection already made an independent copy
+    # Keep the immutable reference positions separate from mutable simulation state.
+    proj = copy.deepcopy(resolve_dhcp(project)[0])
     duration = float(sc.get("duration", 30))
     apps = []
     for i, a in enumerate(sc.get("apps") or []):

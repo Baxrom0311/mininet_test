@@ -129,6 +129,18 @@ class ModelTests(unittest.TestCase):
         self.assertIn("::/0 via fd00:", text)
         self.assertNotIn("0.0.0.0/0", text)
 
+    def test_motion_keeps_original_coordinates(self):
+        path = Path(__file__).resolve().parents[1] / "examples/wifi_kampus.json"
+        p = json.loads(path.read_text())
+        before = copy.deepcopy(p)
+        result = analytic.run(p, p["scenarios"]["yurish"])
+        points = {int(x["t"]): x["thr_bps"] / 1e6 for x in result["flows"]["m"]["series"]}
+        self.assertGreater(points[4], 50)
+        self.assertGreater(points[22], 5)
+        self.assertLess(points[22], 50)
+        self.assertLess(points[38], 0.1)
+        self.assertEqual(p, before)
+
 
 @unittest.skipUnless(importlib.util.find_spec("ns3") and os.environ.get("NETLAB_SKIP_NS3") != "1",
                      "ns-3 unavailable or explicitly skipped")
