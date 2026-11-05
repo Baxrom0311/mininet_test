@@ -128,6 +128,7 @@ jobs:
           python -m lab.tests.smoke_vrrp
           python -m lab.tests.smoke_lag
           python -m lab.tests.smoke_survivability
+          python -m lab.tests.smoke_failures
 
   docker-build:
     runs-on: ubuntu-latest
