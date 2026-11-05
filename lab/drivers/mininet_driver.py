@@ -701,6 +701,7 @@ class MininetDriver(BaseDriver):
                 cmds.append(f"ip link del {m.group(1)}")
         if d["type"] == "router":
             cmds += self._nat_cmds(cfg)
+            cmds += self._vrrp_macvlan_cmds(node, cfg)
         if d["type"] in ("host", "server", "router"):
             self._apply_firewall(name, d)
         gw = cfg.get("gateway")
@@ -859,6 +860,32 @@ exit 0
             cmds.append(f"iptables -t nat -A POSTROUTING -o {out} -j MASQUERADE")
         return cmds
 
+    def _vrrp_macvlan_cmds(self, node, cfg):
+        """FRR vrrpd macvlan talab qiladi: ota interfeys ustida VRRP MAC (00:00:5e:00:01:VRID)
+        va VIP bilan. vrrpd backup holatida uni protodown qiladi, master'da yoqadi."""
+        from lab.vrrp import macvlan_name, vmac
+        cmds, want = [], set()
+        if cfg.get("vrrp"):
+            # VIP backup'da ham (macvlan'da, protodown) mahalliy manzil — arp_ignore=0 bo'lsa ota
+            # interfeys VIP uchun o'z MAC'i bilan javob beradi. 1: faqat kirgan interfeysdagi manzil.
+            cmds.append("sysctl -qw net.ipv4.conf.all.arp_ignore=1 net.ipv4.conf.all.arp_announce=2")
+        for e in cfg.get("vrrp") or []:
+            mv = macvlan_name(e)
+            want.add(mv)
+            cmds += [f"ip link show {mv} >/dev/null 2>&1 || "
+                     f"{{ ip link add {mv} link {e['iface']} addrgenmode random type macvlan mode bridge 2>/dev/null || "
+                     f"ip link add {mv} link {e['iface']} type macvlan mode bridge; }}",   # IPv6'siz yadroda addrgenmode yo'q
+                     f"ip link set {mv} address {vmac(e['vrid'])}",
+                     f"ip addr replace {e['vip']} dev {mv}",
+                     f"ip link set {mv} up"]
+            if self._datapath == "user":
+                cmds.append(f"ethtool -K {mv} tx off >/dev/null")
+        for line in node.cmd("ip -o link show type macvlan").splitlines():
+            m = re.match(r"\d+:\s+([^@:]+)", line)
+            if m and m.group(1).startswith("vrrp4-") and m.group(1) not in want:
+                cmds.append(f"ip link del {m.group(1)}")
+        return cmds
+
     def _apply_stp(self, name):
         """STP/RSTP -> OVS: rejim, priority, bridge id (system-id = device_mac(id, 0) — model bilan
         bir xil tartib), port yo'l narxlari (veth "10G" ko'rinadi — narx kabel bw'dan yoziladi)."""
@@ -957,6 +984,8 @@ exit 0
             t = d["type"]
             if t in ("host", "server", "router"):
                 self._config_ns_node(name)
+                if t == "router" and (d.get("config") or {}).get("vrrp") != ((old or {}).get("config") or {}).get("vrrp"):
+                    self._vrrp_apply(name, d)
             elif t == "wifiap":
                 for _p, (lid_, _peer, _pp) in link_ports(self.project, name).items():
                     l_ = self.project["links"][lid_]
@@ -1163,6 +1192,8 @@ exit 0
         os.makedirs(etc, exist_ok=True)
         os.makedirs(run, exist_ok=True)
         daemons = ["zebra", "staticd"] + [x for x in cfg.get("daemons", []) if x in FRR_DAEMONS]
+        if cfg.get("vrrp") and "vrrpd" not in daemons:
+            daemons.append("vrrpd")     # VRRP sozlangan — vrrpd avtomatik
         for dm in daemons:
             with open(os.path.join(etc, f"{dm}.conf"), "w") as f:
                 f.write(f"hostname {name}\n")
@@ -1211,7 +1242,21 @@ exit 0
             out = node.cmd(f"vtysh -N {name} -f {path} 2>&1")
             if "error" in out.lower() or "unknown command" in out.lower():
                 self.bus.log("warn", f"bgp config: {out.strip()[-400:]}", name)
+        if cfg.get("vrrp"):
+            self._vrrp_apply(name, d)
         self.bus.log("ok", f"FRR ishga tushdi: {', '.join(daemons)}", name)
+
+    def _vrrp_apply(self, name, d):
+        """VRRPv3 konfiguratsiyasi (vtysh). Macvlan (VRRP MAC + VIP) _config_ns_node'da yaratiladi."""
+        from lab.vrrp import frr_config
+        etc, _run = self._frr_dirs(name)
+        path = os.path.join(etc, "vrrp-netlab.conf")
+        with open(path, "w") as f:
+            f.write(frr_config(d))
+        time.sleep(0.3)
+        out = self.net.get(name).cmd(f"vtysh -N {name} -f {path} 2>&1")
+        if "error" in out.lower() or "unknown command" in out.lower() or "%" in out:
+            self.bus.log("warn", f"vrrp config: {out.strip()[-400:]}", name)
 
     def _frr_stop(self, name):
         _etc, run = self._frr_dirs(name)
@@ -1412,6 +1457,11 @@ exit 0
                                                     "conntrack -L 2>&1 | head -30")))
                 if t == "router":
                     secs.append(self._text("FRR: show ip route", node.cmd(f"vtysh -N {name} -c 'show ip route' 2>&1")))
+                    if (d.get("config") or {}).get("vrrp"):
+                        from lab.vrrp import model_rows
+                        secs.append(self._text("FRR: show vrrp", node.cmd(f"vtysh -N {name} -c 'show vrrp' 2>&1")))
+                        secs.append(self._table("VRRP (model bashorati)", ["VRID", "Interfeys", "VIP", "Prioritet",
+                                                                          "Holat", "Master"], model_rows(self.project, name)))
                     daemons = (d.get("config") or {}).get("daemons", [])
                     extra = {"ospfd": "show ip ospf neighbor", "bgpd": "show bgp summary",
                              "ripd": "show ip rip", "isisd": "show isis neighbor",

@@ -93,9 +93,26 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     from lab.stp import compute as stp_compute, convergence_time as stp_conv_time, stp_enabled
     stp_on = any(stp_enabled(d) for d in proj["devices"].values())
     stp_up, stp_fwd, stp_hold = {}, None, {}
+    # VRRP: master o'zgarishlari vaqt modeli (Master_Down_Interval, preempt) — lab/vrrp.py
+    from lab import vrrp as _vrrp
+    vrrp_tl = _vrrp.timeline(proj, sc)
+    if vrrp_tl:
+        prev_m = {}
+        for tt, key, r in vrrp_tl:
+            old_m = prev_m.get(key)
+            prev_m[key] = r
+            if tt <= 0 or old_m == r:
+                continue
+            if old_m:
+                rtrack.events.append({"t": tt, "dev": old_m, "added": [], "removed": [f"VRRP {key} master"]})
+            if r:
+                rtrack.events.append({"t": tt, "dev": r, "added": [f"VRRP {key} master"], "removed": []})
+            log(f"VRRP {key}: t={tt:.1f}s master -> {r or 'yo`q (Master_Down_Interval kutilmoqda)'}")
     steps = int(math.ceil(duration))
     for k in range(steps):
         t0, t1 = float(k), float(min(k + 1, duration))
+        if vrrp_tl:
+            proj["_vrrp_master"] = _vrrp.masters_at(vrrp_tl, t0 + 0.5)    # qadam o'rtasidagi holat
         while ev_i < len(events) and float(events[ev_i].get("t", 0)) <= t0 + 1e-9:
             e = events[ev_i]; ev_i += 1
             l = proj["links"].get(e.get("link"))

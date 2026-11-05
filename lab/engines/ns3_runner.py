@@ -754,6 +754,54 @@ def main(inp_path, out_path):
     for n in stat_nodes:        # t=0 holat
         rtrack.update(0, n, parse_ns3_routes(str(nl.Routes(nodes[n])), idx_ifn.get(n, {})))
         node_prev[n] = [int(x) for x in nl.Get(nodes[n].GetId())]
+    # VRRP: ns-3 da yo'q — model vaqt jadvali (lab/vrrp.timeline: Master_Down_Interval, preempt)
+    # bo'yicha VIP joriy master interfeysiga qo'shimcha manzil sifatida qo'yiladi/olinadi va
+    # ARP keshlari tozalanadi (gratuitous ARP ekvivalenti).
+    from lab import vrrp as _vrrp
+    vrrp_tl = _vrrp.timeline(project, sc)
+    vrrp_hold = {}       # group_key -> (router, port) VIP hozir qayerda
+    vrrp_ent = {key: {r: e for r, e in mem} for key, mem in _vrrp.groups(project).items()}
+
+    def vrrp_tick(t):
+        if not vrrp_tl:
+            return
+        want = _vrrp.masters_at(vrrp_tl, t)
+        changed = False
+        for key, r in want.items():
+            cur = vrrp_hold.get(key)
+            if (cur[0] if cur else None) == r:
+                continue
+            vip = ipaddress.ip_interface(next(iter(vrrp_ent[key].values()))["vip"])
+            if cur and cur in iface:
+                ipv4, idx, _ii = iface[cur]
+                for ai in range(ipv4.GetNAddresses(idx) - 1, -1, -1):
+                    if str(ipv4.GetAddress(idx, ai).GetLocal()) == str(vip.ip):
+                        ipv4.RemoveAddress(idx, ai)
+            vrrp_hold.pop(key, None)
+            if r:
+                port = parse_ifname(vrrp_ent[key][r]["iface"])[1]
+                if (r, port) in iface:
+                    ipv4, idx, _ii = iface[(r, port)]
+                    ipv4.AddAddress(idx, ns.Ipv4InterfaceAddress(ns.Ipv4Address(str(vip.ip)), ns.Ipv4Mask(str(vip.netmask))))
+                    vrrp_hold[key] = (r, port)
+            changed = True
+            if t > 0:
+                emit(log=f"t={t:.1f}s: VRRP {key} master -> {r or 'yoq'}")
+        if changed:
+            state["_vrrp_master"] = want
+            for nn, dd in devs.items():
+                if dd["type"] not in L3:
+                    continue
+                l3p = nodes[nn].GetObject[ns.Ipv4L3Protocol]()
+                for ii_ in range(l3p.GetNInterfaces()):
+                    c_ = l3p.GetInterface(ii_).GetArpCache()
+                    if c_:
+                        c_.Flush()
+    if vrrp_tl:
+        emit(log="eslatma: VRRP ns-3 da yo'q — master model vaqt jadvali bo'yicha (VIP qo'shimcha manzil sifatida ko'chiriladi)")
+        marks = sorted(set(marks) | {round(tt, 6) for tt, _k, _r in vrrp_tl if 0 < tt < duration})
+        vrrp_tick(0.0)
+
     for mark in marks:
         while ev_i < len(events) and float(events[ev_i].get("t", 0)) <= now + 1e-9:
             e = events[ev_i]; ev_i += 1
@@ -764,6 +812,7 @@ def main(inp_path, out_path):
             applied.append({"t": now, **e})
             emit(log=f"t={now:.1f}s: {act} {e.get('link') or e.get('device')}")
         stp_tick(now)
+        vrrp_tick(now)
         if movers:
             update_positions(now)
         ns.Simulator.Stop(ns.Seconds(mark - now))

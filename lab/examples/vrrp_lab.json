@@ -1,0 +1,321 @@
+{
+  "version": 1,
+  "name": "vrrp_lab",
+  "notes": "VRRP (birinchi-hop zaxirasi): r1 (priority 120) va r2 (priority 100) LAN'da 10.0.1.254 virtual gateway'ni bo'lishadi. Hostlar gateway = VIP. 'zaxira' ssenariysi: t=10 s da r1 ning LAN kabeli uziladi — r2 ~3.6 s (Master_Down_Interval) dan keyin master bo'ladi; t=20 s da tiklanadi — r1 preempt bilan qaytadi.",
+  "p4_programs": {},
+  "controllers": {},
+  "devices": {
+    "pc1": {
+      "id": 1,
+      "type": "host",
+      "x": 80,
+      "y": 140,
+      "config": {
+        "interfaces": {
+          "pc1-eth1": {
+            "ip": "10.0.1.11/24"
+          }
+        },
+        "gateway": "10.0.1.254",
+        "routes": []
+      }
+    },
+    "pc2": {
+      "id": 2,
+      "type": "host",
+      "x": 80,
+      "y": 320,
+      "config": {
+        "interfaces": {
+          "pc2-eth1": {
+            "ip": "10.0.1.12/24"
+          }
+        },
+        "gateway": "10.0.1.254",
+        "routes": []
+      }
+    },
+    "s1": {
+      "id": 3,
+      "type": "switch",
+      "x": 240,
+      "y": 230,
+      "config": {
+        "mode": "standalone",
+        "stp": false
+      }
+    },
+    "r1": {
+      "id": 4,
+      "type": "router",
+      "x": 420,
+      "y": 120,
+      "config": {
+        "daemons": [
+          "ospfd",
+          "vrrpd"
+        ],
+        "interfaces": {
+          "r1-eth1": {
+            "ip": "10.0.1.1/24"
+          },
+          "r1-eth2": {
+            "ip": "10.0.13.1/30"
+          }
+        },
+        "vrrp": [
+          {
+            "iface": "r1-eth1",
+            "vrid": 1,
+            "vip": "10.0.1.254/24",
+            "priority": 120,
+            "preempt": true,
+            "advert_ms": 1000
+          }
+        ],
+        "startup": "hostname r1\n!\ninterface r1-eth2\n ip ospf network point-to-point\n ip ospf hello-interval 1\n ip ospf dead-interval 4\n!\ninterface r1-eth1\n ip ospf hello-interval 1\n ip ospf dead-interval 4\n!\nrouter ospf\n ospf router-id 1.1.1.1\n network 10.0.1.0/24 area 0\n network 10.0.13.0/30 area 0\n!",
+        "routes": []
+      }
+    },
+    "r2": {
+      "id": 5,
+      "type": "router",
+      "x": 420,
+      "y": 340,
+      "config": {
+        "daemons": [
+          "ospfd",
+          "vrrpd"
+        ],
+        "interfaces": {
+          "r2-eth1": {
+            "ip": "10.0.1.2/24"
+          },
+          "r2-eth2": {
+            "ip": "10.0.23.1/30"
+          }
+        },
+        "vrrp": [
+          {
+            "iface": "r2-eth1",
+            "vrid": 1,
+            "vip": "10.0.1.254/24",
+            "priority": 100,
+            "preempt": true,
+            "advert_ms": 1000
+          }
+        ],
+        "startup": "hostname r2\n!\ninterface r2-eth2\n ip ospf network point-to-point\n ip ospf hello-interval 1\n ip ospf dead-interval 4\n!\ninterface r2-eth1\n ip ospf hello-interval 1\n ip ospf dead-interval 4\n!\nrouter ospf\n ospf router-id 2.2.2.2\n network 10.0.1.0/24 area 0\n network 10.0.23.0/30 area 0\n!",
+        "routes": []
+      }
+    },
+    "r3": {
+      "id": 6,
+      "type": "router",
+      "x": 600,
+      "y": 230,
+      "config": {
+        "daemons": [
+          "ospfd"
+        ],
+        "interfaces": {
+          "r3-eth1": {
+            "ip": "10.0.13.2/30"
+          },
+          "r3-eth2": {
+            "ip": "10.0.23.2/30"
+          },
+          "r3-eth3": {
+            "ip": "10.0.3.1/24"
+          }
+        },
+        "startup": "hostname r3\n!\ninterface r3-eth1\n ip ospf network point-to-point\n ip ospf hello-interval 1\n ip ospf dead-interval 4\n!\ninterface r3-eth2\n ip ospf network point-to-point\n ip ospf hello-interval 1\n ip ospf dead-interval 4\n!\nrouter ospf\n ospf router-id 3.3.3.3\n network 10.0.13.0/30 area 0\n network 10.0.23.0/30 area 0\n network 10.0.3.0/24 area 0\n!",
+        "routes": []
+      }
+    },
+    "srv1": {
+      "id": 7,
+      "type": "server",
+      "x": 780,
+      "y": 230,
+      "config": {
+        "interfaces": {
+          "srv1-eth1": {
+            "ip": "10.0.3.10/24"
+          }
+        },
+        "gateway": "10.0.3.1",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "pc1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "pc2",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "s1",
+        "port": 3
+      },
+      "b": {
+        "dev": "r1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l4": {
+      "a": {
+        "dev": "s1",
+        "port": 4
+      },
+      "b": {
+        "dev": "r2",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l5": {
+      "a": {
+        "dev": "r1",
+        "port": 2
+      },
+      "b": {
+        "dev": "r3",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l6": {
+      "a": {
+        "dev": "r2",
+        "port": 2
+      },
+      "b": {
+        "dev": "r3",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l7": {
+      "a": {
+        "dev": "r3",
+        "port": 3
+      },
+      "b": {
+        "dev": "srv1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "scenarios": {
+    "zaxira": {
+      "duration": 30,
+      "apps": [
+        {
+          "id": "video",
+          "type": "udp",
+          "src": "pc1",
+          "dst": "srv1",
+          "rate": "4Mbps",
+          "size": 1000,
+          "start": 1,
+          "stop": 29,
+          "label": "video pc1→srv1"
+        },
+        {
+          "id": "ping",
+          "type": "ping",
+          "src": "pc1",
+          "dst": "srv1",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 29,
+          "label": "ping pc1→srv1"
+        }
+      ],
+      "events": [
+        {
+          "t": 10,
+          "action": "link_down",
+          "link": "l3"
+        },
+        {
+          "t": 20,
+          "action": "link_up",
+          "link": "l3"
+        }
+      ],
+      "notes": "t=10 s: r1 (master) LAN kabeli uziladi — r2 ~3.6 s dan keyin VIP'ni oladi; t=20 s: r1 qaytadi va ~3.5 s dan keyin preempt (trafik uzilmaydi)"
+    }
+  }
+}
