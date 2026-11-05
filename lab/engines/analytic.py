@@ -25,6 +25,7 @@ from lab.mobility import apply_positions, has_moves, positions_at
 from lab.wifi import ap_config, channels_overlap, ess_key, max_range_m, meters_per_px
 from lab.wifi import estimate as wifi_estimate
 from lab.wifi import link_estimate as wifi_link_estimate
+from lab.mcast import branch as mc_branch, flood_keys as mc_flood_keys
 from lab.engines.nodestats import L3_NS, RouteTracker, convergence, route_key
 from lab.firewall import _why as fw_why
 from lab.firewall import check_path as fw_check_path
@@ -261,6 +262,11 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     ok2, _w2, _h2, back, _d2 = (n.reply(a["src"], sip.ip, a["dst"], ipaddress.ip_address(dip), _h)
                                                 if ok else (False, "", [], [], 0))
                     st.update(ok=ok and ok2, why=why, path=path, back=back)
+                    if a.get("mcast") and ok:      # multicast: shoxchada PIM bo'lishi shart
+                        okb, whyb, txp = mc_branch(n, a["src"], ipaddress.ip_address(dip), _h)
+                        st["tx"] = txp
+                        if not okb:
+                            st.update(ok=False, why=whyb)
                     if ok and ok2 and has_fw:
                         pkt = {"proto": "icmp" if a["type"] == "ping" else a["type"], "src": str(sip.ip),
                                "dst": dip, "dport": None if a["type"] == "ping" else a["_dport"], "sport": 40000}
@@ -276,6 +282,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
 
         # 1) UDP/ping — inelastik
         load = {k2: 0.0 for k2 in cap}
+        mc_seen, mc_off = set(), {}
         for f in flows:
             a = f["app"]
             if not f.get("active") or not f["ok"] or a["type"] == "tcp":
@@ -286,7 +293,20 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 f["offered"] = parse_rate(a.get("rate", "1Mbps"))
             f["res"] = resources(f["path"])
             for key, w in f["res"]:
+                if a.get("mcast"):                 # multicast: har kabelda BITTA nusxa
+                    if (a["mcast"], key) in mc_seen:
+                        continue
+                    mc_seen.add((a["mcast"], key))
+                    mc_off[a["mcast"]] = f["offered"]
                 load[key] += f["offered"] * w
+        # snooping'siz L2 segmentlarda daraxtdan tashqari flood (qabul qiluvchisiz shoxlar ham yuklanadi)
+        mc_flood = {}
+        for g in mc_off:
+            txs = [x for f in flows if f["app"].get("mcast") == g and f.get("ok") for x in f.get("tx") or []]
+            tree = {key for (g2, key) in mc_seen if g2 == g}
+            mc_flood[g] = [k_ for k_ in mc_flood_keys(n, txs, tree) if k_ in cap]
+            for key in mc_flood[g]:
+                load[key] += mc_off[g]
         # QoS: `prio` kabelida yuqori sinf (DSCP >= 40) birinchi xizmat qilinadi — oddiy sinf
         # faqat qolgan sig'imni oladi; fifo/fq_codel — umumiy (proporsional) kesish.
         def qdisc_of(key):
@@ -306,6 +326,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 scale_cls[k2] = (s_hi, min(1.0, left / lo) if lo > 0 else 1.0)
         used = {k2: 0.0 for k2 in cap}
         used_hi = {k2: 0.0 for k2 in cap}
+        mc_used = {}
         for f in flows:
             if "offered" in f:
                 cls = dscp_class(f["app"].get("dscp"))
@@ -313,9 +334,18 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 f["rate"] = f["offered"] * s_min
                 f["overload_drop"] = 1 - s_min
                 for key, w in f["res"]:
+                    if f["app"].get("mcast"):      # bitta nusxa: shu kabeldagi eng katta tezlik
+                        mk = (f["app"]["mcast"], key)
+                        mc_used[mk] = max(mc_used.get(mk, 0.0), f["rate"] * w)
+                        continue
                     used[key] += f["rate"] * w
                     if cls == 0:
                         used_hi[key] += f["rate"] * w
+        for (g, key), r_ in mc_used.items():
+            used[key] += r_
+        for g, keys in mc_flood.items():
+            for key in keys:
+                used[key] += mc_off[g] * min(1.0, scale[key])
         # 2) TCP — max-min adolat (progressive filling) qolgan sig'imda
         tcp = [f for f in flows if f.get("active") and f["ok"] and f["app"]["type"] == "tcp"]
         for f in tcp:

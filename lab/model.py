@@ -296,6 +296,8 @@ def validate_project(p):
     errors += validate_bgp(p)
     from lab.stp import validate as validate_stp
     errors += validate_stp(p)
+    from lab.mcast import validate_project as validate_mcast
+    errors += validate_mcast(p)
     return errors
 
 
@@ -397,7 +399,10 @@ def validate_scenario(project, sc):
                     raise ValueError
             except (TypeError, ValueError):
                 errors.append(f"{w}: bytes musbat butun son")
-        for k in ("src", "dst"):
+        if a.get("type") == "mcast":
+            from lab.mcast import validate_app as mc_validate
+            errors += [f"{w}: {e}" for e in mc_validate(project, a)]
+        for k in (("src",) if a.get("type") == "mcast" else ("src", "dst")):
             d = devs.get(a.get(k))
             if not d:
                 errors.append(f"{w}: '{a.get(k)}' qurilma yo'q")

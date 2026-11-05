@@ -650,6 +650,7 @@ class MininetDriver(BaseDriver):
         if t in ("switch", "sdnrouter", "wifiap"):
             node.start(self._ctrls_for(d))
             self._apply_vlans(name)
+            self._apply_snooping(name)
         elif t == "p4switch":
             node.start([])
             if (d.get("config") or {}).get("program"):
@@ -882,6 +883,26 @@ exit 0
         if out.strip():
             self.bus.log("warn", f"STP: {out.strip()[-300:]}", name)
 
+    def _apply_snooping(self, name):
+        """IGMP snooping (OVS mcast_snooping): a'zo bo'lmagan portlarga multicast flood qilinmaydi."""
+        d = self.project["devices"][name]
+        if d["type"] not in ("switch", "wifiap"):
+            return
+        on = bool((d.get("config") or {}).get("igmp_snooping"))
+        cmds = [f"ovs-vsctl set Bridge {name} mcast_snooping_enable={'true' if on else 'false'} "
+                f"other_config:mcast-snooping-disable-flood-unregistered={'true' if on else 'false'}"]
+        # router (PIM/IGMP querier) portlari — statik mrouter: IGMP report va multicast doim
+        # shu portga ham boradi (query snooping yoqilishidan oldin yuborilgan bo'lsa ham)
+        for port, (_lid, peer, _pp) in sorted(link_ports(self.project, name).items()):
+            pd = self.project["devices"].get(peer) or {}
+            mr = on and pd.get("type") == "router" and "pimd" in ((pd.get("config") or {}).get("daemons") or [])
+            v = "true" if mr else "false"
+            cmds.append(f"ovs-vsctl set Port {ifname(name, port)} other_config:mcast-snooping-flood-reports={v} "
+                        f"other_config:mcast-snooping-flood={v}")
+        out = self.net.get(name).cmd(" ; ".join(c + " 2>&1" for c in cmds))
+        if out.strip():
+            self.bus.log("warn", f"IGMP snooping: {out.strip()[-200:]}", name)
+
     def _apply_vlans(self, name):
         """Switch portlari VLAN rejimi -> OVS (tag / trunks / vlan_mode)."""
         d = self.project["devices"][name]
@@ -969,6 +990,7 @@ exit 0
             elif t in ("switch", "sdnrouter"):
                 node = self.net.get(name)
                 self._apply_vlans(name)
+                self._apply_snooping(name)
                 oc = (old or {}).get("config") or {}
                 nc = d.get("config") or {}
                 if (oc.get("mode"), oc.get("controller"), oc.get("stp")) != (nc.get("mode"), nc.get("controller"), nc.get("stp")):
@@ -1211,6 +1233,13 @@ exit 0
             out = node.cmd(f"vtysh -N {name} -f {path} 2>&1")
             if "error" in out.lower() or "unknown command" in out.lower():
                 self.bus.log("warn", f"bgp config: {out.strip()[-400:]}", name)
+        if "pimd" in daemons:
+            from lab.mcast import frr_config_lines
+            ifs = [k for k, v in (cfg.get("interfaces") or {}).items() if (v or {}).get("ip")]
+            time.sleep(0.3)
+            out = node.cmd(f"vtysh -N {name} " + " ".join(f"-c '{ln}'" for ln in frr_config_lines(name, cfg, ifs)) + " 2>&1")
+            if "error" in out.lower() or "unknown" in out.lower():
+                self.bus.log("warn", f"pim config: {out.strip()[-300:]}", name)
         self.bus.log("ok", f"FRR ishga tushdi: {', '.join(daemons)}", name)
 
     def _frr_stop(self, name):
@@ -1422,6 +1451,9 @@ exit 0
                                                    node.cmd(f"vtysh -N {name} -c '{extra[dm]}' 2>&1")))
                     if "bgpd" in daemons:
                         secs.append(self._text("FRR: show ip bgp", node.cmd(f"vtysh -N {name} -c 'show ip bgp' 2>&1")))
+                    if "pimd" in daemons:
+                        for cmd in ("show ip pim neighbor", "show ip mroute", "show ip igmp groups", "show ip pim rp-info"):
+                            secs.append(self._text(f"FRR: {cmd}", node.cmd(f"vtysh -N {name} -c '{cmd}' 2>&1")))
                 qd = []
                 for port in sorted(link_ports(self.project, name)):
                     qd.append(_run(["mnexec", "-a", str(node.pid), "tc", "-s", "qdisc", "show",
@@ -1449,6 +1481,8 @@ exit 0
                     fdb = _run(["ovs-appctl", "fdb/show", name]).splitlines()
                     rows = [l.split() for l in fdb[1:] if l.strip()]
                     secs.append(self._table("MAC jadvali (FDB)", ["Port", "VLAN", "MAC", "Yosh (s)"], rows))
+                    if (d.get("config") or {}).get("igmp_snooping"):
+                        secs.append(self._text("IGMP snooping (ovs-appctl mdb/show)", _run(["ovs-appctl", "mdb/show", name])))
                     if (d.get("config") or {}).get("stp"):
                         from lab.stp import inspect_section, stp_mode
                         cmd = "rstp/show" if stp_mode(d) == "rstp" else "stp/show"

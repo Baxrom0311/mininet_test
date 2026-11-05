@@ -78,6 +78,30 @@ double DoneAt(uint32_t key) {
   auto it = g_done.find(key);
   return it == g_done.end() ? -1.0 : it->second;
 }
+// multicast qabul qiluvchilar: SeqTsSizeHeader (yuborilgan vaqt, seq) bo'yicha bayt/paket/kechikish
+struct Mc { double bytes = 0, pkts = 0, dsum = 0, jsum = 0, last = -1; };
+static std::map<uint32_t, Mc> g_mc;
+static std::map<uint32_t, double> g_mctx;
+static void OnMcRx(uint32_t key, Ptr<const Packet> p, const Address&, const Address&, const SeqTsSizeHeader& h) {
+  Mc& m = g_mc[key];
+  double d = (Simulator::Now() - h.GetTs()).GetSeconds();
+  m.bytes += p->GetSize(); m.pkts += 1; m.dsum += d;
+  if (m.last >= 0) m.jsum += std::abs(d - m.last);
+  m.last = d;
+}
+static void OnMcTx(uint32_t key, Ptr<const Packet>) { g_mctx[key] += 1; }
+void WatchMc(Ptr<Application> sink, uint32_t key) {
+  g_mc[key];
+  sink->TraceConnectWithoutContext("RxWithSeqTsSize", MakeBoundCallback(&OnMcRx, key));
+}
+void WatchMcTx(Ptr<Application> src, uint32_t key) {
+  g_mctx[key] = 0;
+  src->TraceConnectWithoutContext("Tx", MakeBoundCallback(&OnMcTx, key));
+}
+std::vector<double> McGet(uint32_t key, uint32_t gkey) {
+  Mc& m = g_mc[key];
+  return {m.bytes, m.pkts, m.dsum, m.jsum, g_mctx[gkey]};
+}
 std::vector<uint64_t> Get(uint32_t id) {
   Cnt& c = g_cnt[id];
   return {c.fwd, c.rx, c.tx, c.noroute, c.drop};
@@ -508,6 +532,7 @@ def main(inp_path, out_path):
         return None if okf else why
 
     apps = []
+    mc_groups = {}
     for i, app in enumerate(sc.get("apps") or []):
         src, dst = app.get("src"), app.get("dst")
         if src not in nodes or dst not in nodes:
@@ -527,6 +552,33 @@ def main(inp_path, out_path):
                 emit(log=f"ilova {app.get('id')}: firewall bloklaydi ({blocked}) — ishga tushirilmaydi")
                 fw_block[app.get("id") or f"a{i + 1}"] = (blocked, start, min(stop, duration))
                 start = stop = duration + 1.0
+        if app.get("mcast"):
+            # multicast: guruh uchun BITTA OnOff (manba -> guruh manzili), har qabul qiluvchida sink
+            g = app["mcast"]
+            if g not in mc_groups:
+                gi = len(mc_groups)
+                gport = 9500 + gi
+                oo = ns.OnOffHelper("ns3::UdpSocketFactory",
+                                    ns.InetSocketAddress(ns.Ipv4Address(app["mgroup"]), gport).ConvertTo())
+                oo.SetConstantRate(ns.DataRate(rate_str(app.get("rate", "1Mbps"))), int(app.get("size", 1000)))
+                oo.SetAttribute("EnableSeqTsSizeHeader", ns.BooleanValue(True))
+                gca = oo.Install(nodes[src])
+                gca.Start(ns.Seconds(start)); gca.Stop(ns.Seconds(stop))
+                nl.WatchMcTx(gca.Get(0), 100000 + gi)
+                mc_groups[g] = {"port": gport, "gkey": 100000 + gi, "src": src, "group": app["mgroup"],
+                                "rcv": [], "app": gca}
+            mg = mc_groups[g]
+            sink = ns.PacketSinkHelper("ns3::UdpSocketFactory",
+                                       ns.InetSocketAddress(ns.Ipv4Address.GetAny(), mg["port"]).ConvertTo())
+            sink.SetAttribute("EnableSeqTsSizeHeader", ns.BooleanValue(True))
+            sa = sink.Install(nodes[dst]); sa.Start(ns.Seconds(0.0))
+            nl.WatchMc(sa.Get(0), i)
+            mg["rcv"].append((dst, dip))
+            apps.append({"id": app.get("id") or f"a{i + 1}", "type": "udp", "src": src, "dst": dst, "port": mg["port"],
+                         "label": app.get("label") or f"mcast {src}→{dst}", "start": start, "stop": min(stop, duration),
+                         "mc_key": i, "mc_gkey": mg["gkey"], "mcast": g, "group": app.get("group", g),
+                         "role": app.get("role")})
+            continue
         from lab.model import dscp_class
         tos = 0xb8 if dscp_class(app.get("dscp")) == 0 else 0     # yuqori sinf -> EF
         addr = ns.InetSocketAddress(ns.Ipv4Address(dip), port).ConvertTo()
@@ -561,6 +613,55 @@ def main(inp_path, out_path):
                      **({"bytes": int(app["bytes"]), "sink_key": i} if app.get("bytes") and typ == "tcp" else {}),
                      **({"group": app["group"], "role": app.get("role")} if app.get("group") else {})})
 
+    # multicast marshrutlari: model daraxti (lab.mcast.branch) bo'yicha statik (PIM yo'q)
+    mc_installed = []
+
+    def install_mcast():
+        if not mc_groups:
+            return
+        from lab.mcast import branch as mc_branch
+        n_ = Net(state)
+        for node_, origin, grp, iif in mc_installed:
+            try:
+                srh.GetStaticRouting(node_.GetObject[ns.Ipv4]()).RemoveMulticastRoute(origin, grp, iif)
+            except Exception:  # noqa: BLE001
+                pass
+        mc_installed.clear()
+        for g, mg in mc_groups.items():
+            sip = ip_of(mg["src"])
+            per_router = {}     # router -> [kirish port, {chiqish portlari}]
+            src_eg = None
+            for rcv, rip in mg["rcv"]:
+                ok, _w, hops, _l, _d = n_.forward(mg["src"], ipaddress.ip_address(rip))
+                if not ok:
+                    continue
+                okb, _wb, txp = mc_branch(n_, mg["src"], ipaddress.ip_address(rip), hops)
+                if not okb or not txp:
+                    continue
+                src_eg = src_eg or txp[0][1]
+                for (dv, eg), (_nd, in_ip) in zip(txp[1:], hops):
+                    in_port = next((p_ for p_, f_, ipi in n_.ifaces(dv) if ipi and str(ipi.ip) == in_ip), None)
+                    ent = per_router.setdefault(dv, [in_port, set()])
+                    ent[1].add(parse_ifname(eg)[1])
+            if src_eg and not mg.get("src_route"):
+                ns.Ipv4StaticRoutingHelper().SetDefaultMulticastRoute(
+                    nodes[mg["src"]], port_dev[(mg["src"], parse_ifname(src_eg)[1])])
+                mg["src_route"] = True
+            for dv, (in_port, outs) in per_router.items():
+                if in_port is None or (dv, in_port) not in port_dev:
+                    continue
+                oc = ns.NetDeviceContainer()
+                for o in sorted(outs):
+                    if (dv, o) in port_dev:
+                        oc.Add(port_dev[(dv, o)])
+                srh.AddMulticastRoute(nodes[dv], ns.Ipv4Address(sip), ns.Ipv4Address(mg["group"]),
+                                      port_dev[(dv, in_port)], oc)
+                ipv4_ = nodes[dv].GetObject[ns.Ipv4]()
+                mc_installed.append((nodes[dv], ns.Ipv4Address(sip), ns.Ipv4Address(mg["group"]),
+                                     ipv4_.GetInterfaceForDevice(port_dev[(dv, in_port)])))
+        emit(log=f"multicast: {len(mc_groups)} guruh, {len(mc_installed)} router'da statik mroute (PIM ekvivalenti)")
+
+    install_mcast()
     fmh = ns.FlowMonitorHelper()
     mon = fmh.InstallAll()
     clf = ns.DynamicCast[ns.Ipv4FlowClassifier](fmh.GetClassifier())
@@ -593,6 +694,7 @@ def main(inp_path, out_path):
             if lid in state["links"]:
                 state["links"][lid]["up"] = bool(up)
             install_routes()
+            install_mcast()
 
     # STP: model daraxti; blocking (va konvergensiya kutayotgan) segmentlar ma'lumot uchun yopiq
     from lab.stp import compute as stp_compute2, convergence_time as stp_conv_time, stp_enabled
@@ -788,6 +890,17 @@ def main(inp_path, out_path):
             roam_state[sta] = cur_ap
         mon.CheckForLostPackets()
         for app in apps:
+            if "mc_key" in app:         # multicast qabul qiluvchi: C++ sink hisoblagichlari
+                cur = [float(x) for x in nl.McGet(app["mc_key"], app["mc_gkey"])]
+                p0 = prev.get(app["id"], [0.0] * 5)
+                prev[app["id"]] = cur
+                d_ = [c - q for c, q in zip(cur, p0)]
+                series[app["id"]].append({
+                    "t": round(now, 3), "thr_bps": round(d_[0] * 8 / max(dt, 1e-9)),
+                    "delay_ms": round(d_[2] / d_[1] * 1000, 3) if d_[1] > 0 else None,
+                    "jitter_ms": round(d_[3] / d_[1] * 1000, 3) if d_[1] > 0 else None,
+                    "loss_pct": round(max(d_[4] - d_[1], 0) / d_[4] * 100, 2) if d_[4] > 0 else None})
+                continue
             fwd, rev = flows_for(app)
             cur = (agg(fwd), agg(rev))
             p0 = prev.get(app["id"], ((0, 0, 0, 0.0, 0.0), (0, 0, 0, 0.0, 0.0)))
@@ -816,6 +929,17 @@ def main(inp_path, out_path):
     # yakuniy xulosa
     flows = {}
     for app in apps:
+        if "mc_key" in app:
+            b_, pk_, ds_, js_, tx_ = [float(x) for x in nl.McGet(app["mc_key"], app["mc_gkey"])]
+            active = max(app["stop"] - app["start"], 1e-9)
+            flows[app["id"]] = {**{k: v for k, v in app.items() if k not in ("mc_key", "mc_gkey")},
+                                "series": series[app["id"]],
+                                "summary": {"tx_pkts": int(tx_), "rx_pkts": int(pk_), "rx_bytes": int(b_),
+                                            "avg_thr_bps": round(b_ * 8 / active),
+                                            "avg_delay_ms": round(ds_ / pk_ * 1000, 3) if pk_ else None,
+                                            "avg_jitter_ms": round(js_ / pk_ * 1000, 3) if pk_ else None,
+                                            "loss_pct": round(max(tx_ - pk_, 0) / tx_ * 100, 2) if tx_ else None}}
+            continue
         fwd, rev = flows_for(app)
         tx, rx, rxb, dl, jt = agg(fwd)
         _rtx, rrx, _rb, rdl, _rj = agg(rev)

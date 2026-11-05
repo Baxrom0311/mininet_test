@@ -516,6 +516,9 @@ class DemoDriver(BaseDriver):
                     secs.append({"title": "NAT", "kind": "text",
                                  "text": f"MASQUERADE: ichki interfeyslar -> {cfg['nat'].get('outside')} "
                                          f"({next((str(i.ip) for _p, f, i in n.ifaces(name) if f == cfg['nat'].get('outside') and i), '?')})"})
+                if "pimd" in (cfg.get("daemons") or []):
+                    from lab.mcast import demo_section
+                    secs.append(demo_section(n, name))
                 if cfg.get("firewall"):
                     from lab.firewall import chain_policy
                     fw = cfg["firewall"]
