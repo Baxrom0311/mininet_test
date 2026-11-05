@@ -300,6 +300,8 @@ def validate_project(p):
     errors += validate_mcast(p)
     from lab.vrrp import validate as validate_vrrp
     errors += validate_vrrp(p)
+    from lab.lag import validate as validate_lag
+    errors += validate_lag(p)
     return errors
 
 

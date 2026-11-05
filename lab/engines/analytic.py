@@ -109,6 +109,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             if r:
                 rtrack.events.append({"t": tt, "dev": r, "added": [f"VRRP {key} master"], "removed": []})
             log(f"VRRP {key}: t={tt:.1f}s master -> {r or 'yo`q (Master_Down_Interval kutilmoqda)'}")
+    from lab.lag import failover_s as lag_failover_s, groups as lag_groups
+    lag_links = {lid for g in lag_groups(proj) for lid in g["links"]}
+    lag_failover, lag_hold = lag_failover_s(sc), {}
     steps = int(math.ceil(duration))
     for k in range(steps):
         t0, t1 = float(k), float(min(k + 1, duration))
@@ -123,6 +126,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             if l and e["action"] == "link_up" and bgp_set and bgp_conv > 0 and l.get("up") is False:
                 bgp_stale = (copy.deepcopy(proj), t0 + bgp_conv)
                 log(f"BGP: {bgp_conv:.0f}s sessiya qayta o'rnatilmoqda")
+            if l and e["action"] == "link_down" and l.get("up") is not False and lag_links and e["link"] in lag_links:
+                lag_hold[e["link"]] = t0 + lag_failover      # bond a'zosi: failover tugaguncha hash eski
             if l:
                 if e["action"] == "link_down":
                     l["up"] = False
@@ -180,6 +185,14 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         if bgp_stale and t0 < bgp_stale[1]:
             bgp_stale[0]["devices"] = proj["devices"]
             bgp_ov = ((bgp_stale[0], bgp_set),)
+        if lag_links:
+            # bond failover: uzilgan a'zo qadamning ko'p qismida hali "tanlangan" bo'lsa — shu
+            # a'zoga hash qilingan oqimlar yo'qoladi; keyin qolgan a'zolarga qayta taqsimlanadi
+            hold_now = sorted(lid for lid, u in lag_hold.items() if t0 + 0.5 < u)
+            if hold_now:
+                proj["_lag_hold"] = hold_now
+            else:
+                proj.pop("_lag_hold", None)
         if stp_on:
             # STP konvergensiyasi: blocking/disabled -> forwarding o'tayotgan portlar `hold` da
             # (802.1D: 2*forward_delay [+max_age], RSTP ~1 s); forwarding -> blocking — darhol.
@@ -275,6 +288,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 dip = a.get("dst_ip") or (str(n.ip_of(a["dst"]).ip) if n.ip_of(a["dst"]) else None)
                 sip = n.ip_of(a["src"])
                 if dip and sip:
+                    n.flow_key = (a["src"], a["dst"], a["id"])     # bond (LAG) a'zosi hash'i
                     ok, why, _h, path, _d = n.forward(a["src"], ipaddress.ip_address(dip))
                     ok2, _w2, _h2, back, _d2 = (n.reply(a["src"], sip.ip, a["dst"], ipaddress.ip_address(dip), _h)
                                                 if ok else (False, "", [], [], 0))

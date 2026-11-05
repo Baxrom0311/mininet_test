@@ -622,7 +622,7 @@ class MininetDriver(BaseDriver):
             sdn = cfg.get("mode") == "sdn"
             self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13", datapath=self._datapath,
                                failMode="secure" if sdn else "standalone",
-                               stp=bool(cfg.get("stp")) and not sdn)
+                               stp=bool(cfg.get("stp")) and not sdn and not cfg.get("bonds"))   # bond: STP yo'q (lab/stp.py)
         elif t == "sdnrouter":
             self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13", datapath=self._datapath,
                                failMode="secure")
@@ -886,6 +886,78 @@ exit 0
             if m and m.group(1).startswith("vrrp4-") and m.group(1) not in want:
                 cmds.append(f"ip link del {m.group(1)}")
         return cmds
+    def _bond_sides(self, name):
+        """Shu switch'ning bond'lari: {ovs port nomi: {"members": [port..], "mode", "lacp", "rep": port}}."""
+        from lab.lag import groups
+        out = {}
+        for g in groups(self.project):
+            for side in ("a", "b"):
+                if g[side][0] != name:
+                    continue
+                ports = [g["ports_" + side][lid] for lid in g["links"]]
+                out[f"{name}-{g[side][1]}"[:15]] = {"members": ports, "mode": g["mode"],
+                                                     "lacp": g["lacp"][0 if side == "a" else 1]}
+        return out
+
+    def _port_name(self, name, port):
+        """OVS Port nomi: bond a'zosi bo'lsa — bond porti, aks holda <sw>-eth<N>."""
+        for bn, b in self._bond_sides(name).items():
+            if port in b["members"]:
+                return bn
+        return ifname(name, port)
+
+    def _apply_bonds(self, name):
+        """Link aggregation -> OVS: a'zo portlar o'chirilib bitta bond porti sifatida qayta
+        qo'shiladi (`add-bond ... lacp=active bond_mode=balance-tcp`), ofport'lar saqlanadi,
+        tc (HTB/navbat) qayta qo'llanadi. Konfiguratsiyadan olingan bond'lar oddiy portga qaytadi."""
+        d = self.project["devices"][name]
+        if d["type"] != "switch":
+            return
+        node = self.net.get(name)
+        want = self._bond_sides(name)
+        cur = set(node.cmd(f"ovs-vsctl list-ports {name}").split())
+        member_ifs = {ifname(name, p) for b in want.values() for p in b["members"]}
+        cmds, touched = [], set()
+        for pn in sorted(cur):
+            is_bond = node.cmd(f"ovs-vsctl get port {pn} bond_mode 2>/dev/null").strip() not in ("", "[]")
+            if not is_bond or (pn in want and set(node.cmd(f"ovs-vsctl --bare --columns=name list interface "
+                                                          f"$(ovs-vsctl --bare get port {pn} interfaces)").split())
+                                                == {ifname(name, p) for p in want[pn]["members"]}):
+                continue
+            ifs = node.cmd(f"ovs-vsctl --bare --columns=name list interface $(ovs-vsctl --bare get port {pn} interfaces)").split()
+            cmds.append(f"ovs-vsctl del-port {name} {pn}")
+            for ifn in ifs:
+                if ifn not in member_ifs:
+                    port = int(ifn.rsplit("eth", 1)[1])
+                    cmds.append(f"ovs-vsctl add-port {name} {ifn} -- set interface {ifn} ofport_request={port}")
+                    touched.add(ifn)
+            cur.discard(pn)
+        for bn, b in want.items():
+            mifs = [ifname(name, p) for p in b["members"]]
+            if bn in cur:
+                continue
+            for ifn in mifs:
+                if ifn in cur:
+                    cmds.append(f"ovs-vsctl del-port {name} {ifn}")
+            lacp = "off" if b["lacp"] == "off" else b["lacp"]
+            cmds.append(f"ovs-vsctl add-bond {name} {bn} {' '.join(mifs)} bond_mode={b['mode']} lacp={lacp} "
+                        f"other_config:lacp-time=fast other_config:bond-detect-mode=carrier "
+                        + " ".join(f"-- set interface {ifn} ofport_request={p}" for ifn, p in zip(mifs, b["members"])))
+            touched.update(mifs)
+        if not cmds:
+            return
+        out = node.cmd(" ; ".join(c + " 2>&1" for c in cmds))
+        if out.strip():
+            self.bus.log("warn", f"bond: {out.strip()[-300:]}", name)
+        for ifn in touched:
+            intf = node.nameToIntf.get(ifn)
+            if intf is not None:
+                node.cmd(f"ip link set {ifn} up")
+                node.TCReapply(intf)
+        if want:
+            self.bus.log("ok", "bond: " + ", ".join(f"{bn} ({b['mode']}, lacp {b['lacp']}) = "
+                                                     f"{'+'.join(ifname(name, p) for p in b['members'])}"
+                                                     for bn, b in want.items()), name)
 
     def _apply_stp(self, name):
         """STP/RSTP -> OVS: rejim, priority, bridge id (system-id = device_mac(id, 0) — model bilan
@@ -895,6 +967,10 @@ exit 0
         node = self.net.get(name)
         if not stp_enabled(d):
             node.cmd(f"ovs-vsctl set bridge {name} stp_enable=false rstp_enable=false")
+            if (d.get("config") or {}).get("stp") and (d.get("config") or {}).get("bonds"):
+                self.bus.log("warn", "STP o'chirildi: OVS bond porti STP/RSTP yoqilgan bridge'da forwarding'ga "
+                                     "o'tmaydi (bond = bitta port, parallel a'zolar halqa emas; boshqa "
+                                     "zaxira yo'llar halqa hosil qilmasin)", name)
             return
         mac = device_mac(d["id"], 0)
         pr = bridge_priority(d)
@@ -903,9 +979,14 @@ exit 0
                 f"rstp_enable={'true' if rstp else 'false'} "
                 + (f"other_config:rstp-priority={pr} other_config:rstp-address={mac}" if rstp else
                    f"other_config:stp-priority={pr} other_config:stp-system-id={mac}")]
+        done = set()
         for port, (lid, _peer, _pp) in sorted(link_ports(self.project, name).items()):
             key = "rstp-path-cost" if rstp else "stp-path-cost"
-            cmds.append(f"ovs-vsctl set port {ifname(name, port)} other_config:{key}={port_cost(self.project, name, port, lid)}")
+            pn = self._port_name(name, port)
+            if pn in done:
+                continue
+            done.add(pn)
+            cmds.append(f"ovs-vsctl set port {pn} other_config:{key}={port_cost(self.project, name, port, lid)}")
         out = node.cmd(" ; ".join(c + " 2>&1" for c in cmds))
         if out.strip():
             self.bus.log("warn", f"STP: {out.strip()[-300:]}", name)
@@ -935,11 +1016,16 @@ exit 0
         d = self.project["devices"][name]
         if d["type"] not in VLAN_TYPES:
             return
+        self._apply_bonds(name)
         self._apply_stp(name)
         node = self.net.get(name)
         cmds = []
+        done = set()
         for port in sorted(link_ports(self.project, name)):
-            ifn = ifname(name, port)
+            ifn = self._port_name(name, port)        # bond a'zolari — bond porti (birinchi a'zo sozlamasi)
+            if ifn in done:
+                continue
+            done.add(ifn)
             pc = switch_port_cfg(d, port)
             cmds.append(f"ovs-vsctl clear port {ifn} tag trunks vlan_mode")
             if pc["mode"] == "access":
@@ -1533,6 +1619,14 @@ exit 0
                     secs.append(self._table("MAC jadvali (FDB)", ["Port", "VLAN", "MAC", "Yosh (s)"], rows))
                     if (d.get("config") or {}).get("igmp_snooping"):
                         secs.append(self._text("IGMP snooping (ovs-appctl mdb/show)", _run(["ovs-appctl", "mdb/show", name])))
+                    if self._bond_sides(name):
+                        secs.append(self._text("Bond (OVS bond/show)", _run(["ovs-appctl", "bond/show"])))
+                        secs.append(self._text("LACP (OVS lacp/show)", _run(["ovs-appctl", "lacp/show"])))
+                        from lab.lag import inspect_section as lag_section
+                        sec = lag_section(self.project, name, lambda lid: self.project["links"][lid].get("up") is not False)
+                        if sec:
+                            sec["title"] = "Bond (model)"
+                            secs.append(sec)
                     if (d.get("config") or {}).get("stp"):
                         from lab.stp import inspect_section, stp_mode
                         cmd = "rstp/show" if stp_mode(d) == "rstp" else "stp/show"

@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "name": "lag_lab",
+  "notes": "Link aggregation (802.3ad LACP): s1 va s2 ikki 100 Mbit/s kabel bilan bond1 (balance-tcp) orqali ulangan; STP yoqilgan, lekin bond bitta port — hech bir a'zo bloklanmaydi. Oqimlar a'zolar bo'yicha hash qilinadi; t=10s da a'zo l5 uziladi.",
+  "p4_programs": {},
+  "controllers": {},
+  "devices": {
+    "h1": {
+      "id": 1,
+      "type": "host",
+      "x": 100,
+      "y": 120,
+      "config": {
+        "interfaces": {
+          "h1-eth1": {
+            "ip": "10.0.0.1/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "h2": {
+      "id": 2,
+      "type": "host",
+      "x": 100,
+      "y": 320,
+      "config": {
+        "interfaces": {
+          "h2-eth1": {
+            "ip": "10.0.0.2/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "s1": {
+      "id": 3,
+      "type": "switch",
+      "x": 280,
+      "y": 220,
+      "config": {
+        "mode": "standalone",
+        "stp": true,
+        "stp_priority": 4096,
+        "bonds": {
+          "bond1": {
+            "ports": [
+              3,
+              4
+            ],
+            "mode": "balance-tcp",
+            "lacp": "active"
+          }
+        }
+      }
+    },
+    "s2": {
+      "id": 4,
+      "type": "switch",
+      "x": 480,
+      "y": 220,
+      "config": {
+        "mode": "standalone",
+        "stp": true,
+        "bonds": {
+          "bond1": {
+            "ports": [
+              3,
+              4
+            ],
+            "mode": "balance-tcp",
+            "lacp": "active"
+          }
+        }
+      }
+    },
+    "h3": {
+      "id": 5,
+      "type": "host",
+      "x": 660,
+      "y": 120,
+      "config": {
+        "interfaces": {
+          "h3-eth1": {
+            "ip": "10.0.0.3/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "h4": {
+      "id": 6,
+      "type": "host",
+      "x": 660,
+      "y": 320,
+      "config": {
+        "interfaces": {
+          "h4-eth1": {
+            "ip": "10.0.0.4/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "h1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 1
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "h2",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 2
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "h3",
+        "port": 1
+      },
+      "b": {
+        "dev": "s2",
+        "port": 1
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l4": {
+      "a": {
+        "dev": "h4",
+        "port": 1
+      },
+      "b": {
+        "dev": "s2",
+        "port": 2
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l5": {
+      "a": {
+        "dev": "s1",
+        "port": 3
+      },
+      "b": {
+        "dev": "s2",
+        "port": 3
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l6": {
+      "a": {
+        "dev": "s1",
+        "port": 4
+      },
+      "b": {
+        "dev": "s2",
+        "port": 4
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "scenarios": {
+    "lag": {
+      "duration": 20,
+      "events": [
+        {
+          "t": 10,
+          "action": "link_down",
+          "link": "l5"
+        }
+      ],
+      "apps": [
+        {
+          "id": "f1",
+          "type": "tcp",
+          "src": "h1",
+          "dst": "h3",
+          "start": 1,
+          "stop": 19,
+          "label": "h1 → h3"
+        },
+        {
+          "id": "f2",
+          "type": "tcp",
+          "src": "h2",
+          "dst": "h4",
+          "start": 1,
+          "stop": 19,
+          "label": "h2 → h4"
+        }
+      ],
+      "notes": "ikki TCP oqim bond a'zolariga taqsimlanadi (~2x100 Mbit/s); l5 uzilgach ikkalasi l6 ni bo'lishadi"
+    }
+  }
+}

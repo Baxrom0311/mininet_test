@@ -50,7 +50,16 @@ class Net:
         self.devs = project["devices"]
         self._if_cache = {}
         self._stp = None
+        self._lag = None
+        self.flow_key = None     # bond hash kaliti (analitik: (manba, manzil, ilova)); None — manba qurilma
         self.l2_why = None
+
+    def lag_members(self):
+        """{(switch, port): bond guruhi} (lab.lag)."""
+        if self._lag is None:
+            from lab.lag import member_ports
+            self._lag = member_ports(self.p)
+        return self._lag
 
     def stp(self):
         """Spanning tree holati (lab.stp.compute) — blocking portlar va storm domenlari.
@@ -122,6 +131,7 @@ class Net:
         if not first or not self.link_ok(first[0]):
             return out
         st = self.stp()
+        lag = self.lag_members()
         q = deque([(first[1], first[2], tag, [(first[0], first[3])])])
         seen = set()
         while q:
@@ -146,6 +156,16 @@ class Net:
                 ok, etag = vlan_egress(switch_port_cfg(cd, p2), v)
                 if not ok or (cur, p2) in st["blocked"]:
                     continue
+                g = lag.get((cur, p2))
+                if g is not None:      # bond: oqim faqat hash tanlagan bitta a'zodan o'tadi
+                    from lab.lag import choose, usable_members
+                    pick = choose(g, usable_members(self.p, g, self.link_ok), dev, self.flow_key)
+                    side = "a" if g["a"][0] == cur else "b"
+                    if pick is None or g["ports_" + side][pick] != p2:
+                        continue
+                    if not self.link_ok(pick):
+                        self.l2_why = f"{cur}: bond {g[side][1]} a'zosi {pick} uzildi (failover kutilmoqda)"
+                        continue
                 nxt = self.link_on(cur, p2)
                 if nxt and self.link_ok(nxt[0]):
                     q.append((nxt[1], nxt[2], etag, path + [(nxt[0], nxt[3])]))
@@ -586,6 +606,10 @@ class DemoDriver(BaseDriver):
                              "text": " cookie=0x0, table=0, priority=0 actions=NORMAL\n(demo rejimi)"})
                 from lab.stp import inspect_section
                 sec = inspect_section(self.project, name)
+                if sec:
+                    secs.append(sec)
+                from lab.lag import inspect_section as lag_section
+                sec = lag_section(self.project, name, n.link_ok)
                 if sec:
                     secs.append(sec)
             if t == "p4switch":
