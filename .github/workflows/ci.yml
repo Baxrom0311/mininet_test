@@ -135,7 +135,7 @@ jobs:
       - name: IPv6 model and ns-3 packet regression
         run: python -m unittest lab.tests.smoke_ipv6 lab.tests.smoke_isis -v
       - name: Runtime safety and dataset labeling regression
-        run: python -m unittest lab.tests.test_runtime_safety ml.test_labeling -v
+        run: python -m unittest lab.tests.test_runtime_safety ml.test_labeling lab.tests.test_calibration -v
 
   docker-build:
     runs-on: ubuntu-latest

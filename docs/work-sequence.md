@@ -14,6 +14,8 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
    6 test (shu jumladan IPv4/IPv6 ns-3) o‘tdi; real test root/isisd sabab blocked.
 4. `feat/calibration` — real o‘lchov importi va model/real jadvali; yangi real
    sonlarni root muhitsiz taxmin qilib kiritmaslik.
+   CSV compare/median/tolerance va qo‘llab-quvvatlangan timer takliflari tayyor;
+   4 test o‘tdi. Real retuning yangi o‘lchov yo‘qligi sabab bajarilmadi.
 5. `feat/traffic-matrix` — CSV va gravity traffic, API, 1000 oqimli tekshiruv.
 6. `feat/run-queue` — SQLite run metadata, chegaralangan ijro, cancel, restart recovery.
 7. `feat/p4-bmv2` — mavjud P4 real testini qat’iy prerequisite/skip holati bilan
