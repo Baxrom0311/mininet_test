@@ -95,6 +95,11 @@ def build_dataset(topo, routing_mode, seed=None):
 
     # Save
     for name, df in datasets.items():
+        # Keep theoretical routing labels distinct from the actual controller behavior.
+        df["forwarding_mode"] = "l2_learning"
+        df["routing_label_kind"] = "theoretical"
+        if "target_ips" in df:
+            df["target_ips"] = df["target_ips"].apply(lambda v: json.dumps(v) if isinstance(v, list) else v)
         df.to_csv(f"{DATA_DIR}/datasets/{name}.csv", index=False)
         try: df.to_parquet(f"{DATA_DIR}/datasets/{name}.parquet", index=False)
         except Exception: pass
@@ -104,6 +109,8 @@ def build_dataset(topo, routing_mode, seed=None):
     topo_json["links"] = {f"{k[0]}-{k[1]}": v for k, v in topo["links"].items()}
     with open(f"{DATA_DIR}/datasets/metadata.json", "w") as f:
         json.dump({"topology": topo_json, "routing": routing_mode,
+                    "forwarding_mode": "l2_learning", "routing_label_kind": "theoretical",
+                    "run_id": os.environ.get("SIM_RUN_ID"),
                     "seed": seed,
                     "traffic_mix": [{"name": m[0], "weight": m[1], "proto": m[2]} for m in TRAFFIC_MIX],
                     "impairments": IMPAIRMENT_EVENTS}, f, indent=2, default=str)

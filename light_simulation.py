@@ -141,15 +141,11 @@ Misollar:
 
     ctrl_proc = None
     net = None
+    traffic = impairments = nat_monitor = path_tracer = collector = None
 
     def signal_handler(sig, frame):
         print("\n[!] Ctrl+C")
-        if net:
-            try: net.stop()
-            except Exception: pass
-        if ctrl_proc:
-            ctrl_proc.terminate()
-        cleanup(); sys.exit(0)
+        raise SystemExit(128 + sig)  # finally performs cleanup; cancelled runs are not successful
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -161,6 +157,7 @@ Misollar:
         print(f"  REAL INTERNET SIMULATION v2")
         print(f"  Topology: {args.topology} ({n_sw} sw, {n_h} hosts)")
         print(f"  Routing:  {args.routing}")
+        print("  Routing label: theoretical model; real forwarding: L2 learning")
         print(f"  Duration: {args.duration}s ({args.duration/60:.1f} min)")
         print(f"{'='*55}\n")
 
@@ -258,16 +255,18 @@ Misollar:
                 time.sleep(5)
 
             print("\n\n[Stop]...")
-            if traffic: traffic.stop()
-            if impairments: impairments.stop()
-            nat_monitor.stop()
-            path_tracer.stop()
-            collector.stop()
 
     except Exception as e:
         print(f"\nXATO: {e}")
         import traceback; traceback.print_exc()
+        raise
     finally:
+        for service in (traffic, impairments, nat_monitor, path_tracer, collector):
+            if service:
+                try:
+                    service.stop()
+                except Exception:
+                    pass
         # Avval barcha background jarayonlarni o'chirish
         if net:
             for h in net.hosts:
@@ -293,6 +292,7 @@ Misollar:
         build_dataset(topo, args.routing, seed=args.seed)
     except Exception as e:
         print(f"Dataset XATO: {e}")
+        raise
     print("\n[Done]\n")
 
 

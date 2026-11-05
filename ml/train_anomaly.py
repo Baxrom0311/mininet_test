@@ -43,23 +43,13 @@ anomalies = pd.read_csv(os.path.join(DATA_DIR, "anomaly_events.csv"))
 print(f"transport_events: {len(events):,} qator, anomaly_events: {len(anomalies):,} qator")
 
 # ─── Label qilish: vaqt oynasi + IP moslik ────────────────
-events["label"] = "normal"
-events["ts"] = events["ts"].astype(float)
-anomalies["ts"] = anomalies["ts"].astype(float)
+try:
+    from ml.labeling import label_events
+except ModuleNotFoundError:
+    from labeling import label_events
 
-for routing, grp in anomalies.groupby("routing"):
-    mask_routing = events["routing"] == routing
-    for _, ev in grp.iterrows():
-        start, end = ev["ts"], ev["ts"] + max(float(ev["duration_sec"]), 1.0)
-        # Require the packet's {ip_src, ip_dst} pair to touch BOTH the
-        # attacker AND the target (not just either one) -- a row where only
-        # one endpoint matches is bystander traffic from/to that host that
-        # has nothing to do with this particular attacker->target flow.
-        touches_attacker = (events["ip_src"] == ev["attacker_ip"]) | (events["ip_dst"] == ev["attacker_ip"])
-        touches_target = (events["ip_src"] == ev["target_ip"]) | (events["ip_dst"] == ev["target_ip"])
-        ip_match = touches_attacker & touches_target
-        time_match = events["ts"].between(start, end)
-        events.loc[mask_routing & ip_match & time_match, "label"] = ev["type"]
+events = label_events(events, anomalies)
+events["ts"] = events["ts"].astype(float)
 
 print("\nLabel taqsimoti:")
 print(events["label"].value_counts())
@@ -203,8 +193,8 @@ y_train, y_test = y_binary[train_idx], y_binary[test_idx]
 scaler = StandardScaler()
 X_train = scaler.fit_transform(X_train)
 X_test = scaler.transform(X_test)
-joblib.dump(scaler, os.path.join(OUT_DIR, "scaler.joblib"))
-joblib.dump(feature_cols, os.path.join(OUT_DIR, "feature_cols.joblib"))
+joblib.dump(scaler, os.path.join(OUT_DIR, "anomaly_scaler.joblib"))
+joblib.dump(feature_cols, os.path.join(OUT_DIR, "anomaly_feature_cols.joblib"))
 
 X_train_t = torch.tensor(X_train, dtype=torch.float32, device=device)
 y_train_t = torch.tensor(y_train, dtype=torch.float32, device=device).unsqueeze(1)
@@ -268,4 +258,4 @@ print(confusion_matrix(y_test, preds))
 
 torch.save(model.state_dict(), os.path.join(OUT_DIR, "anomaly_model.pt"))
 print(f"\nModel saqlandi: {os.path.join(OUT_DIR, 'anomaly_model.pt')}")
-print(f"Scaler saqlandi: {os.path.join(OUT_DIR, 'scaler.joblib')}")
+print(f"Scaler saqlandi: {os.path.join(OUT_DIR, 'anomaly_scaler.joblib')}")

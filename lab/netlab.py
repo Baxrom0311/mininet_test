@@ -43,9 +43,8 @@ def main():
         print("XATO: real driver root talab qiladi: sudo python3 -m lab.netlab --driver real")
         sys.exit(1)
 
-    token = args.token
-    if args.host not in ("127.0.0.1", "localhost", "::1") and not token:
-        token = secrets.token_urlsafe(18)
+    # Localhost also needs authentication: a browser can reach local services.
+    token = args.token or secrets.token_urlsafe(18)
 
     import uvicorn
     from lab.server import create_app

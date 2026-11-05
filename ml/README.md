@@ -1,5 +1,16 @@
 # ML — anomaly detection & routing prediction
 
+Preprocessing artefaktlari endi model prefiksi bilan yoziladi:
+`anomaly_scaler.joblib`, `anomaly_feature_cols.joblib`, `routing_scaler.joblib`,
+`routing_feature_cols.joblib`, `routing_label_encoder.joblib`. Ikkala trening
+bir OUT_DIR ishlatsa ham bir-birining preprocessing fayllarini almashtirmaydi.
+Eski `.joblib` fayllarni yangi model bilan aralashtirmang.
+
+Root simulyatorning routing sinfi nazariy modelni bildiradi, haqiqiy FRR protokolini
+emas. PacketIn asosidagi 1 soniyalik feature ham to‘liq tarmoq packet rate’i emas.
+Yangi anomaly loglaridagi `target_ips`, haqiqiy davomiylik va mavjud `run_id`
+label hisobida ishlatiladi; eski single-target datasetlar qo‘llab-quvvatlanadi.
+
 Two standalone PyTorch training scripts that consume the CSV datasets produced by
 `dataset_builder.py` (see the repo root `README.md` / `docs/CLAUDE.md` for how those datasets
 are generated). Both are plain scripts, not a package — run them directly with `python3`.
@@ -57,9 +68,9 @@ the last data collection in this repo.
 Both scripts now write, into `OUT_DIR`:
 
 - `anomaly_model.pt` / `routing_model.pt` — the trained model's `state_dict()`
-- `scaler.joblib` — the fitted `StandardScaler`, needed to preprocess new data identically
-- `feature_cols.joblib` — the exact ordered feature-column list the model expects
-- `label_encoder.joblib` (`train_routing.py` only) — the fitted routing-mode `LabelEncoder`
+- `<model>_scaler.joblib` — the fitted `StandardScaler`, needed to preprocess new data identically
+- `<model>_feature_cols.joblib` — the exact ordered feature-column list the model expects
+- `routing_label_encoder.joblib` (`train_routing.py` only) — the fitted routing-mode `LabelEncoder`
 
 Load them together at inference time rather than re-fitting a fresh scaler/encoder, or
 predictions won't be comparable to training.

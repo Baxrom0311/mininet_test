@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 
 from lab.model import normalize_link_params, parse_rate, validate_project, validate_scenario
 
@@ -35,12 +36,18 @@ def _ns3_available():
     return importlib.util.find_spec("ns") is not None or importlib.util.find_spec("ns3") is not None
 
 
+def new_run_id():
+    # 48 chars leaves room for study variant suffixes within the 60-char API limit.
+    return time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex
+
+
 class RunManager:
     def __init__(self, bus, driver):
         self.bus = bus
         self.driver = driver
         self.active = {}     # run_id -> {"progress", "engine", ...}
         self._lock = threading.Lock()
+        self._emulation_lock = threading.Lock()
         os.makedirs(RESULTS_DIR, exist_ok=True)
 
     def engines(self):
@@ -79,7 +86,9 @@ class RunManager:
                                                    "study_param2", "study_value2", "study_index2")})
             except (OSError, ValueError):
                 continue
-        for rid, a in self.active.items():
+        with self._lock:
+            active = list(self.active.items())
+        for rid, a in active:
             if a["project"] == project_name:
                 out.insert(0, {"run_id": rid, "scenario_name": a["scenario_name"], "engine": a["engine"],
                                "status": "running", "progress": a["progress"], "created": a["created"],
@@ -130,8 +139,7 @@ class RunManager:
             raise ValueError(f"{eng['label']}: {eng['hint']}")
         pname = project.get("name") or "untitled"
         self._dir(pname)
-        run_id = time.strftime("%Y%m%d-%H%M%S") + f"-{engine}-{scenario_name}"[:40]
-        run_id = re.sub(r"[^A-Za-z0-9_\-]", "_", run_id)
+        run_id = new_run_id()
         with self._lock:
             if any(a["engine"] == "mininet" for a in self.active.values()) and engine == "mininet":
                 raise ValueError("Mininet'da bir vaqtda faqat bitta ssenariy ishlaydi")
@@ -261,7 +269,7 @@ class RunManager:
                 variants.append((i, j, v, v2, p2, sc2))
         pname = project.get("name") or "untitled"
         self._dir(pname)
-        study_id = re.sub(r"[^A-Za-z0-9_\-]", "_", time.strftime("%Y%m%d-%H%M%S") + f"-study-{scenario_name}"[:40])
+        study_id = new_run_id()
         pdesc = {**param, "label": self._param_label(param)}
         pdesc2 = {**param2, "label": self._param_label(param2)} if two_d else None
 
@@ -314,9 +322,14 @@ class RunManager:
         from lab import apps as appmodels
         from lab import failures as failmodel
         sc_user = sc
-        sc_fail = failmodel.expand(project, sc)     # MTBF/MTTR -> link_down/link_up hodisalari
-        sc = appmodels.expand(sc_fail)              # voip/http/ftp -> udp/tcp
+        emulation_locked = False
         try:
+            if engine == "mininet":
+                emulation_locked = self._emulation_lock.acquire(blocking=False)
+                if not emulation_locked:
+                    raise ValueError("Mininet'da bir vaqtda faqat bitta ssenariy ishlaydi")
+            sc_fail = failmodel.expand(project, sc)     # MTBF/MTTR -> link_down/link_up
+            sc = appmodels.expand(sc_fail)              # voip/http/ftp -> udp/tcp
             if engine == "analytic":
                 from lab.engines import analytic
                 res = analytic.run(project, sc, prog, log)
@@ -331,14 +344,20 @@ class RunManager:
         except Exception as e:  # noqa: BLE001
             res = {"engine": engine, "status": "error", "error": f"{type(e).__name__}: {e}", "flows": {}}
             log(f"XATO: {e}")
+        finally:
+            if emulation_locked:
+                self._emulation_lock.release()
         res.update(run_id=run_id, project=pname, scenario_name=sc_name, scenario=sc_user, created=t0,
                    topology={"devices": len(project["devices"]), "links": len(project["links"])})
         res.setdefault("wall_s", round(time.time() - t0, 2))
         if extra:
             res.update(extra)
-        self._save(pname, res)
-        self.active.pop(run_id, None)
-        self._pub(run_id, done=True, status=res["status"], error=res.get("error"))
+        try:
+            self._save(pname, res)
+        finally:
+            self._pub(run_id, done=True, status=res["status"], error=res.get("error"))
+            with self._lock:
+                self.active.pop(run_id, None)
 
     def _run_ns3(self, project, sc, prog, log):
         with tempfile.TemporaryDirectory(prefix="netlab-ns3-") as td:

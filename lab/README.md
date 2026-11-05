@@ -1,5 +1,11 @@
 # NetLab — Mininet asosidagi vizual tarmoq laboratoriyasi
 
+CLI localhost’da ham avtomatik token yaratadi. Konsolda ko‘rsatilgan URL bilan
+kiring; token cookie’ga o‘tgach API va WebSocketlar undan foydalanadi. HTTP
+o‘zgartirish so‘rovlari va ikkala WebSocket begona Origin’ni rad etadi.
+`create_app()`ni o‘zingiz joylashtirsangiz tokenni aniq uzating; standart CLI
+buni avtomatik bajaradi.
+
 ## IPv6 model va ns-3
 
 Interfeysda IPv4 `ip` bilan birga IPv6 `ip6`, hostda `gateway6` yoziladi.

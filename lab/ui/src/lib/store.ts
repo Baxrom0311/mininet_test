@@ -108,15 +108,26 @@ export function mutate(fn: (p: Project) => void, opts: { history?: boolean } = {
 
 export const running = () => !!S().status.running
 
-async function live(fn: () => Promise<unknown>, okMsg?: string) {
+async function live(fn: () => Promise<unknown>, okMsg?: string, before?: Project) {
   if (!running()) return true
-  try { await fn(); if (okMsg) toast(okMsg, 'ok'); return true } catch (e: any) { toast(e.message, 'error'); return false }
+  try { await fn(); if (okMsg) toast(okMsg, 'ok'); return true } catch (e: any) {
+    toast(e.message, 'error')
+    try {
+      const state = await api.get<{ project: Project | null; running: boolean }>('/api/net/project')
+      if (state.project && state.running) {
+        // Keep local scenario/code edits, but restore authoritative network state.
+        restore({ ...S().project, devices: state.project.devices, links: state.project.links })
+      } else if (before) restore(before)
+    } catch { if (before) restore(before); toast('Ulanishni tiklab, sahifani yangilang', 'warn') }
+    return false
+  }
 }
 
 export function loadProject(p: Project, dirty = false) {
   const q = clone(p)
   for (const k of ['devices', 'links', 'p4_programs', 'controllers', 'scenarios'] as const) (q as any)[k] ||= {}
   set({ project: q, selection: null, dirty, wins: [], overlay: [] })
+  storage.set('netlab.draft', q)
   clearHistory()
 }
 
@@ -145,6 +156,7 @@ function defaultConfig(p: Project, type: DeviceType): Record<string, any> {
 
 // ---------------- qurilmalar ----------------
 export async function addDevice(type: DeviceType, x: number, y: number) {
+  const before = S().project
   let name = ''
   const p = mutate((p) => {
     if (type === 'p4switch' && !Object.keys(p.p4_programs).length && S().templates.p4.l2_switch) p.p4_programs.l2_switch = S().templates.p4.l2_switch
@@ -156,17 +168,18 @@ export async function addDevice(type: DeviceType, x: number, y: number) {
     p.devices[name] = { id, type, x: Math.round(x), y: Math.round(y), config: defaultConfig(p, type) }
   })
   set({ selection: { kind: 'device', id: name } })
-  await live(() => api.post('/api/net/device/' + name, { project: p }))
+  if (!await live(() => api.post('/api/net/device/' + name, { project: p }), undefined, before)) return null
   return name
 }
 
 export async function removeDevice(name: string) {
+  const before = S().project
   mutate((p) => {
     for (const x of Object.values(portsOf(p, name))) delete p.links[x.lid]
     delete p.devices[name]
   })
   set((s) => ({ selection: s.selection?.id === name ? null : s.selection, wins: s.wins.filter((w) => !(w.kind === 'device' && w.ref === name)) }))
-  await live(() => api.del('/api/net/device/' + name))
+  await live(() => api.del('/api/net/device/' + name), undefined, before)
 }
 
 export function renameDevice(oldName: string, newName: string) {
@@ -200,12 +213,14 @@ export function moveDevice(name: string, x: number, y: number, persist = false) 
 }
 
 export async function saveDeviceConfig(name: string, cfg: Record<string, any>) {
+  const before = S().project
   const p = mutate((p) => { p.devices[name].config = cfg })
-  return live(() => api.put(`/api/net/device/${name}/config`, { project: p }), running() ? `${name}: qo'llandi` : undefined)
+  return live(() => api.put(`/api/net/device/${name}/config`, { project: p }), running() ? `${name}: qo'llandi` : undefined, before)
 }
 
 // ---------------- kabellar ----------------
 export async function addLink(a: string, b: string) {
+  const before = S().project
   if (a === b) return null
   let lid = ''
   const p = mutate((p) => {
@@ -218,11 +233,12 @@ export async function addLink(a: string, b: string) {
     p.links[lid] = { a: { dev: a, port: freePort(p, a) }, b: { dev: b, port: freePort(p, b) }, params, up: true }
   })
   set({ selection: { kind: 'link', id: lid } })
-  await live(() => api.post('/api/net/link/' + lid, { project: p }))
+  if (!await live(() => api.post('/api/net/link/' + lid, { project: p }), undefined, before)) return null
   return lid
 }
 
 export async function removeLink(lid: string) {
+  const before = S().project
   if (!S().project.links[lid]) return
   mutate((p) => {
     const l = p.links[lid]
@@ -233,16 +249,17 @@ export async function removeLink(lid: string) {
     delete p.links[lid]
   })
   set((s) => ({ selection: s.selection?.id === lid ? null : s.selection }))
-  await live(() => api.del('/api/net/link/' + lid))
+  await live(() => api.del('/api/net/link/' + lid), undefined, before)
 }
 
 export async function updateLink(lid: string, params?: Partial<LinkParams> | null, up?: boolean) {
+  const before = S().project
   const p = mutate((p) => {
     const l = p.links[lid]
     if (params) l.params = { ...l.params, ...params }
     if (up !== undefined) l.up = up
   })
-  return live(() => api.patch('/api/net/link/' + lid, { params: params ? p.links[lid].params : undefined, up }))
+  return live(() => api.patch('/api/net/link/' + lid, { params: params ? p.links[lid].params : undefined, up }), undefined, before)
 }
 
 // ---------------- tarmoq / saqlash ----------------
