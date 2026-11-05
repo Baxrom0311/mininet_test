@@ -4,7 +4,7 @@ export interface LinkParams { bw: number; delay: string; jitter: string; loss: n
 export interface Endpoint { dev: string; port: number }
 export interface Link { a: Endpoint; b: Endpoint; params: LinkParams; up?: boolean }
 export interface Device { id: number; type: DeviceType; x: number; y: number; config: Record<string, any> }
-export interface ScenarioApp { id: string; type: 'udp' | 'tcp' | 'ping' | 'voip' | 'http' | 'ftp'; src: string; dst: string; rate?: string; size?: number; start?: number; stop?: number; label?: string; interval?: number; dst_ip?: string; bytes?: number; codec?: 'g711' | 'g729'; page?: string; think?: number; file?: string; direction?: 'download' | 'upload'; dscp?: number }
+export interface ScenarioApp { id: string; type: 'udp' | 'tcp' | 'ping' | 'voip' | 'http' | 'ftp' | 'mcast'; src: string; dst: string; group?: string;  /** mcast: dst — qabul qiluvchilar ro'yxati (string[]) */ rate?: string; size?: number; start?: number; stop?: number; label?: string; interval?: number; dst_ip?: string; bytes?: number; codec?: 'g711' | 'g729'; page?: string; think?: number; file?: string; direction?: 'download' | 'upload'; dscp?: number }
 export interface ScenarioEvent { t: number; action: 'link_down' | 'link_up' | 'link_params' | 'move' | 'roam'; link?: string; params?: Record<string, any>; device?: string; x?: number; y?: number; duration?: number; from?: string; to?: string }
 export interface Scenario { duration: number; apps: ScenarioApp[]; events: ScenarioEvent[]; notes?: string; seed?: number }
 export interface Project {

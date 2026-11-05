@@ -124,6 +124,7 @@ jobs:
           python -m lab.tests.smoke_bgp
           python -m lab.tests.smoke_stp
           python -m lab.tests.smoke_fw
+          python -m lab.tests.smoke_mcast
 
   docker-build:
     runs-on: ubuntu-latest
