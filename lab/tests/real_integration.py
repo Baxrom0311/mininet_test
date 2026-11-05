@@ -404,9 +404,10 @@ def _register_feature_tests():
     """Alohida fayllardagi real testlar (BGP, STP, Firewall). Ular shu moduldan
     yordamchilarni import qiladi — `-m` bilan ishga tushganda bu modul `__main__`,
     import qilingani esa alohida nusxa; xatolar ikkalasidan ham yig'iladi."""
-    from lab.tests import real_bgp, real_failures, real_fw, real_lag, real_mcast, real_stp, real_vrrp
+    from lab.tests import real_bgp, real_failures, real_fw, real_lag, real_mcast, real_stp, real_topogen, real_vrrp
     TESTS.update({"bgp": real_bgp.t_bgp, "stp": real_stp.t_stp, "fw": real_fw.t_fw, "fw_emu": real_fw.t_fw_emu,
-                  "mcast": real_mcast.t_mcast, "vrrp": real_vrrp.t_vrrp, "lag": real_lag.t_lag, "failures": real_failures.t_failures})
+                  "mcast": real_mcast.t_mcast, "vrrp": real_vrrp.t_vrrp, "lag": real_lag.t_lag, "failures": real_failures.t_failures,
+                  "topogen": real_topogen.t_topogen})
     return sys.modules.get("lab.tests.real_integration")
 
 

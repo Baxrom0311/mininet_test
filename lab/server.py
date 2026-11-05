@@ -283,6 +283,21 @@ def create_app(driver_name="demo", token=None):
                                 body.get("param") or {}, body.get("values") or [],
                                 body.get("param2") or None, body.get("values2") or None)
 
+    @app.post("/api/topogen")
+    def topogen(body: dict = Body(...)):
+        """Topologiya generatori (ring | star | tree | campus) -> loyiha JSON (saqlanmaydi)."""
+        from lab.topogen import KINDS, generate
+        kind = body.get("kind")
+        allowed = {"routers", "branches", "depth", "core", "dist", "access", "hosts", "flows", "name"}
+        kw = {k: v for k, v in body.items() if k in allowed and v not in (None, "")}
+        if kind not in KINDS:
+            raise ValueError(f"kind: {' | '.join(KINDS)}")
+        p = generate(kind, **kw)
+        errs = validate_project(p)
+        if errs:
+            raise ValueError("; ".join(errs[:5]))
+        return p
+
     @app.post("/api/analysis/survivability")
     def survivability(body: dict = Body(...)):
         """Yakka nosozliklar ta'siri (N-1) + sig'im rejasi — analitik model, sinxron (bir necha soniya)."""

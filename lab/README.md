@@ -44,7 +44,7 @@ Majburlash: `NETLAB_OVS_DATAPATH=kernel|user`.
 Haqiqiy tarmoq integratsiya testi (root kerak; FRR/os-ken/BMv2 bo'lmasa tegishli qism o'tkazib yuboriladi):
 
 ```bash
-sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv vlan natdhcp apps qos bgp stp fw fw_emu mcast vrrp lag failures sdn p4
+sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv vlan natdhcp apps qos bgp stp fw fw_emu mcast vrrp lag failures topogen sdn p4
 ```
 
 ### Istalgan kompyuter (demo rejim, Mininet'siz)
@@ -345,6 +345,31 @@ uchun qo'lda yozgan hodisasini bekor qilishi mumkin (masalan, nosozlik tugashi `
 ```bash
 python3 -m lab.tests.smoke_failures
 ```
+
+### Katta topologiyalar: generator va tezlik
+
+`lab/topogen.py` (OPNET "Rapid Configuration") — bir buyruq bilan katta tarmoq:
+
+```bash
+python3 -m lab.topogen campus --core 2 --dist 6 --access 12 --hosts 5 --flows 40 > lab/projects/kampus.json
+```
+
+Turlar: `ring` (halqa + diagonallar), `star` (markaz + filiallar), `tree` (ikkilik daraxt),
+`campus` (core / distribution / access). Barcha routerlarda OSPF — real FRR uchun `startup`
+ham yaratiladi (`network ... area 0`, router-router kabellarda point-to-point, hello 1 s).
+API: `POST /api/topogen {"kind": "ring", "routers": 20, "hosts": 5, "flows": 40}`.
+
+Analitik model `Net` keshlari bilan (kabel indeksi, L2 reach, marshrutlar, LPM, forward;
+holat o'zgarmagan qadamlarda `Net` qayta ishlatiladi) — natijalar bayt darajasida bir xil:
+
+| Topologiya | Avval | Hozir |
+|---|---|---|
+| 50 qurilma, 20 oqim, 40 s | 7.5 s | ~0.2 s |
+| 280 qurilma (40 router), 100 oqim, 30 s | 12.4 s (faqat kabel indeksi va L2/marshrut keshlari bilan; to'liq keshsiz o'lchanmagan) | 0.9 s |
+| Kampus 80 qurilma — survivability (N-1, links+devices) | — | 3.4 s |
+
+Real Mininet: generatsiya qilingan 6 routerli halqa — OSPF ~9 s da yaqinlashadi, kabel
+uzilganda muqobil yo'l ~1 s (`real_integration topogen`).
 
 ### Ikki parametrli tadqiqot (issiqlik xaritasi)
 

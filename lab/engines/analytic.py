@@ -15,6 +15,7 @@ va "nima bo'ladi?" tahlili uchun. Aniq natija: ns-3 yoki Mininet dvigateli.
 """
 
 import copy
+import json
 import ipaddress
 import math
 import time
@@ -114,6 +115,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     lag_links = {lid for g in lag_groups(proj) for lid in g["links"]}
     lag_failover, lag_hold = lag_failover_s(sc), {}
     steps = int(math.ceil(duration))
+    net_cache = [None]
     for k in range(steps):
         t0, t1 = float(k), float(min(k + 1, duration))
         if vrrp_tl:
@@ -218,13 +220,24 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 stp_hold.pop(key)
             if stp_hold:
                 proj["_stp_hold"] = sorted(stp_hold)
-        if stale and t0 < stale[1]:
+        # Net (marshrut/L2 keshlari bilan) holat o'zgarmagan qadamlarda qayta ishlatiladi:
+        # imzo = kabellar + qurilmalar (pozitsiya/sozlama) + ichki holatlar (_stp_hold, _lag_hold,
+        # _vrrp_master) + faol eski-marshrut oynalari (RIP/BGP).
+        st_on = bool(stale and t0 < stale[1])
+        sig = (json.dumps(proj["links"], sort_keys=True, default=str),
+               json.dumps(proj["devices"], sort_keys=True, default=str),
+               json.dumps({k_: v_ for k_, v_ in proj.items() if k_.startswith("_")}, sort_keys=True, default=str),
+               id(stale[0]) if st_on else None, tuple(id(o) for o, _s in bgp_ov))
+        if net_cache[0] is not None and net_cache[0][0] == sig:
+            n = net_cache[0][1]
+        elif st_on:
             stale[0]["devices"] = proj["devices"]   # eski routing jadvali, lekin joriy pozitsiyalar
             n = _StaleNet(proj, stale[0], rip_set, bgp_ov)
         elif bgp_ov:
             n = _StaleNet(proj, None, set(), bgp_ov)
         else:
             n = Net(proj)
+        net_cache[0] = (sig, n)
         cap = {}
         wifi_of = {}    # lid -> (ap, stansiya foydali sig'imi bit/s)
         for lid, l in proj["links"].items():
@@ -547,7 +560,10 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             for x, b in n.stp()["bridges"].items():
                 rtrack.update(t0, x, {f"port{p_} {v['role']}/{v['state']}" for p_, v in b["ports"].items()})
         for dv in node_series:
-            rts = {route_key(r[0], r[1], r[2]) for r in n.routes(dv)}
+            rk = n.__dict__.setdefault("_rk_cache", {})
+            if dv not in rk:
+                rk[dv] = {route_key(r[0], r[1], r[2]) for r in n.routes(dv)}
+            rts = rk[dv]
             rtrack.update(t0, dv, rts)
             disc = sum(link_series[lid][-1][f"drops_{d}"] for lid, l in proj["links"].items()
                        for side, d in (("a", "ab"), ("b", "ba")) if l[side]["dev"] == dv)

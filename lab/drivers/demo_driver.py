@@ -77,7 +77,7 @@ class Net:
         cfg = self.devs[dev].get("config") or {}
         ics = cfg.get("interfaces") or {}
         out = []
-        for port in sorted(link_ports(self.p, dev)):
+        for port in sorted(self.ports_of(dev)):
             base = ifname(dev, port)
             names = [base] + sorted((k for k in ics if k.startswith(base + ".")),
                                     key=lambda k: parse_ifname(k)[2] or 0)
@@ -100,13 +100,26 @@ class Net:
                     return name, port
         return None, None
 
+    # ── keshlar: Net qisqa umrli (analitik har qadamda yangisini yaratadi); topologiya
+    # (kabel uchlari) shu davrda o'zgarmaydi, kabel holati (up/Wi-Fi) esa keshlanmaydi ──
+    def _topo(self):
+        if getattr(self, "_topo_idx", None) is None:
+            on, ports = {}, {}
+            for lid, l in self.p["links"].items():
+                a, b = l["a"], l["b"]
+                on.setdefault((a["dev"], a["port"]), (lid, b["dev"], b["port"], "ab"))
+                on.setdefault((b["dev"], b["port"]), (lid, a["dev"], a["port"], "ba"))
+                ports.setdefault(a["dev"], {})[a["port"]] = (lid, b["dev"], b["port"])
+                ports.setdefault(b["dev"], {})[b["port"]] = (lid, a["dev"], a["port"])
+            self._topo_idx = (on, ports)
+        return self._topo_idx
+
+    def ports_of(self, dev):
+        """link_ports(project, dev) bilan bir xil ({port: (lid, peer, peer_port)}), indekslangan."""
+        return self._topo()[1].get(dev, {})
+
     def link_on(self, dev, port):
-        for lid, l in self.p["links"].items():
-            if l["a"]["dev"] == dev and l["a"]["port"] == port:
-                return lid, l["b"]["dev"], l["b"]["port"], "ab"
-            if l["b"]["dev"] == dev and l["b"]["port"] == port:
-                return lid, l["a"]["dev"], l["a"]["port"], "ba"
-        return None
+        return self._topo()[0].get((dev, port))
 
     def is_l2(self, dev):
         t = self.devs[dev]["type"]
@@ -123,6 +136,22 @@ class Net:
         return True
 
     def l2_reach(self, dev, port, tag=None):
+        """Keshlangan (_l2_reach_raw). LAG bo'lsa natija oqim hash'iga (flow_key) bog'liq."""
+        key = (dev, port, tag, self.flow_key if self.lag_members() else None)
+        c = self.__dict__.setdefault("_l2_cache", {})
+        if key not in c:
+            before = self.l2_why
+            self.l2_why = None
+            out = self._l2_reach_raw(dev, port, tag)
+            c[key] = (out, self.l2_why)
+            if self.l2_why is None:
+                self.l2_why = before
+        out, why = c[key]
+        if why is not None:
+            self.l2_why = why
+        return {k: list(v) for k, v in out.items()}
+
+    def _l2_reach_raw(self, dev, port, tag=None):
         """dev:port'dan (802.1Q teg `tag`, None = tegsiz) chiqqan kadr L2 domenda yetadigan
         L3 so'nggi nuqtalar: {(dev, port, tag_kelganda): [(link_id, dir), ...]}.
         Switch portlari access/trunk qoidalari bo'yicha (model.vlan_ingress/egress)."""
@@ -150,7 +179,7 @@ class Net:
             if v is None or (cur, v) in seen:
                 continue
             seen.add((cur, v))
-            for p2 in link_ports(self.p, cur):
+            for p2 in sorted(self.ports_of(cur)):
                 if p2 == inport:
                     continue
                 ok, etag = vlan_egress(switch_port_cfg(cd, p2), v)
@@ -192,7 +221,13 @@ class Net:
 
     def routes(self, dev):
         """[(network, via_ip|None, ifname, proto)] — kichik prefiksdan kattasiga emas, LPM bilan ishlatiladi.
-        connected/static/IGP + BGP (AD bo'yicha birlashtiriladi)."""
+        connected/static/IGP + BGP (AD bo'yicha birlashtiriladi). Net davomida keshlanadi."""
+        c = self.__dict__.setdefault("_rt_cache", {})
+        if dev not in c:
+            c[dev] = self._routes_raw(dev)
+        return list(c[dev])
+
+    def _routes_raw(self, dev):
         base = self._base_routes(dev)
         b = self.bgp()[0].get(dev)
         if not b:
@@ -264,6 +299,13 @@ class Net:
         return bool(x and y and x["asn"] != y["asn"])
 
     def lookup(self, dev, dst):
+        c = self.__dict__.setdefault("_lk_cache", {})
+        k = (dev, dst)
+        if k not in c:
+            c[k] = self._lookup_raw(dev, dst)
+        return c[k]
+
+    def _lookup_raw(self, dev, dst):
         best = None
         for net, via, ifn, proto in self.routes(dev):
             if dst in net and (best is None or net.prefixlen > best[0].prefixlen):
@@ -272,7 +314,16 @@ class Net:
 
     def forward(self, src_dev, dst, max_hops=16):
         """src_dev'dan dst IP'ga yo'l: (ok, sabab, hops[], link_path[], delay_ms).
-        hops: [(device, ip)], link_path: [(link_id, dir)]"""
+        hops: [(device, ip)], link_path: [(link_id, dir)]. Net davomida keshlanadi
+        (LAG bo'lsa oqim hash'i — flow_key — kalitga kiradi)."""
+        c = self.__dict__.setdefault("_fw_cache", {})
+        k = (src_dev, dst, max_hops, self.flow_key if self.lag_members() else None)
+        if k not in c:
+            c[k] = self._forward_raw(src_dev, dst, max_hops)
+        ok, why, hops, links, delay = c[k]
+        return ok, why, list(hops), list(links), delay
+
+    def _forward_raw(self, src_dev, dst, max_hops=16):
         cur = src_dev
         hops, links, delay = [], [], 0.0
         for _ in range(max_hops):
