@@ -9,8 +9,9 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
    o‘lchovi root/Mininet/FRR yo‘qligi sabab bloklangan; model va ns-3 testlari o‘tdi.
 2. `fix/review-runtime-safety` — audit topilmalari: origin/auth, run identity,
    xato exit kodi, Studio lifecycle, ML artefakt/label, DATA_DIR va UI sync.
-   14 regressiya testi, demo suite va React typecheck/build o‘tdi; commit uchun tayyor.
+   `1563fd6`: 14 regressiya testi, demo suite va React typecheck/build o‘tdi; push qilindi.
 3. `feat/isis` — model/FRR konfiguratsiyasi, namuna va smoke/real testlar.
+   6 test (shu jumladan IPv4/IPv6 ns-3) o‘tdi; real test root/isisd sabab blocked.
 4. `feat/calibration` — real o‘lchov importi va model/real jadvali; yangi real
    sonlarni root muhitsiz taxmin qilib kiritmaslik.
 5. `feat/traffic-matrix` — CSV va gravity traffic, API, 1000 oqimli tekshiruv.

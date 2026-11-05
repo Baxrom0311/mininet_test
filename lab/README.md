@@ -32,6 +32,35 @@ IPv4 DHCP/NAT/BGP/VRRP/PIM sozlamalari IPv6 run’ga ko‘chirilmaydi. UI’da m
 maydonlarini qo‘shish alohida ish; JSON importi va API orqali foydalanish mumkin.
 Demo terminalda `ping -6 <IPv6>`, `ping6 <IPv6>` va `ip -6 route` ishlatiladi.
 
+## IS-IS
+
+`isis_lab` namunasi uch router halqasi, IPv4 LAN’lar va ikki xil yo‘l narxini
+ko‘rsatadi. Router `daemons: ["isisd"]` bilan `config.isis` ishlatadi:
+
+```json
+{"net":"49.0001.0000.0000.0001.00","tag":"CORE","level":"level-2-only",
+ "metric":10,"hello_interval":1,"hello_multiplier":3,
+ "interfaces":{"r0-eth2":{"metric":50,"passive":false}}}
+```
+
+NET berilmasa device ID’dan deterministik system ID yaratiladi. Duplicate system
+ID, noto‘g‘ri level/metric va mavjud bo‘lmagan interfeys rad etiladi. Demo/analytic
+model weighted SPF, L1 area va L2 eligibility, passive interfeyslarni hisobga
+oladi; L1/L2 route leaking, DIS election va real konvergensiya modeli emas.
+ns-3 shu yo‘llarni statik forwardingga o‘rnatadi (IPv4/IPv6).
+
+Real driverda FRR `isisd` ishga tushib konfiguratsiya `vtysh` orqali qo‘llanadi.
+Qo‘shnilar real inspect’da `show isis neighbor` bilan ko‘rinadi.
+
+```bash
+python3 -m unittest lab.tests.smoke_isis -v
+sudo timeout 180 python3 -m lab.tests.real_isis --output /tmp/isis-real.json
+```
+
+Real test flock bilan ajratilgan: barcha 6 yo‘naltirilgan adjacency Up bo‘lishi,
+end-to-end ping va kabel uzilganda zaxira yo‘lga o‘tish tekshiriladi. Root/FRR
+bo‘lmasa exit 2 (`blocked`), muvaffaqiyat deb ko‘rsatilmaydi.
+
 ## Katta real FRR topologiyalari uchun benchmark
 
 Dedicated root Linux hostda (Mininet cleanup global):

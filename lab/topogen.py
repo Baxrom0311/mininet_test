@@ -223,7 +223,8 @@ def add_ipv6(project):
             ic["ip6"] = f"{address}/64"
             addresses[str(ii.ip)] = str(address)
         if d["type"] == "router":
-            cfg["daemons"] = list(dict.fromkeys(cfg.get("daemons", []) + ["ospf6d"]))
+            if "isisd" not in cfg.get("daemons", []):
+                cfg["daemons"] = list(dict.fromkeys(cfg.get("daemons", []) + ["ospf6d"]))
     for d in p["devices"].values():
         cfg = d["config"]
         if cfg.get("gateway"):

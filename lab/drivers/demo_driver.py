@@ -280,6 +280,9 @@ class Net:
             except ValueError:
                 pass
         mine = self.dyn_daemons(dev)
+        if mine == {"isisd"}:
+            from lab.isis import routes as isis_routes
+            return rt + isis_routes(self, dev, {x[0] for x in rt})
         if mine:
             known = {x[0] for x in rt}
             # BFS dinamik routerlar grafida (hop soni = metric)
@@ -597,6 +600,12 @@ class DemoDriver(BaseDriver):
                              "columns": ["Interfeys", "Holat", "MAC", "IPv4", "MTU", "RX pkt", "TX pkt", "Drop"],
                              "rows": rows})
                 cfg = d.get("config") or {}
+                if "isisd" in (cfg.get("daemons") or []):
+                    from lab.isis import neighbors
+                    secs.append({"title": "IS-IS neighbors (model)", "kind": "table",
+                                 "columns": ["Neighbor", "Interface", "State", "Level"],
+                                 "rows": [[r[k] for k in ("neighbor", "interface", "state", "level")]
+                                          for r in neighbors(n, name)]})
                 if cfg.get("dhcp_server"):
                     from lab.services import resolve_dhcp
                     rows = [[x["mac"], x["ip"], x["client"], x["server_iface"]]
@@ -738,6 +747,10 @@ class DemoDriver(BaseDriver):
             for net, via, ifn, proto in n.routes(name):
                 out.append(f"{net}{' via ' + str(via) if via else ''} dev {ifn} proto {proto}")
             return ("\n".join(out) or "(bo'sh)") + "\n"
+        if line.startswith("show isis neighbor"):
+            from lab.isis import neighbors
+            return "Neighbor  Interface  State  Level (model)\n" + "\n".join(
+                "  ".join(r[k] for k in ("neighbor", "interface", "state", "level")) for r in neighbors(n, name)) + "\n"
         if line.startswith("show ip route"):
             return self._show_ip_route(n, name) + "\n"
         if line.startswith("show vrrp"):
