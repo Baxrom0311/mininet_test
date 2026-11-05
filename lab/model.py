@@ -296,6 +296,8 @@ def validate_project(p):
     errors += validate_bgp(p)
     from lab.stp import validate as validate_stp
     errors += validate_stp(p)
+    from lab.lag import validate as validate_lag
+    errors += validate_lag(p)
     return errors
 
 

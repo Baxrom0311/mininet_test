@@ -41,8 +41,12 @@ def default_cost(bw_mbps):
 
 
 def stp_enabled(d):
+    """STP amalda yoqilganmi. Bond (config.bonds) bor switch'da — YO'Q: OVS STP/RSTP bond
+    portini "disabled" rolida ushlaydi va u hech qachon forwarding bo'lmaydi (real sinov),
+    shuning uchun driver bunday bridge'da STP'ni o'chiradi; model ham shunday."""
     cfg = d.get("config") or {}
-    return d.get("type") == "switch" and bool(cfg.get("stp")) and cfg.get("mode") != "sdn"
+    return (d.get("type") == "switch" and bool(cfg.get("stp")) and cfg.get("mode") != "sdn"
+            and not cfg.get("bonds"))
 
 
 def stp_mode(d):
@@ -106,11 +110,21 @@ def compute(project, hold=()):
     bridges = {n for n, d in devs.items() if d.get("type") in L2_TYPES}
     stp_br = {n for n in bridges if stp_enabled(devs[n])}
     bid = {n: (bridge_priority(devs[n]), int(devs[n].get("id", 0))) for n in stp_br}
+    # Link aggregation (lab/lag.py): bond'li switch'da STP o'chiq (stp_enabled), shuning uchun bond
+    # a'zolari STP segmentiga kirmaydi. Halqa (storm) tekshiruvida bond — BITTA qirra
+    # (vakil — eng kichik portli ishlaydigan a'zo): parallel bond a'zolari halqa emas.
+    from lab.lag import groups as lag_groups
+    lag_follow, lag_all = {}, set()       # lid -> vakil lid; barcha a'zolar
+    for g in lag_groups(project):
+        up = [lid for lid in g["links"] if _link_up(project, lid)]
+        lag_all |= set(g["links"])
+        for lid in up[1:]:
+            lag_follow[lid] = up[0]
     # STP segmentlari: ikkala uchi ham STP switch bo'lgan ishlaydigan kabellar
     seg = []           # (lid, a, pa, b, pb)
     for lid, l in project["links"].items():
         a, b = l["a"]["dev"], l["b"]["dev"]
-        if a in stp_br and b in stp_br and _link_up(project, lid):
+        if a in stp_br and b in stp_br and _link_up(project, lid) and lid not in lag_all:
             seg.append((lid, a, l["a"]["port"], b, l["b"]["port"]))
     # komponentlar bo'yicha root + root narxi (Dijkstra, kichik daraxtlar — oddiy relaks)
     adj = {n: [] for n in stp_br}
@@ -185,7 +199,7 @@ def compute(project, hold=()):
         info[x] = {"bridge_id": _bid_str(bid[x], devs[x]), "root_id": _bid_str(bid[r], devs[r]), "root": r,
                    "is_root": r == x, "root_port": root_port[x], "root_cost": 0 if rc[x] == INF else rc[x],
                    "mode": stp_mode(devs[x]), "ports": ports}
-    storm, cyc = _storms(project, bridges, blocked)
+    storm, cyc = _storms(project, bridges, blocked, set(lag_follow))
     return {"bridges": info, "blocked": blocked, "storm": storm, "storm_cycle": cyc}
 
 
@@ -204,12 +218,15 @@ def _ports(project, dev):
     return out
 
 
-def _storms(project, bridges, blocked):
+def _storms(project, bridges, blocked, skip=()):
     """Blocking portlarsiz L2 forwarding graf (faqat bridge-bridge kabellar) — halqa bormi.
-    Multigraf: komponentda kabellar soni >= bridge'lar soni bo'lsa halqa (storm)."""
+    Multigraf: komponentda kabellar soni >= bridge'lar soni bo'lsa halqa (storm).
+    skip — bond'ning vakil bo'lmagan a'zolari (bond — bitta qirra)."""
     edges = []
     for lid, l in project["links"].items():
         a, b = l["a"]["dev"], l["b"]["dev"]
+        if lid in skip:
+            continue
         if a in bridges and b in bridges and _link_up(project, lid) \
                 and (a, l["a"]["port"]) not in blocked and (b, l["b"]["port"]) not in blocked:
             edges.append((lid, a, b))

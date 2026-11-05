@@ -381,8 +381,10 @@ def main(inp_path, out_path):
 
     emit(log=f"kabellar: {len(link_objs)}")
     bridge = ns.BridgeHelper()
-    if _st["bridges"]:
-        # STP topologiya o'zgarishi (TCN) FDB'ni tozalaydi; ns-3 bridge'da TCN yo'q — MAC yozuvlari
+    from lab.lag import groups as _lag_groups0
+    if _st["bridges"] or _lag_groups0(project):
+        # STP topologiya o'zgarishi (TCN) / bond vakil a'zosi almashishi FDB'ni tozalaydi; ns-3
+        # bridge'da bunday mexanizm yo'q — MAC yozuvlari
         # qisqa yashaydi (aks holda 300 s eski port bo'yicha yuborilib qoladi)
         bridge.SetDeviceAttribute("ExpirationTime", ns.TimeValue(ns.Seconds(2)))
     for n, by_vlan in sw_ports.items():
@@ -632,6 +634,34 @@ def main(inp_path, out_path):
         for x, b in st["bridges"].items():
             rtrack.update(t, x, {f"port{p_} {v['role']}/{v['state']}" for p_, v in b["ports"].items()})
 
+    # Link aggregation: ns-3 da bonding yo'q — bond BITTA "vakil" a'zo kabel orqali yuradi,
+    # uning DataRate'i = ishlaydigan a'zolar yig'indisi; qolgan a'zolar yopiq (ErrorModel=1,
+    # aks holda bridge'lar orasida L2 halqa). Oqim bo'yicha hash modellashtirilmaydi; kabel
+    # statistikasi vakil a'zoda (yig'indi). STP tick'idan keyin qo'llanadi.
+    from lab.lag import groups as lag_groups
+    lag_g = lag_groups(state)
+    if lag_g:
+        emit(log="bond (LAG): ns-3 da bitta vakil kabel, tezlik = a'zolar yig'indisi: "
+                 + ", ".join(f"{g['a'][0]}/{g['a'][1]}<->{g['b'][0]}/{g['b'][1]} [{', '.join(g['links'])}]" for g in lag_g))
+
+    def lag_tick(_t):
+        for g in lag_g:
+            up = [lid for lid in g["links"] if state["links"][lid].get("up") is not False and lid in link_objs]
+            total = sum(float((state["links"][lid].get("params") or {}).get("bw", 100)) for lid in up)
+            for lid in g["links"]:
+                lo = link_objs.get(lid)
+                if not lo:
+                    continue
+                if up and lid == up[0]:
+                    r = ns.StringValue(rate_str(total))
+                    for dv in lo["devs"]:
+                        dv.SetAttributeFailSafe("DataRate", r)
+                    for em in lo["errs"]:
+                        em.SetAttribute("ErrorRate", ns.DoubleValue(lo["loss"]))
+                else:
+                    for em in lo["errs"]:
+                        em.SetAttribute("ErrorRate", ns.DoubleValue(1.0))
+
     events = sorted(sc.get("events") or [], key=lambda e: float(e.get("t", 0)))
     initially_down = [lid for lid, l in project["links"].items() if l.get("up") is False]
     for lid in initially_down:
@@ -764,6 +794,7 @@ def main(inp_path, out_path):
             applied.append({"t": now, **e})
             emit(log=f"t={now:.1f}s: {act} {e.get('link') or e.get('device')}")
         stp_tick(now)
+        lag_tick(now)
         if movers:
             update_positions(now)
         ns.Simulator.Stop(ns.Seconds(mark - now))
