@@ -78,6 +78,9 @@ class Net:
                     out.append((port, ifn, ipaddress.ip_interface(ip) if ip and ip != "dhcp" else None))
                 except ValueError:
                     out.append((port, ifn, None))
+        if self.devs[dev].get("type") == "router" and cfg.get("vrrp"):
+            from lab.vrrp import vip_ifaces        # VRRP master: VIP — shu interfeysning qo'shimcha manzili
+            out += vip_ifaces(self.p, dev)
         self._if_cache[dev] = out
         return out
 
@@ -220,6 +223,9 @@ class Net:
                 cur, first_via, first_if, hops = q.popleft()
                 if cur != dev:
                     for port, ifn, ipi in self.ifaces(cur):
+                        lk = self.link_on(cur, port)
+                        if not lk or not self.link_ok(lk[0]):
+                            continue        # o'chgan interfeys tarmog'i e'lon qilinmaydi (OSPF/RIP kabi)
                         if ipi and ipi.network not in known:
                             known.add(ipi.network)
                             proto = DYNAMIC[sorted(mine)[0]]
@@ -540,6 +546,11 @@ class DemoDriver(BaseDriver):
                              "rows": [[ip, m, i, "REACHABLE"] for ip, (m, i) in arp.items()]})
                 if t == "router":
                     secs.append({"title": "FRR: show ip route", "kind": "text", "text": self._show_ip_route(n, name)})
+                    if (d.get("config") or {}).get("vrrp"):
+                        from lab.vrrp import model_rows
+                        secs.append({"title": "VRRP (show vrrp)", "kind": "table",
+                                     "columns": ["VRID", "Interfeys", "VIP", "Prioritet", "Holat", "Master"],
+                                     "rows": model_rows(n.p, name)})
                     rows_b, sess = n.bgp()
                     if name in sess:
                         secs.append({"title": "FRR: show bgp summary", "kind": "table",
@@ -636,6 +647,13 @@ class DemoDriver(BaseDriver):
             return ("\n".join(out) or "(bo'sh)") + "\n"
         if line.startswith("show ip route"):
             return self._show_ip_route(n, name) + "\n"
+        if line.startswith("show vrrp"):
+            from lab.vrrp import model_rows
+            rows = model_rows(n.p, name)
+            if not rows:
+                return "% VRRP sozlanmagan\n"
+            return " VRID  Interface      VIP                Priority  State       Master\n" + "".join(
+                f" {r[0]:<5} {r[1]:<14} {r[2]:<18} {r[3]:<9} {r[4]:<11} {r[5]}\n" for r in rows)
         if line.startswith(("show bgp summary", "show ip bgp summary", "show ip bgp", "show bgp")):
             rows_b, sess = n.bgp()
             if name not in sess:

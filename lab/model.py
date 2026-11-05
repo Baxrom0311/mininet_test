@@ -32,7 +32,7 @@ DEVICE_TYPES = {
     "wifiap":    {"label": "Wi-Fi AP",    "ns": False, "l3": False, "prefix": "ap"},
 }
 
-FRR_DAEMONS = ["ospfd", "bgpd", "ripd", "isisd", "ospf6d", "eigrpd", "pimd", "ldpd", "bfdd"]
+FRR_DAEMONS = ["ospfd", "bgpd", "ripd", "isisd", "ospf6d", "eigrpd", "pimd", "ldpd", "bfdd", "vrrpd"]
 
 DEFAULT_LINK = {"bw": 100, "delay": "1ms", "jitter": "0ms", "loss": 0, "queue": 1000, "medium": "wire",
                 "qdisc": "fifo"}
@@ -298,6 +298,8 @@ def validate_project(p):
     errors += validate_stp(p)
     from lab.mcast import validate_project as validate_mcast
     errors += validate_mcast(p)
+    from lab.vrrp import validate as validate_vrrp
+    errors += validate_vrrp(p)
     return errors
 
 
