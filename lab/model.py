@@ -302,6 +302,8 @@ def validate_project(p):
     errors += validate_vrrp(p)
     from lab.lag import validate as validate_lag
     errors += validate_lag(p)
+    from lab.survivability import validate_srlg   # loyiha `srlg` (umumiy xavf guruhlari)
+    errors += validate_srlg(p)
     return errors
 
 
