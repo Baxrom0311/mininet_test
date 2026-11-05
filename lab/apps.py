@@ -26,7 +26,7 @@ CODECS = {
 RTP_HDR = 12
 PPS = 50
 MAX_PAGES = 60
-MODEL_TYPES = ("voip", "http", "ftp")
+MODEL_TYPES = ("voip", "http", "ftp", "mcast")
 
 
 def parse_bytes(v):
@@ -94,6 +94,7 @@ def expand(sc):
                 apps.append({"id": f"{aid}.{role}", "type": "udp", "src": s_, "dst": d_, "rate": rate, "size": size,
                              "start": st, "stop": sp, "group": aid, "role": role,
                              "dscp": int(a["dscp"]) if a.get("dscp") not in (None, "") else 46,   # EF
+                             **({"dport": int(a["dport"])} if a.get("dport") not in (None, "") else {}),
                              "label": f"{a.get('label') or aid} [{role}]"})
         elif t == "http":
             page = parse_bytes(a.get("page", "500KB"))
@@ -102,6 +103,7 @@ def expand(sc):
             while t0 < sp - 1e-9 and k < MAX_PAGES:
                 apps.append({"id": f"{aid}.p{k + 1}", "type": "tcp", "src": a["dst"], "dst": a["src"], "bytes": page,
                              **({"dscp": int(a["dscp"])} if a.get("dscp") not in (None, "") else {}),
+                         **({"dport": int(a["dport"])} if a.get("dport") not in (None, "") else {}),
                              "start": round(t0, 3), "stop": sp, "group": aid, "role": "page",
                              "label": f"{a.get('label') or aid} sahifa {k + 1}"})
                 k += 1
@@ -111,7 +113,17 @@ def expand(sc):
             s_, d_ = (a["dst"], a["src"]) if a.get("direction", "download") == "download" else (a["src"], a["dst"])
             apps.append({"id": f"{aid}.xfer", "type": "tcp", "src": s_, "dst": d_, "bytes": size, "start": st, "stop": sp,
                          **({"dscp": int(a["dscp"])} if a.get("dscp") not in (None, "") else {}),
+                         **({"dport": int(a["dport"])} if a.get("dport") not in (None, "") else {}),
                          "group": aid, "role": "xfer", "label": f"{a.get('label') or aid} [{a.get('direction', 'download')}]"})
+        elif t == "mcast":
+            from lab.mcast import receivers_of
+            for r in receivers_of(a):
+                apps.append({"id": f"{aid}.{r}", "type": "udp", "src": a["src"], "dst": r,
+                             "rate": a.get("rate", "1Mbps"), "size": int(a.get("size", 1000)),
+                             "start": st, "stop": sp, "group": aid, "role": "rcv",
+                             "mcast": aid, "mgroup": a.get("group"),
+                             **({"dscp": int(a["dscp"])} if a.get("dscp") not in (None, "") else {}),
+                             "label": f"{a.get('label') or aid} → {r}"})
         else:
             apps.append(a)
     out["apps"] = apps
@@ -175,6 +187,32 @@ def postprocess(res, sc):
                   "avg_thr_bps": round(sum(p["thr_bps"] for p in series) / len(series)) if series else 0}
             sm["quality"] = ("a'lo" if (sm["avg_mos"] or 0) >= 4.0 else "yaxshi" if (sm["avg_mos"] or 0) >= 3.6
                              else "qoniqarli" if (sm["avg_mos"] or 0) >= 3.1 else "yomon")
+            flows[aid] = {**base, "series": series, "summary": sm}
+        elif t == "mcast":
+            per, by_t = {}, {}
+            for k, f in parts.items():
+                rcv = k.split(".", 1)[1]
+                sm_ = f.get("summary") or {}
+                per[rcv] = {"avg_thr_bps": sm_.get("avg_thr_bps"), "loss_pct": sm_.get("loss_pct"),
+                            "avg_delay_ms": sm_.get("avg_delay_ms"), "avg_jitter_ms": sm_.get("avg_jitter_ms")}
+                for p in f.get("series") or []:
+                    by_t.setdefault(p["t"], []).append(p)
+            series = []
+            for tt in sorted(by_t):
+                pts = by_t[tt]
+                dl = [p["delay_ms"] for p in pts if p.get("delay_ms") is not None]
+                ls = [p["loss_pct"] for p in pts if p.get("loss_pct") is not None]
+                series.append({"t": tt, "thr_bps": round(sum(p.get("thr_bps") or 0 for p in pts) / len(pts)),
+                               "delay_ms": max(dl) if dl else None, "loss_pct": round(sum(ls) / len(ls), 2) if ls else None,
+                               "receivers_ok": sum(1 for p in pts if (p.get("loss_pct") if p.get("loss_pct") is not None else 100) < 50)})
+            from lab.model import parse_rate
+            want = parse_rate(a.get("rate", "1Mbps"))
+            reached = [r for r, v in per.items() if (v["avg_thr_bps"] or 0) >= 0.5 * want]
+            losses = [v["loss_pct"] for v in per.values() if v["loss_pct"] is not None]
+            sm = {"group": a.get("group"), "receivers": len(per), "reached": len(reached),
+                  "reached_list": sorted(reached), "avg_loss_pct": round(sum(losses) / len(losses), 2) if losses else None,
+                  "avg_thr_bps": round(sum((v["avg_thr_bps"] or 0) for v in per.values()) / len(per)) if per else 0,
+                  "per_receiver": per}
             flows[aid] = {**base, "series": series, "summary": sm}
         elif t in ("http", "ftp"):
             nbytes = parse_bytes(a.get("page", "500KB") if t == "http" else a.get("file", "10MB"))

@@ -1,0 +1,208 @@
+{
+  "version": 1,
+  "name": "stp_lab",
+  "notes": "Uchburchak: s1 (root, priority 4096) - s2 - s3. STP s2-s3 kabelida bitta portni blocking qiladi. Ssenariy 'uzilish': t=10s da faol s1-s3 kabeli uziladi — s3 alternate porti listening/learning (2x15 s) dan keyin forwarding bo'ladi. stp_mode=rstp qilsangiz konvergensiya ~1 s.",
+  "p4_programs": {},
+  "controllers": {},
+  "devices": {
+    "s1": {
+      "id": 1,
+      "type": "switch",
+      "x": 300,
+      "y": 80,
+      "config": {
+        "mode": "standalone",
+        "stp": true,
+        "stp_mode": "stp",
+        "stp_priority": 4096
+      }
+    },
+    "s2": {
+      "id": 2,
+      "type": "switch",
+      "x": 160,
+      "y": 260,
+      "config": {
+        "mode": "standalone",
+        "stp": true,
+        "stp_mode": "stp",
+        "stp_priority": 32768
+      }
+    },
+    "s3": {
+      "id": 3,
+      "type": "switch",
+      "x": 440,
+      "y": 260,
+      "config": {
+        "mode": "standalone",
+        "stp": true,
+        "stp_mode": "stp",
+        "stp_priority": 32768
+      }
+    },
+    "h1": {
+      "id": 4,
+      "type": "host",
+      "x": 60,
+      "y": 380,
+      "config": {
+        "interfaces": {
+          "h1-eth1": {
+            "ip": "10.0.0.1/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    },
+    "h2": {
+      "id": 5,
+      "type": "host",
+      "x": 540,
+      "y": 380,
+      "config": {
+        "interfaces": {
+          "h2-eth1": {
+            "ip": "10.0.0.2/24"
+          }
+        },
+        "gateway": "",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "s1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s2",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "s1",
+        "port": 2
+      },
+      "b": {
+        "dev": "s3",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "s2",
+        "port": 2
+      },
+      "b": {
+        "dev": "s3",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l4": {
+      "a": {
+        "dev": "h1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s2",
+        "port": 3
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l5": {
+      "a": {
+        "dev": "h2",
+        "port": 1
+      },
+      "b": {
+        "dev": "s3",
+        "port": 3
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "scenarios": {
+    "uzilish": {
+      "duration": 90,
+      "apps": [
+        {
+          "id": "video",
+          "type": "udp",
+          "src": "h1",
+          "dst": "h2",
+          "rate": "5Mbps",
+          "size": 1000,
+          "start": 1,
+          "stop": 89,
+          "label": "video h1→h2"
+        },
+        {
+          "id": "ping",
+          "type": "ping",
+          "src": "h1",
+          "dst": "h2",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 89,
+          "label": "ping h1→h2"
+        }
+      ],
+      "events": [
+        {
+          "t": 10,
+          "action": "link_down",
+          "link": "l2"
+        },
+        {
+          "t": 50,
+          "action": "link_up",
+          "link": "l2"
+        }
+      ],
+      "notes": "faol daraxt: h1-s2-s1-s3-h2 (s2-s3 blocking). t=10 l2 uziladi: s3 ning s2 tomondagi porti 30 s (listening+learning) dan keyin forwarding. t=50 l2 tiklanadi: 802.1D da yangi root port yana 30 s kutadi — tiklanishda ham uzilish bor (RSTP'da ~1 s)."
+    }
+  }
+}

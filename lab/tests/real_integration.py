@@ -400,10 +400,22 @@ def t_qos(drv, caps):
 TESTS = {"l2": t_l2, "ospf": t_ospf, "rip": t_rip, "emu": t_emu, "queue": t_queue, "conv": t_conv, "vlan": t_vlan, "natdhcp": t_natdhcp, "apps": t_apps, "qos": t_qos, "sdn": t_sdn, "p4": t_p4}
 
 
+def _register_feature_tests():
+    """Alohida fayllardagi real testlar (BGP, STP, Firewall). Ular shu moduldan
+    yordamchilarni import qiladi — `-m` bilan ishga tushganda bu modul `__main__`,
+    import qilingani esa alohida nusxa; xatolar ikkalasidan ham yig'iladi."""
+    from lab.tests import real_bgp, real_failures, real_fw, real_lag, real_mcast, real_stp, real_topogen, real_vrrp
+    TESTS.update({"bgp": real_bgp.t_bgp, "stp": real_stp.t_stp, "fw": real_fw.t_fw, "fw_emu": real_fw.t_fw_emu,
+                  "mcast": real_mcast.t_mcast, "vrrp": real_vrrp.t_vrrp, "lag": real_lag.t_lag, "failures": real_failures.t_failures,
+                  "topogen": real_topogen.t_topogen})
+    return sys.modules.get("lab.tests.real_integration")
+
+
 def main(argv):
     if os.geteuid() != 0:
         print("root kerak: sudo python3 -m lab.tests.real_integration")
         return 2
+    other = _register_feature_tests()
     drv = MininetDriver(EventBus())
     caps = drv.capabilities()
     print("caps:", caps)
@@ -422,8 +434,9 @@ def main(argv):
             except Exception as e:  # noqa: BLE001
                 check(False, f"{name}: stop {e}")
         print(f"   ({time.time() - t0:.1f} s)")
-    print("\nNATIJA:", "OK" if not FAILS else f"{len(FAILS)} xato: {FAILS}")
-    return 1 if FAILS else 0
+    fails = FAILS + (other.FAILS if other is not None and other.FAILS is not FAILS else [])
+    print("\nNATIJA:", "OK" if not fails else f"{len(fails)} xato: {fails}")
+    return 1 if fails else 0
 
 
 if __name__ == "__main__":

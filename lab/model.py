@@ -32,7 +32,7 @@ DEVICE_TYPES = {
     "wifiap":    {"label": "Wi-Fi AP",    "ns": False, "l3": False, "prefix": "ap"},
 }
 
-FRR_DAEMONS = ["ospfd", "bgpd", "ripd", "isisd", "ospf6d", "eigrpd", "pimd", "ldpd", "bfdd"]
+FRR_DAEMONS = ["ospfd", "bgpd", "ripd", "isisd", "ospf6d", "eigrpd", "pimd", "ldpd", "bfdd", "vrrpd"]
 
 DEFAULT_LINK = {"bw": 100, "delay": "1ms", "jitter": "0ms", "loss": 0, "queue": 1000, "medium": "wire",
                 "qdisc": "fifo"}
@@ -294,6 +294,16 @@ def validate_project(p):
     errors += validate_services(p)
     from lab.bgp import validate_bgp
     errors += validate_bgp(p)
+    from lab.stp import validate as validate_stp
+    errors += validate_stp(p)
+    from lab.mcast import validate_project as validate_mcast
+    errors += validate_mcast(p)
+    from lab.vrrp import validate as validate_vrrp
+    errors += validate_vrrp(p)
+    from lab.lag import validate as validate_lag
+    errors += validate_lag(p)
+    from lab.survivability import validate_srlg   # loyiha `srlg` (umumiy xavf guruhlari)
+    errors += validate_srlg(p)
     return errors
 
 
@@ -383,13 +393,22 @@ def validate_scenario(project, sc):
                     raise ValueError
             except (TypeError, ValueError):
                 errors.append(f"{w}: dscp 0..63 (EF=46)")
+        if a.get("dport") not in (None, ""):
+            try:
+                if not 1 <= int(a["dport"]) <= 65535:
+                    raise ValueError
+            except (TypeError, ValueError):
+                errors.append(f"{w}: dport 1..65535")
         if a.get("bytes") is not None:
             try:
                 if int(a["bytes"]) <= 0:
                     raise ValueError
             except (TypeError, ValueError):
                 errors.append(f"{w}: bytes musbat butun son")
-        for k in ("src", "dst"):
+        if a.get("type") == "mcast":
+            from lab.mcast import validate_app as mc_validate
+            errors += [f"{w}: {e}" for e in mc_validate(project, a)]
+        for k in (("src",) if a.get("type") == "mcast" else ("src", "dst")):
             d = devs.get(a.get(k))
             if not d:
                 errors.append(f"{w}: '{a.get(k)}' qurilma yo'q")
@@ -408,6 +427,8 @@ def validate_scenario(project, sc):
                 parse_rate(a["rate"])
             except ValueError as e:
                 errors.append(f"{w}: {e}")
+    from lab.failures import validate as validate_failures
+    errors += validate_failures(project, sc)
     for i, e in enumerate(sc.get("events") or []):
         w = f"hodisa {i + 1}"
         if e.get("action") not in EVENT_ACTIONS:

@@ -1,0 +1,293 @@
+{
+  "version": 1,
+  "name": "firewall_lab",
+  "notes": "r1 — firewall (stateful ACL): LAN (pc1, pc2) istalgan joyga chiqadi; Internet (inet) faqat DMZ veb-serveriga (srv1:80/tcp) kira oladi; Internetdan LAN'ga ping — reject (host prohibited), boshqa hammasi — drop. Javoblar 'established' qoidasi bilan qaytadi.",
+  "p4_programs": {},
+  "controllers": {},
+  "devices": {
+    "pc1": {
+      "id": 1,
+      "type": "host",
+      "x": 100,
+      "y": 140,
+      "config": {
+        "interfaces": {
+          "pc1-eth1": {
+            "ip": "10.0.1.10/24"
+          }
+        },
+        "gateway": "10.0.1.1",
+        "routes": []
+      }
+    },
+    "pc2": {
+      "id": 2,
+      "type": "host",
+      "x": 100,
+      "y": 320,
+      "config": {
+        "interfaces": {
+          "pc2-eth1": {
+            "ip": "10.0.1.11/24"
+          }
+        },
+        "gateway": "10.0.1.1",
+        "routes": []
+      }
+    },
+    "s1": {
+      "id": 3,
+      "type": "switch",
+      "x": 250,
+      "y": 230,
+      "config": {
+        "mode": "standalone",
+        "stp": false
+      }
+    },
+    "r1": {
+      "id": 4,
+      "type": "router",
+      "x": 420,
+      "y": 230,
+      "config": {
+        "daemons": [],
+        "startup": "hostname r1\n!",
+        "routes": [],
+        "interfaces": {
+          "r1-eth1": {
+            "ip": "10.0.1.1/24"
+          },
+          "r1-eth2": {
+            "ip": "10.0.2.1/24"
+          },
+          "r1-eth3": {
+            "ip": "203.0.113.1/24"
+          }
+        },
+        "firewall": {
+          "default": "drop",
+          "rules": [
+            {
+              "chain": "forward",
+              "action": "accept",
+              "state": "established"
+            },
+            {
+              "chain": "forward",
+              "action": "accept",
+              "in": "r1-eth1"
+            },
+            {
+              "chain": "forward",
+              "action": "accept",
+              "proto": "tcp",
+              "dst": "10.0.2.10/32",
+              "dport": 80
+            },
+            {
+              "chain": "forward",
+              "action": "reject",
+              "proto": "icmp",
+              "in": "r1-eth3",
+              "dst": "10.0.1.0/24"
+            }
+          ]
+        }
+      }
+    },
+    "srv1": {
+      "id": 5,
+      "type": "server",
+      "x": 600,
+      "y": 120,
+      "config": {
+        "interfaces": {
+          "srv1-eth1": {
+            "ip": "10.0.2.10/24"
+          }
+        },
+        "gateway": "10.0.2.1",
+        "routes": []
+      }
+    },
+    "inet": {
+      "id": 6,
+      "type": "host",
+      "x": 600,
+      "y": 340,
+      "config": {
+        "interfaces": {
+          "inet-eth1": {
+            "ip": "203.0.113.50/24"
+          }
+        },
+        "gateway": "203.0.113.1",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "pc1",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "pc2",
+        "port": 1
+      },
+      "b": {
+        "dev": "s1",
+        "port": 2
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "s1",
+        "port": 3
+      },
+      "b": {
+        "dev": "r1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l4": {
+      "a": {
+        "dev": "r1",
+        "port": 2
+      },
+      "b": {
+        "dev": "srv1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l5": {
+      "a": {
+        "dev": "r1",
+        "port": 3
+      },
+      "b": {
+        "dev": "inet",
+        "port": 1
+      },
+      "params": {
+        "bw": 50,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "scenarios": {
+    "trafik": {
+      "duration": 15,
+      "events": [],
+      "apps": [
+        {
+          "id": "web_in",
+          "type": "tcp",
+          "src": "inet",
+          "dst": "srv1",
+          "dport": 80,
+          "start": 1,
+          "stop": 14,
+          "label": "inet → srv1:80 (ruxsat)"
+        },
+        {
+          "id": "ssh_in",
+          "type": "tcp",
+          "src": "inet",
+          "dst": "srv1",
+          "dport": 22,
+          "start": 1,
+          "stop": 14,
+          "label": "inet → srv1:22 (drop)"
+        },
+        {
+          "id": "lan_out",
+          "type": "udp",
+          "src": "pc2",
+          "dst": "inet",
+          "rate": "5Mbps",
+          "size": 1000,
+          "dport": 5001,
+          "start": 1,
+          "stop": 14,
+          "label": "pc2 → inet UDP (LAN chiqadi)"
+        },
+        {
+          "id": "lan_web",
+          "type": "tcp",
+          "src": "pc1",
+          "dst": "srv1",
+          "dport": 8080,
+          "start": 2,
+          "stop": 14,
+          "label": "pc1 → srv1:8080 (LAN — ruxsat)"
+        },
+        {
+          "id": "ping_out",
+          "type": "ping",
+          "src": "pc1",
+          "dst": "inet",
+          "interval": 0.2,
+          "start": 1,
+          "stop": 14,
+          "label": "pc1 → inet ping (javob established)"
+        },
+        {
+          "id": "ping_in",
+          "type": "ping",
+          "src": "inet",
+          "dst": "pc1",
+          "interval": 0.5,
+          "start": 1,
+          "stop": 14,
+          "label": "inet → pc1 ping (reject)"
+        }
+      ],
+      "notes": "ruxsat: web_in, lan_out, lan_web, ping_out; bloklangan: ssh_in (drop), ping_in (reject)"
+    }
+  }
+}

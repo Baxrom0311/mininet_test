@@ -49,6 +49,25 @@ class Net:
         self.p = project
         self.devs = project["devices"]
         self._if_cache = {}
+        self._stp = None
+        self._lag = None
+        self.flow_key = None     # bond hash kaliti (analitik: (manba, manzil, ilova)); None — manba qurilma
+        self.l2_why = None
+
+    def lag_members(self):
+        """{(switch, port): bond guruhi} (lab.lag)."""
+        if self._lag is None:
+            from lab.lag import member_ports
+            self._lag = member_ports(self.p)
+        return self._lag
+
+    def stp(self):
+        """Spanning tree holati (lab.stp.compute) — blocking portlar va storm domenlari.
+        project["_stp_hold"] — konvergensiya davomida hali forwarding bo'lmagan portlar."""
+        if self._stp is None:
+            from lab.stp import compute
+            self._stp = compute(self.p, self.p.get("_stp_hold") or ())
+        return self._stp
 
     def ifaces(self, dev):
         """[(port, ifname, ipaddress.IPv4Interface | None)] — fizik port + uning VLAN
@@ -58,7 +77,7 @@ class Net:
         cfg = self.devs[dev].get("config") or {}
         ics = cfg.get("interfaces") or {}
         out = []
-        for port in sorted(link_ports(self.p, dev)):
+        for port in sorted(self.ports_of(dev)):
             base = ifname(dev, port)
             names = [base] + sorted((k for k in ics if k.startswith(base + ".")),
                                     key=lambda k: parse_ifname(k)[2] or 0)
@@ -68,6 +87,9 @@ class Net:
                     out.append((port, ifn, ipaddress.ip_interface(ip) if ip and ip != "dhcp" else None))
                 except ValueError:
                     out.append((port, ifn, None))
+        if self.devs[dev].get("type") == "router" and cfg.get("vrrp"):
+            from lab.vrrp import vip_ifaces        # VRRP master: VIP — shu interfeysning qo'shimcha manzili
+            out += vip_ifaces(self.p, dev)
         self._if_cache[dev] = out
         return out
 
@@ -78,13 +100,26 @@ class Net:
                     return name, port
         return None, None
 
+    # ── keshlar: Net qisqa umrli (analitik har qadamda yangisini yaratadi); topologiya
+    # (kabel uchlari) shu davrda o'zgarmaydi, kabel holati (up/Wi-Fi) esa keshlanmaydi ──
+    def _topo(self):
+        if getattr(self, "_topo_idx", None) is None:
+            on, ports = {}, {}
+            for lid, l in self.p["links"].items():
+                a, b = l["a"], l["b"]
+                on.setdefault((a["dev"], a["port"]), (lid, b["dev"], b["port"], "ab"))
+                on.setdefault((b["dev"], b["port"]), (lid, a["dev"], a["port"], "ba"))
+                ports.setdefault(a["dev"], {})[a["port"]] = (lid, b["dev"], b["port"])
+                ports.setdefault(b["dev"], {})[b["port"]] = (lid, a["dev"], a["port"])
+            self._topo_idx = (on, ports)
+        return self._topo_idx
+
+    def ports_of(self, dev):
+        """link_ports(project, dev) bilan bir xil ({port: (lid, peer, peer_port)}), indekslangan."""
+        return self._topo()[1].get(dev, {})
+
     def link_on(self, dev, port):
-        for lid, l in self.p["links"].items():
-            if l["a"]["dev"] == dev and l["a"]["port"] == port:
-                return lid, l["b"]["dev"], l["b"]["port"], "ab"
-            if l["b"]["dev"] == dev and l["b"]["port"] == port:
-                return lid, l["a"]["dev"], l["a"]["port"], "ba"
-        return None
+        return self._topo()[0].get((dev, port))
 
     def is_l2(self, dev):
         t = self.devs[dev]["type"]
@@ -101,6 +136,22 @@ class Net:
         return True
 
     def l2_reach(self, dev, port, tag=None):
+        """Keshlangan (_l2_reach_raw). LAG bo'lsa natija oqim hash'iga (flow_key) bog'liq."""
+        key = (dev, port, tag, self.flow_key if self.lag_members() else None)
+        c = self.__dict__.setdefault("_l2_cache", {})
+        if key not in c:
+            before = self.l2_why
+            self.l2_why = None
+            out = self._l2_reach_raw(dev, port, tag)
+            c[key] = (out, self.l2_why)
+            if self.l2_why is None:
+                self.l2_why = before
+        out, why = c[key]
+        if why is not None:
+            self.l2_why = why
+        return {k: list(v) for k, v in out.items()}
+
+    def _l2_reach_raw(self, dev, port, tag=None):
         """dev:port'dan (802.1Q teg `tag`, None = tegsiz) chiqqan kadr L2 domenda yetadigan
         L3 so'nggi nuqtalar: {(dev, port, tag_kelganda): [(link_id, dir), ...]}.
         Switch portlari access/trunk qoidalari bo'yicha (model.vlan_ingress/egress)."""
@@ -108,6 +159,8 @@ class Net:
         first = self.link_on(dev, port)
         if not first or not self.link_ok(first[0]):
             return out
+        st = self.stp()
+        lag = self.lag_members()
         q = deque([(first[1], first[2], tag, [(first[0], first[3])])])
         seen = set()
         while q:
@@ -115,17 +168,33 @@ class Net:
             if not self.is_l2(cur):
                 out.setdefault((cur, inport, wtag), path)
                 continue
+            if cur in st["storm"]:          # L2 halqa STP'siz — kadrlar cheksiz aylanadi
+                self.l2_why = (f"{cur}: L2 halqa (STP o'chiq): broadcast storm "
+                               f"[{', '.join(st['storm_cycle'].get(cur, []))}]")
+                return {}
+            if (cur, inport) in st["blocked"]:  # STP blocking port kadrni qabul qilmaydi
+                continue
             cd = self.devs[cur]
             v = vlan_ingress(switch_port_cfg(cd, inport), wtag)
             if v is None or (cur, v) in seen:
                 continue
             seen.add((cur, v))
-            for p2 in link_ports(self.p, cur):
+            for p2 in sorted(self.ports_of(cur)):
                 if p2 == inport:
                     continue
                 ok, etag = vlan_egress(switch_port_cfg(cd, p2), v)
-                if not ok:
+                if not ok or (cur, p2) in st["blocked"]:
                     continue
+                g = lag.get((cur, p2))
+                if g is not None:      # bond: oqim faqat hash tanlagan bitta a'zodan o'tadi
+                    from lab.lag import choose, usable_members
+                    pick = choose(g, usable_members(self.p, g, self.link_ok), dev, self.flow_key)
+                    side = "a" if g["a"][0] == cur else "b"
+                    if pick is None or g["ports_" + side][pick] != p2:
+                        continue
+                    if not self.link_ok(pick):
+                        self.l2_why = f"{cur}: bond {g[side][1]} a'zosi {pick} uzildi (failover kutilmoqda)"
+                        continue
                 nxt = self.link_on(cur, p2)
                 if nxt and self.link_ok(nxt[0]):
                     q.append((nxt[1], nxt[2], etag, path + [(nxt[0], nxt[3])]))
@@ -152,7 +221,13 @@ class Net:
 
     def routes(self, dev):
         """[(network, via_ip|None, ifname, proto)] — kichik prefiksdan kattasiga emas, LPM bilan ishlatiladi.
-        connected/static/IGP + BGP (AD bo'yicha birlashtiriladi)."""
+        connected/static/IGP + BGP (AD bo'yicha birlashtiriladi). Net davomida keshlanadi."""
+        c = self.__dict__.setdefault("_rt_cache", {})
+        if dev not in c:
+            c[dev] = self._routes_raw(dev)
+        return list(c[dev])
+
+    def _routes_raw(self, dev):
         base = self._base_routes(dev)
         b = self.bgp()[0].get(dev)
         if not b:
@@ -203,6 +278,9 @@ class Net:
                 cur, first_via, first_if, hops = q.popleft()
                 if cur != dev:
                     for port, ifn, ipi in self.ifaces(cur):
+                        lk = self.link_on(cur, port)
+                        if not lk or not self.link_ok(lk[0]):
+                            continue        # o'chgan interfeys tarmog'i e'lon qilinmaydi (OSPF/RIP kabi)
                         if ipi and ipi.network not in known:
                             known.add(ipi.network)
                             proto = DYNAMIC[sorted(mine)[0]]
@@ -221,6 +299,13 @@ class Net:
         return bool(x and y and x["asn"] != y["asn"])
 
     def lookup(self, dev, dst):
+        c = self.__dict__.setdefault("_lk_cache", {})
+        k = (dev, dst)
+        if k not in c:
+            c[k] = self._lookup_raw(dev, dst)
+        return c[k]
+
+    def _lookup_raw(self, dev, dst):
         best = None
         for net, via, ifn, proto in self.routes(dev):
             if dst in net and (best is None or net.prefixlen > best[0].prefixlen):
@@ -229,7 +314,16 @@ class Net:
 
     def forward(self, src_dev, dst, max_hops=16):
         """src_dev'dan dst IP'ga yo'l: (ok, sabab, hops[], link_path[], delay_ms).
-        hops: [(device, ip)], link_path: [(link_id, dir)]"""
+        hops: [(device, ip)], link_path: [(link_id, dir)]. Net davomida keshlanadi
+        (LAG bo'lsa oqim hash'i — flow_key — kalitga kiradi)."""
+        c = self.__dict__.setdefault("_fw_cache", {})
+        k = (src_dev, dst, max_hops, self.flow_key if self.lag_members() else None)
+        if k not in c:
+            c[k] = self._forward_raw(src_dev, dst, max_hops)
+        ok, why, hops, links, delay = c[k]
+        return ok, why, list(hops), list(links), delay
+
+    def _forward_raw(self, src_dev, dst, max_hops=16):
         cur = src_dev
         hops, links, delay = [], [], 0.0
         for _ in range(max_hops):
@@ -251,7 +345,7 @@ class Net:
                     if pp == np and parse_ifname(nifn)[2] == tg and nip and nip.ip == nh:
                         target = (nd, path, nip.ip)
             if not target:
-                return False, f"{cur}: {nh} ARP javob bermadi (Destination Host Unreachable)", hops, links, delay
+                return False, self.l2_why or f"{cur}: {nh} ARP javob bermadi (Destination Host Unreachable)", hops, links, delay
             nd, path, nip = target
             links += path
             for lid, _dir in path:
@@ -499,6 +593,20 @@ class DemoDriver(BaseDriver):
                     secs.append({"title": "NAT", "kind": "text",
                                  "text": f"MASQUERADE: ichki interfeyslar -> {cfg['nat'].get('outside')} "
                                          f"({next((str(i.ip) for _p, f, i in n.ifaces(name) if f == cfg['nat'].get('outside') and i), '?')})"})
+                if "pimd" in (cfg.get("daemons") or []):
+                    from lab.mcast import demo_section
+                    secs.append(demo_section(n, name))
+                if cfg.get("firewall"):
+                    from lab.firewall import chain_policy
+                    fw = cfg["firewall"]
+                    rows = [[i + 1, r.get("chain", "forward"), r.get("action"), r.get("proto") or "any",
+                             r.get("src") or "*", r.get("dst") or "*", r.get("dport") or "", r.get("in") or "*",
+                             r.get("out") or "*", r.get("state") or ""] for i, r in enumerate(fw.get("rules") or [])]
+                    rows += [["siyosat", ch, chain_policy(d, ch), "", "", "", "", "", "", ""]
+                             for ch in ("input", "forward", "output")]
+                    secs.append({"title": "Firewall (ACL)", "kind": "table",
+                                 "columns": ["#", "Zanjir", "Amal", "Proto", "Manba", "Manzil", "dport", "in", "out",
+                                             "Holat"], "rows": rows})
                 rt = n.routes(name)
                 secs.append({"title": "Routing jadvali", "kind": "table",
                              "columns": ["Manzil", "Gateway", "Interfeys", "Protokol", "Metric"],
@@ -509,6 +617,11 @@ class DemoDriver(BaseDriver):
                              "rows": [[ip, m, i, "REACHABLE"] for ip, (m, i) in arp.items()]})
                 if t == "router":
                     secs.append({"title": "FRR: show ip route", "kind": "text", "text": self._show_ip_route(n, name)})
+                    if (d.get("config") or {}).get("vrrp"):
+                        from lab.vrrp import model_rows
+                        secs.append({"title": "VRRP (show vrrp)", "kind": "table",
+                                     "columns": ["VRID", "Interfeys", "VIP", "Prioritet", "Holat", "Master"],
+                                     "rows": model_rows(n.p, name)})
                     rows_b, sess = n.bgp()
                     if name in sess:
                         secs.append({"title": "FRR: show bgp summary", "kind": "table",
@@ -542,6 +655,14 @@ class DemoDriver(BaseDriver):
                              "rows": [[p, 0, m, int(time.time() - ts)] for m, (p, ts) in fdb.items()]})
                 secs.append({"title": "OpenFlow jadvallari", "kind": "text",
                              "text": " cookie=0x0, table=0, priority=0 actions=NORMAL\n(demo rejimi)"})
+                from lab.stp import inspect_section
+                sec = inspect_section(self.project, name)
+                if sec:
+                    secs.append(sec)
+                from lab.lag import inspect_section as lag_section
+                sec = lag_section(self.project, name, n.link_ok)
+                if sec:
+                    secs.append(sec)
             if t == "p4switch":
                 prog = (d.get("config") or {}).get("program")
                 src = (self.project.get("p4_programs") or {}).get(prog, "")
@@ -601,6 +722,13 @@ class DemoDriver(BaseDriver):
             return ("\n".join(out) or "(bo'sh)") + "\n"
         if line.startswith("show ip route"):
             return self._show_ip_route(n, name) + "\n"
+        if line.startswith("show vrrp"):
+            from lab.vrrp import model_rows
+            rows = model_rows(n.p, name)
+            if not rows:
+                return "% VRRP sozlanmagan\n"
+            return " VRID  Interface      VIP                Priority  State       Master\n" + "".join(
+                f" {r[0]:<5} {r[1]:<14} {r[2]:<18} {r[3]:<9} {r[4]:<11} {r[5]}\n" for r in rows)
         if line.startswith(("show bgp summary", "show ip bgp summary", "show ip bgp", "show bgp")):
             rows_b, sess = n.bgp()
             if name not in sess:
@@ -695,6 +823,21 @@ class DemoDriver(BaseDriver):
             sent += 1
             src_ip = n.ip_of(name)
             ok, why, hops, links, d1 = n.forward(name, dst)
+            if ok and src_ip:
+                from lab.firewall import check_roundtrip
+                dst_dev, _ = n.owner_of(dst)
+                okf, whyf, verdict = check_roundtrip(n, name, src_ip.ip, dst_dev, dst, hops,
+                                                     {"proto": "icmp", "src": str(src_ip.ip), "dst": str(dst)})
+                if not okf:
+                    self._emit_path(links, "ICMP", f"IP {src_ip.ip} > {dst}: ICMP echo request, seq {seq}")
+                    time.sleep(1.0)
+                    if verdict == "reject":
+                        sh.out(f"From {whyf.split(':')[0]} icmp_seq={seq} Destination Host Prohibited ({whyf})\n")
+                    else:
+                        sh.out(f"Request timeout for icmp_seq {seq} ({whyf})\n")
+                    if seq < count:
+                        stop.wait(0.4)
+                    continue
             if ok:
                 dst_dev, _ = n.owner_of(dst)
                 ok2, why2, hops2, back, d2 = n.reply(name, src_ip.ip if src_ip else dst, dst_dev, dst, hops)

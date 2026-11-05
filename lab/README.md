@@ -44,7 +44,7 @@ Majburlash: `NETLAB_OVS_DATAPATH=kernel|user`.
 Haqiqiy tarmoq integratsiya testi (root kerak; FRR/os-ken/BMv2 bo'lmasa tegishli qism o'tkazib yuboriladi):
 
 ```bash
-sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv vlan natdhcp sdn p4
+sudo python3 -m lab.tests.real_integration            # l2 ospf rip emu queue conv vlan natdhcp apps qos bgp stp fw fw_emu mcast vrrp lag failures topogen sdn p4
 ```
 
 ### Istalgan kompyuter (demo rejim, Mininet'siz)
@@ -247,6 +247,231 @@ Real Mininet (10 Mbit/s kabel, 14 Mbit/s UDP yuklama): fifo MOS 1.96 → prio 4.
 
 Eslatma: analitik modelda TCP navbati endi faqat tor joyda (to'yingan hop) hisoblanadi.
 
+### Survivability: nosozlik ta'siri va N-1 sig'im rejasi
+
+OPNET'dagi "Failure Impact" tahlili: har bir **yakka** nosozlik (bitta kabel yoki bitta
+qurilma — uning barcha kabellari) uchun ssenariy ilovalari **barqaror holatda**
+(protokollar yaqinlashgandan keyin) analitik model bilan qayta hisoblanadi va asosiy
+holat bilan solishtiriladi. Marshrutlash, VLAN, NAT, firewall, STP, LAG, VRRP, BGP va
+multicast — analitik dvigatelning o'zidan (qayta yozilmagan).
+
+```bash
+python3 -m lab.survivability lab/examples/rip_ring.json uzilish          # jadval
+python3 -m lab.survivability lab/examples/vrrp_lab.json zaxira both --json
+```
+
+API: `POST /api/analysis/survivability` `{"project": {...}, "scenario": "uzilish", "targets": "links"|"devices"|"both", "include_hosts": false}`.
+
+Har bir holat (`cases[]`, kritiklik bali bo'yicha kamayish tartibida):
+
+| Maydon | Ma'nosi |
+|---|---|
+| `broken` | uzilgan oqimlar (yo'l yo'q / 100% yo'qotish) va sababi |
+| `broken_demand_pct` | uzilgan talab ulushi (asosiy o'tkazuvchanlik bo'yicha) |
+| `rerouted` | yo'li o'zgargan (boshqa yo'lga o'tgan) oqimlar |
+| `degraded` | o'tkazuvchanligi 5% dan ko'p tushgan oqimlar |
+| `udp_loss`, `overloaded` | yo'qotishi > 1% bo'lgan UDP oqimlar, util ≥ 0.95 bo'lib qolgan kabellar |
+| `mos` | VoIP MOS o'zgarishi (asosiy → nosozlik) |
+| `convergence` | taxminiy tiklanish vaqti: RIP `update/2`, STP 30 s / RSTP 1 s, VRRP Master_Down_Interval, LAG failover |
+| `score` | kritiklik bali (uzilgan talab + ortiqcha yuk + degradatsiya + MOS tushishi) |
+
+- `spof` — yagona nosozlik nuqtalari (nosozligi kamida bitta oqimni uzadigan kabel/qurilma).
+- `baseline.down_flows` — asosiy holatda ham ishlamaydigan oqimlar (masalan firewall bloklagan) —
+  nosozlik aybi sifatida hisoblanmaydi.
+- `capacity_plan` — har kabel/yo'nalish: asosiy va eng yomon (N-1) inelastik yuklama (UDP, ping,
+  VoIP, multicast), qaysi nosozlikda, `need_mbps = yuklama / 0.8`; `upgrade: true` — kabel
+  tezligi yetmaydi. Elastik TCP har qanday sig'imni to'ldirgani uchun rejaga kirmaydi
+  (`worst_tcp_mbps` — ma'lumot uchun). `upgrades` — faqat oshirish kerak bo'lganlari.
+
+Hostlar/serverlar standartda nishon emas (`include_hosts`). FTP/HTTP ilovalari elastik TCP
+sifatida baholanadi. Tahlil tez: namunalarda 0.01–0.15 s.
+
+Misollar:
+- `ospf_lab`: r1-r2 (l4), r1, r2, s1, s2 — SPOF (zaxira yo'l yo'q).
+- `rip_ring`: l2 uzilsa hech narsa uzilmaydi, oqimlar r3 orqali (`RIP 15 s`); l3 ning eng yomon
+  yuklamasi l2 nosozligida.
+- `lag_lab`: bond a'zosi uzilsa uzilish yo'q, TCP o'tkazuvchanligi yarmiga tushadi.
+- `vrrp_lab`: r1 nosozligida oqimlar r2 orqali (`VRRP 3.5 s`), r3 — SPOF.
+
+### Nosozlik va tiklanish (MTBF / MTTR, mavjudlik)
+
+OPNET'dagi "Failure/Recovery" kabi: ssenariyga `failures` qo'shiladi — kabel va qurilmalar
+tasodifiy (lekin seed bo'yicha takrorlanadigan) vaqtlarda ishdan chiqadi va tiklanadi.
+
+```json
+"failures": {"seed": 1, "distribution": "exponential",
+             "links":   {"mtbf_s": 120, "mttr_s": 15, "targets": ["l2", "l3"]},
+             "devices": {"mtbf_s": 600, "mttr_s": 60, "targets": ["r2"]}}
+```
+
+- `distribution`: `exponential` (standart; ish/nosozlik davrlari eksponensial) yoki `fixed`
+  (aniq MTBF/MTTR — tushuntirish va tekshirish uchun qulay).
+- `targets`: ro'yxat yoki `"all"` (qurilmalarda host/server'siz).
+- Qurilma nosozligi — uning barcha kabellari uziladi. Bir kabelni ikki sabab (kabel o'zi va
+  qurilma) uzsa, kabel ikkalasi ham tugaguncha uzilgan qoladi.
+- Nosozliklar oddiy `link_down` / `link_up` hodisalariga aylantiriladi (`source: "failure"`,
+  `cause: [...]`), shuning uchun **uchala dvigatel** (analitik, ns-3, Mininet) ularni bir xil
+  bajaradi, routing/STP/VRRP/BGP konvergensiyasi ham odatdagidek ishlaydi (`lab/failures.py`).
+
+Natijada `availability`:
+
+| Maydon | Ma'nosi |
+|---|---|
+| `flows.<id>.availability_pct` | oqim faol bo'lgan soniyalardan trafik o'tgan soniyalar ulushi (ping — javob kelgan soniyalar); http — yuklangan sahifalar, ftp — fayl yakunlandi |
+| `flows.<id>.outages` | uzilishlar: boshlanish, tugash, davomiylik |
+| `links.<id>` | ishlamay turgan vaqt (s, %), nosozliklar soni, oraliqlar |
+| `theoretical.<nishon>` | A = MTBF / (MTBF + MTTR) |
+| `mean_flow_availability`, `min_flow_availability` | oqimlar bo'yicha o'rtacha / eng yomon |
+
+Parametrik tadqiqot: `{"kind": "failure", "group": "links", "field": "mtbf_s" | "mttr_s"}` yoki
+`{"kind": "failure", "field": "seed"}` (bir nechta seed — Monte-Karlo o'rtachasi).
+
+Namuna: `reliability_lab` — OSPF halqasi (zaxira yo'l) va zaxirasiz r3–srv2 kabeli:
+
+| `ishonchlilik` (600 s, MTBF 120 s, MTTR 15 s; nazariy 88.9%) | pc1→srv1 (zaxirali) | pc1→srv2 (zaxirasiz) | Vaqt |
+|---|---|---|---|
+| Analitik | 93.3% | 85.3% | ~1 s |
+| ns-3 | 93.8% | 86.1% | ~22 s |
+
+Tekshiruvlar: qat'iy MTBF 100 / MTTR 10 (3600 s) — 91.1% (nazariy 90.9%); eksponensial,
+6 seed o'rtachasi 92.1%; MTTR 5 / 20 / 60 s → 96.9 / 89.6 / 72.5%. Real Mininet
+(MTBF 10 / MTTR 5, qat'iy): kabel 10–15 va 25–30 s da haqiqatan uziladi, ping mavjudligi
+73.7% (kabel ishlagan vaqt 75%).
+
+Cheklovlar: analitik dvigatel hodisalarni 1 s qadamda qo'llaydi (1 s dan qisqa uzilish
+ko'rinmasligi mumkin); mavjudlik 1 s aniqlikda; nosozlik hodisasi foydalanuvchining shu kabel
+uchun qo'lda yozgan hodisasini bekor qilishi mumkin (masalan, nosozlik tugashi `link_up`).
+
+```bash
+python3 -m lab.tests.smoke_failures
+```
+
+#### N-2 (juft nosozliklar), SRLG va kirish kabellari filtri
+
+`analyze(..., order=2)` (API: `"order": 2`, CLI: `--n2`) — N-1 holatlariga qo'shimcha barcha
+nishon juftliklari baholanadi (`n2` maydoni):
+
+- **kesish:** ikkala nishon ham asosiy holatdagi va birorta N-1 holatdagi oqim yo'llarida
+  ishlatilmasa — juftlik hech narsani o'zgartira olmaydi; qurilma va uning o'z kabeli
+  juftligi — bitta qurilma nosozligi bilan bir xil. Ikkalasi ham o'tkazib yuboriladi (`pruned`);
+- `max_cases` (standart 2000) — undan ko'p juftlik bo'lsa birinchilari baholanadi, `truncated: true`;
+- `vulnerabilities` — **faqat juft nosozlikda** uziladigan oqimlar (har qanday yakka nosozlikka chidaydi);
+- `min_cut` — har oqim uchun minimal kesim: `1` (SPOF), `2` (faqat juftlikda), `">=3"`
+  (N-2 dan ham omon qoladi), `null` (asosiy holatda ishlamaydi — masalan firewall). Kesim
+  baholangan nishonlar to'plami bo'yicha (`exclude_access` bilan host kabellari hisobga olinmaydi);
+- `n2.capacity_plan` / `n2.upgrades` — eng yomon juft nosozlik bo'yicha sig'im rejasi (N-1 rejasidan alohida).
+
+**SRLG** (umumiy xavf guruhi — bitta kanal/trassadagi kabellar): loyiha `"srlg": {"trassa1": ["l3", "l7"]}`
+yoki so'rovda `srlg` — har guruh bitta nosozlik holati (`kind: "srlg"`), `srlg_broken` — oqim
+qaysi guruhlarda uziladi.
+
+**`exclude_access`** — host/server kabellari nishonlardan chiqariladi (SPOF ro'yxati ularsiz
+qisqaroq; uchi host bo'lgan har bir kabel — bu kabel uzilsa, aslida faqat shu host uziladi).
+
+```bash
+python3 -m lab.survivability lab/examples/rip_ring.json uzilish links --n2 --exclude-access
+python3 -m lab.survivability lab/examples/rip_ring.json uzilish links --srlg '{"trassa": ["l2", "l3"]}'
+```
+
+`rip_ring` (kirish kabellarisiz): N-1 da SPOF yo'q, lekin `l2 + l3` yoki `l2 + l4` birga uzilsa
+pc1→srv1 uziladi — min kesim 2. Tezlik (N-2, barcha kabellar): kampus 41 kabel / 820 juftlik
+~14 s, halqa 50 kabel / 1225 juftlik ~21 s; `exclude_access` bilan 2.4 s va 5.6 s.
+
+### Katta topologiyalar: generator va tezlik
+
+`lab/topogen.py` (OPNET "Rapid Configuration") — bir buyruq bilan katta tarmoq:
+
+```bash
+python3 -m lab.topogen campus --core 2 --dist 6 --access 12 --hosts 5 --flows 40 > lab/projects/kampus.json
+```
+
+Turlar: `ring` (halqa + diagonallar), `star` (markaz + filiallar), `tree` (ikkilik daraxt),
+`campus` (core / distribution / access). Barcha routerlarda OSPF — real FRR uchun `startup`
+ham yaratiladi (`network ... area 0`, router-router kabellarda point-to-point, hello 1 s).
+API: `POST /api/topogen {"kind": "ring", "routers": 20, "hosts": 5, "flows": 40}`.
+
+Analitik model `Net` keshlari bilan (kabel indeksi, L2 reach, marshrutlar, LPM, forward;
+holat o'zgarmagan qadamlarda `Net` qayta ishlatiladi) — natijalar bayt darajasida bir xil:
+
+| Topologiya | Avval | Hozir |
+|---|---|---|
+| 50 qurilma, 20 oqim, 40 s | 7.5 s | ~0.2 s |
+| 280 qurilma (40 router), 100 oqim, 30 s | 12.4 s (faqat kabel indeksi va L2/marshrut keshlari bilan; to'liq keshsiz o'lchanmagan) | 0.9 s |
+| Kampus 80 qurilma — survivability (N-1, links+devices) | — | 3.4 s |
+
+Real Mininet: generatsiya qilingan 6 routerli halqa — OSPF ~9 s da yaqinlashadi, kabel
+uzilganda muqobil yo'l ~1 s (`real_integration topogen`).
+
+### Hisobotlar: HTML va CSV eksport (OPNET "Report")
+
+`lab/report.py` — bitta fayldan iborat, tashqi resurssiz HTML hisobot (CSS va SVG grafiklar
+ichida; yorug'/qorong'i mavzu avtomatik, palitra UI bilan bir xil) hamda CSV to'plami.
+
+| So'rov | Natija |
+|---|---|
+| `GET /api/runs/{loyiha}/{run_id}/report.html` | bitta natija: xulosa, oqimlar, ilovalar (MOS / sahifa / fayl), mavjudlik, grafiklar (o'tkazuvchanlik, kechikish, yo'qotish, MOS, kabel yuklamasi), kabellar (max yuklama/navbat/tashlangan), qurilmalar, konvergensiya, marshrut o'zgarishlari, hodisalar |
+| `GET /api/runs/{loyiha}/{run_id}/export.zip` | `flows.csv`, `flow_summary.csv`, `links.csv`, `nodes.csv`, `apps.csv`, `availability.csv`, `convergence.csv`, `route_events.csv`, `events.csv`, `results.json` |
+| `POST /api/reports/compare` `{"project", "run_ids": [...]}` | natijalarni solishtirish (umumiy oqimlar bo'yicha jadval va grafiklar) |
+| `GET /api/studies/{loyiha}/{study_id}/report.html` | parametrik tadqiqot: 1D — metrika vs parametr grafiklari, 2D — issiqlik xaritalari |
+| `POST /api/analysis/survivability/report` (survivability bilan bir xil tana) | SPOF, kritiklik reytingi, N-1 sig'im rejasi |
+
+Buyruq qatori:
+
+```bash
+python3 -m lab.report lab/results/ospf_lab/<run_id>.json -o hisobot.html
+python3 -m lab.report lab/results/ospf_lab/ -o solishtirish.html          # papkadagi barcha natijalar
+python3 -m lab.report lab/results/ospf_lab/ --study -o tadqiqot.html
+python3 -m lab.report lab/results/ospf_lab/<run_id>.json --zip -o natija.zip
+```
+
+Barcha foydalanuvchi matnlari (nomlar, izohlar) escape qilinadi; token himoyasi hisobotlarga ham
+tegishli. Hisobot hajmi odatda 5–30 KB.
+
+### ns-3 tezligi: katta topologiyalar
+
+ns-3 — paket darajasidagi simulyatsiya: vaqt deyarli to'liq C++ ichida (paketlar soni ×
+hop'lar), Python tomoni (namuna olish, marshrutlar) sezilarsiz. Profil (gdb namunalari):
+TCP/IP stek, navbatlar, bridge — "yagona sekin joy" yo'q. Shuning uchun:
+
+**Aniq rejim (standart) — natija o'zgarmaydi**, faqat bizning qo'shimcha yuklamamiz olib tashlandi:
+
+- FlowMonitor faqat ilova uchlarida (har hop'dagi probe — paket tegi, hash — behuda edi);
+- qurilma hisoblagichlari: `Tx` trace o'rniga `SendOutgoing` + `UnicastForward` (ns-3 `Tx`
+  trace'ga ulanilsa har hop'da paketni nusxalab sarlavha qo'shadi), `std::map` o'rniga vektor;
+- `RateErrorModel` yo'qotish 0 bo'lganda o'chiriladi (har paketda tasodifiy son chizilmaydi).
+
+Tezlashuv kichik (~0–8%, ns-3 ning o'zi asosiy vaqt). Barcha 21 namuna ssenariysida va
+generatsiya qilingan ring10/campus'da natijalar (oqimlar, kabellar, qurilmalar, route_events,
+konvergensiya) BAYT darajasida bir xil (stp_lab'da route_events tartibi bir soniya ichida
+hash'ga bog'liq edi — endi saralangan).
+
+**Tezkor rejim (ixtiyoriy, taxminiy)**: ssenariyda `"ns3_fast": true` (yoki
+`NETLAB_NS3_FAST=1`) — jumbo MTU 9000 / MSS 8948, navbatlar BAYT bo'yicha teng qoldiriladi
+(paket soni ×1500/9000). TCP paketlari ~6 baravar kam → 4–5 baravar tez. UDP oqimlari bir xil;
+TCP oqimlarining umumiy o'tkazuvchanligi yaqin, lekin bir-biri bilan bo'lishishi (adolat)
+va paket darajasidagi kechikish/jitter farq qiladi. Wi-Fi bo'lsa qo'llanmaydi. Natijada
+`ns3_fast: true` va izoh bo'ladi.
+
+O'lchovlar (30 s, bitta link_down; 4 yadro, bir vaqtda 2–4 ish — taxminiy):
+
+| Topologiya | Asos | Aniq (yangi) | Tezkor (`ns3_fast`) | Tezkor: TCP jami / UDP |
+|---|---|---|---|---|
+| ring 10 router, 30 host, 20 oqim | 290 s | 267 s | 54 s (5.4x) | −0.2% / <0.1% |
+| ring 20 router, 100 host, 40 oqim | 567 s | — | 107 s (5.3x) | — |
+| campus 2/4/8, 40 host, 40 oqim | 356 s | 366 s | 88 s (4.0x) | +0.7% / <2% |
+| ring 40 router, 200 host, 100 oqim | ~2600 s (taxm.: 36 daq. da 83%) | — | 404 s (~6x) | — |
+
+Tezkor rejimda alohida TCP oqimlari ulushi o'zgaradi (median 8–15%, eng ko'p 93%) — umumiy
+yuklama/sig'im tahlili uchun, oqim darajasidagi aniq natija uchun emas.
+
+**Parallel tadqiqotlar**: ns-3 dvigatelida parametrik tadqiqot variantlari bir vaqtda
+ishga tushiriladi (har biri alohida jarayon): `NETLAB_NS3_PARALLEL=N`, standart — yadrolar
+soni / 2 (1..4). Misol: 4 variantli tadqiqot (har biri ~19 s) 2 parallel bilan 39 s.
+Har ns-3 jarayoni katta topologiyada 1–3 GB xotira olishi mumkin (ring 40: ~2.8 GB).
+Analitik (GIL) va Mininet (bitta jonli tarmoq) ketma-ket qoladi.
+
+Test: `python3 -m lab.tests.smoke_ns3_perf` (tezkor rejim; `NETLAB_NS3_PERF_EXACT=1` — aniq ham).
+
 ### Ikki parametrli tadqiqot (issiqlik xaritasi)
 
 Tadqiqot bo'limida ikkinchi parametr ham tanlanishi mumkin. Shunda ikki parametr
@@ -383,6 +608,259 @@ javoblar qaytmaydi.
 Router `config.routes` (statik marshrutlar) Mininet'da kernel marshruti sifatida ham
 qo'llanadi (zebra uni ko'radi).
 
+## Routing, L2 va xavfsizlik: BGP, STP, Firewall
+
+### BGP: avtonom tizimlar (eBGP / iBGP)
+
+Router `daemons` ichida `bgpd` va tuzilgan `config.bgp`:
+
+```json
+"bgp": {"asn": 65001, "router_id": "2.2.2.2",
+        "neighbors": [{"ip": "10.12.0.1", "remote_as": 65001, "next_hop_self": true},
+                      {"ip": "203.0.113.2", "remote_as": 65002}],
+        "networks": ["10.1.0.0/24"], "redistribute": ["connected", "ospf", "static"]}
+```
+
+- **sessiya** — ikkala tomon bir-birini (IP + `remote_as`) ko'rsatsa UP. eBGP — qo'shni
+  to'g'ridan-to'g'ri ulangan subnetda; iBGP — IGP/statik marshrut bilan yetadi.
+- **e'lon** — `networks` (prefiks RIB'da bo'lsa, FRR import-check kabi) + `redistribute`.
+- **eBGP** — AS_PATH oldiga o'z AS'i, AS halqasi rad etiladi; **iBGP** — faqat lokal/eBGP
+  marshrutlar uzatiladi (route reflector yo'q), next-hop o'zgarmaydi (`next_hop_self` bo'lmasa).
+- tanlash: qisqa AS_PATH > eBGP > iBGP; AD: eBGP 20, OSPF 110, RIP 120, iBGP 200.
+- IGP (OSPF/RIP) AS chegarasidan o'tmaydi (ikkala routerda har xil `asn` bo'lsa).
+
+| Dvigatel | Qanday |
+|---|---|
+| Mininet | FRR `bgpd`; `config.bgp` → `vtysh -f` (`router bgp`, `no bgp ebgp-requires-policy`, `neighbor … timers connect 5`, `address-family ipv4 unicast`). Inspect: `show bgp summary`, `show ip bgp` |
+| Analitik / demo | `lab/bgp.py` path-vector modeli; uzilishda marshrut darhol olib tashlanadi, tiklanganda `bgp_convergence_s` (standart 2 s) dan keyin qaytadi. Demo terminal: `show bgp summary`, `show ip bgp` |
+| ns-3 | BGP yo'q — model hisoblagan marshrutlar statik o'rnatiladi (hodisada darhol qayta hisoblanadi) |
+
+Namuna: `bgp_lab` — AS65001 (r1, r2: OSPF + iBGP, pc1) va AS65002 (r3, srv1), r2–r3 eBGP.
+Ssenariy `ebgp_uzilish`: t=10 s da eBGP kabeli uziladi, t=20 s da tiklanadi.
+
+| | uzilishda marshrut olib tashlanishi | tiklanish konvergensiyasi | video uzilishi |
+|---|---|---|---|
+| Real FRR (Mininet) | 0.2 s (interfeys DOWN → sessiya darhol tushadi) | 2.0 s | 11 s |
+| Analitik | darhol | 2.0 s | 12 s |
+| ns-3 (statik) | darhol | darhol | 10 s |
+
+Testlar: `python3 -m lab.tests.smoke_bgp` (demo + analitik + ns-3),
+`sudo python3 -m lab.tests.real_bgp` (real FRR).
+
+Cheklovlar: modelda IGP qo'shnisining barcha interfeys subnetlari o'rganiladi (OSPF `network`
+bayonotlari tahlil qilinmaydi); BGP atributlari (local-pref, MED, community), route reflector,
+multipath va policy (route-map) modellashtirilmaydi — real FRR'da startup orqali yozish mumkin.
+
+### STP / RSTP (switch halqalari)
+
+Switch `config`:
+
+```json
+"stp": true, "stp_mode": "stp", "stp_priority": 4096,
+"ports": {"2": {"stp_cost": 100}}
+```
+
+- `stp_mode`: `stp` (802.1D, standart) yoki `rstp` (802.1w).
+- `stp_priority`: 0..61440, 4096 ga karrali (standart 32768); eng kichik (priority, id) — root.
+- `ports.<n>.stp_cost`: port yo'l narxi; bo'lmasa kabel tezligidan (802.1D-1998: 10 Mbit/s
+  → 100, 100 Mbit/s → 19, 1 Gbit/s → 4, 10 Gbit/s → 2). Real driver bu narxni OVS'ga
+  yozadi (veth o'zini "10 Gbit/s" deb ko'rsatadi).
+
+Model (`lab/stp.py`): root bridge, root port, designated/alternate portlar; alternate —
+blocking. STP'siz switchlar halqa hosil qilsa — **broadcast storm**: domen ishlamaydi,
+ping/traceroute sababni ko'rsatadi (`L2 halqa (STP o'chiq): broadcast storm [l1, l2, l3]`),
+ns-3 aniq xato beradi. Inspect → "STP (spanning tree)" (rol/holat, bridge/root id);
+real driverda `ovs-appctl stp/show` (yoki `rstp/show`) va model bashorati yonma-yon.
+
+| Dvigatel | Qanday | Konvergensiya (`stp_lab`, faol kabel uzilganda) |
+|---|---|---|
+| Mininet (OVS) | `stp_enable` / `rstp_enable`, `stp-priority`, `stp-system-id` = device_mac(id, 0), `stp-path-cost` | STP ~23 s, RSTP < 1 s (o'lchangan) |
+| Analitik | blocking → forwarding o'tish `hold`: 802.1D 2×forward_delay = 30 s (bilvosita nosozlik +max_age 20 s), RSTP 1 s; `stp_convergence_s` — qo'lda | 30 s / 1 s |
+| ns-3 | BridgeNetDevice'da STP yo'q: model daraxti bo'yicha blocking segment ma'lumot uchun yopiladi (ErrorModel), hodisada qayta hisoblanadi; MAC yozuvlari 2 s (TCN FDB tozalashi o'rniga) | 30 s / 1 s |
+
+Port holati o'zgarishlari `route_events` ga (`dev` = switch, `port2 root/forwarding`)
+yoziladi — `convergence` (OPNET "convergence duration") L2 uchun ham ko'rinadi.
+
+Eslatma: 802.1D da kabel **tiklanganda** ham uzilish bo'ladi — yangi root port 30 s
+listening/learning kutadi, eski root port esa darhol blocking bo'ladi (RSTP'da ~1 s).
+
+Namuna: `stp_lab` — s1 (root, priority 4096), s2, s3 uchburchak; s3:2 blocking.
+Ssenariy `uzilish`: t=10 s da l2 (s1-s3) uziladi, t=50 s da tiklanadi.
+
+Testlar: `python3 -m lab.tests.smoke_stp` (demo + analitik + ns-3),
+`sudo flock /tmp/netlab-real.lock python3 -m lab.tests.real_stp` (real OVS STP va RSTP).
+
+### Firewall / ACL (stateful, iptables)
+
+Router, host yoki server `config.firewall`:
+
+```json
+"firewall": {"default": "drop",
+             "rules": [
+               {"chain": "forward", "action": "accept", "state": "established"},
+               {"chain": "forward", "action": "accept", "in": "r1-eth1"},
+               {"chain": "forward", "action": "accept", "proto": "tcp", "dst": "10.0.2.10/32", "dport": 80},
+               {"chain": "forward", "action": "reject", "proto": "icmp", "in": "r1-eth3", "dst": "10.0.1.0/24"}]}
+```
+
+- **Semantika — iptables bilan bir xil:** zanjir (`input` / `forward` / `output`) ichida
+  birinchi mos qoida; mos qoida bo'lmasa — siyosat. `default` routerda `forward`,
+  host/serverda `input` zanjiriga tegishli; aniq siyosat: `"policy": {"input": "drop"}`.
+- Maydonlar: `proto` (`any` / `tcp` / `udp` / `icmp`), `src`/`dst` (subnet), `dport`/`sport`
+  (faqat tcp/udp), `in`/`out` (interfeys), `state` (`new` / `established`).
+- **Stateful:** `established` qoidasi javob paketlarini o'tkazadi — "ichkaridan tashqariga
+  ruxsat, tashqaridan yangi ulanish yo'q". Bu qoida bo'lmasa javoblar ham tashlanadi.
+- **`reject` va `drop`:** `reject` — TCP uchun RST, boshqalar uchun ICMP host-prohibited
+  (ping darhol "Destination Host Prohibited" deydi); `drop` — jim tashlash (timeout).
+
+| Dvigatel | Qanday |
+|---|---|
+| Mininet | qurilma namespace'ida o'z zanjirlari `NETLAB-IN/FWD/OUT` (INPUT/FORWARD/OUTPUT dan sakrash); NAT (`nat` jadvali) alohida qoladi; jonli o'zgartirish — zanjirlar qayta yoziladi. Inspect → **har qoida hisoblagichi** (paket/bayt, `iptables -L -v`) |
+| Analitik / demo | paket yo'li bo'yicha: manba OUTPUT, oraliq routerlar FORWARD, manzil INPUT; NAT'dan keyingi hoplarda manba almashtiriladi; tcp/ping javobi `established` sifatida tekshiriladi (`lab/firewall.py`) |
+| ns-3 | iptables yo'q — model bloklagan oqim ishga tushirilmaydi (natijada 100% yo'qotish, `blocked` sababi bilan) |
+
+**Portlar.** Ilovaga `dport` bering (`{"type": "tcp", "dport": 80, ...}`); bo'lmasa port
+`5201 + ilova tartib raqami` (Mininet'dagi iperf3 porti bilan bir xil). Mininet'da iperf3
+server/klient aynan shu portda ishlaydi; bir (server, port) dagi bir nechta TCP ilova
+(masalan HTTP sahifalari) bitta doimiy iperf3 server'ni bo'lishadi. Eslatma: iperf3 UDP
+testi shu portga TCP boshqaruv ulanishini ham ochadi — real tarmoqda UDP ilova uchun shu
+portda TCP ham ruxsat etilgan bo'lishi kerak.
+
+Namuna: `firewall_lab` — LAN (pc1, pc2), DMZ veb-server (srv1:80), Internet (inet).
+Ssenariy `trafik`: `web_in` (inet → srv1:80) va LAN oqimlari o'tadi, `ssh_in` (:22)
+tashlanadi, `ping_in` (inet → pc1) reject. Real Mininet sinovi: TCP :80 47 Mbit/s, :22
+"Connection timed out", hisoblagichlar (established qoidasi 37 404 paket, default drop 6),
+jonli qoida qo'shish va olib tashlash.
+
+```bash
+python3 -m lab.tests.smoke_fw
+```
+
+```bash
+sudo python3 -m lab.tests.real_fw
+```
+
+### IP multicast: IGMP + PIM-SM
+
+Router — `daemons` ichida `pimd` va ixtiyoriy `config.pim`:
+
+```json
+"daemons": ["ospfd", "pimd"],
+"pim": {"rp": "10.0.0.1", "interfaces": ["r1-eth1", "r1-eth2"]}
+```
+
+`interfaces` berilmasa — IP'li barcha interfeyslarda `ip pim` + `ip igmp`. Unicast
+routing (OSPF/statik) bo'lishi shart (RPF). Switch — `config.igmp_snooping: true`
+(OVS `mcast_snooping`): kadrlar faqat a'zo portlarga va PIM router portlariga boradi;
+o'chiq bo'lsa butun L2 domenga (VLAN/STP hisobga olinadi) flood.
+
+Ilova turi `mcast` (`dst` — qabul qiluvchilar ro'yxati):
+
+```json
+{"id": "tv", "type": "mcast", "src": "srv1", "group": "239.1.1.1",
+ "dst": ["pc1", "pc3"], "rate": "4Mbps", "size": 1000, "start": 1, "stop": 29}
+```
+
+Natija: `apps.tv` — `reached` / `reached_list`, `avg_loss_pct`, `per_receiver`
+(har qabul qiluvchi tezligi, yo'qotishi, kechikishi); `flows.tv.<qabul qiluvchi>` —
+soniyalik seriya; `links` — har kabelda **bitta nusxa** (qabul qiluvchilar soniga
+ko'paytirilmaydi).
+
+| Dvigatel | Qanday |
+|---|---|
+| Analitik / demo | daraxt = manbadan har qabul qiluvchigacha eng qisqa unicast yo'llar birlashmasi (SPT); yo'ldagi router'da pimd/PIM interfeysi bo'lmasa — shoxcha uziladi; umumiy kabel yuklamasi bir marta; snooping'siz segmentlarda flood yuklamasi; yuklangan shoxchadagina yo'qotish |
+| ns-3 | PIM yo'q — model daraxti bo'yicha statik `AddMulticastRoute` (hodisalarda qayta o'rnatiladi), bitta OnOff → guruh, qabul qiluvchilarda PacketSink (SeqTsSize: kechikish, yo'qotish); ns-3 bridge'da IGMP snooping yo'q (flood) |
+| Mininet | FRR pimd (`ip pim rp`, `ip pim`, `ip igmp`), `lab/engines/mcast_tool.py` yuboruvchi/qabul qiluvchi (IP_ADD_MEMBERSHIP → IGMP report → PIM join), TTL 16; inspect: `show ip pim neighbor`, `show ip mroute`, `show ip igmp groups`, `show ip pim rp-info`, switch'da `mdb/show` |
+
+Namuna `mcast_lab`: srv1 → r1 (RP) → r2 (s1: pc1 a'zo, pc2 a'zo emas) va r3 (s2: pc3),
+r2-r3 zaxira kabel, OSPF + PIM-SM. Real sinov: PIM qo'shnilar va RP tayyor, pc1/pc3
+4.0 Mbit/s oladi, pc2 ga yetmaydi (snooping), r1-r2 kabelida 4.17 Mbit/s (bitta nusxa);
+r1-r3 uzilganda pc3 shoxchasi ~1 s ichida r2-r3 orqali tiklanadi (l4: 0 → 4.17 Mbit/s).
+
+Cheklovlar: model faqat SPT (RP orqali umumiy daraxt va SPT'ga o'tish vaqti
+modellanmaydi); analitikda PIM qayta qurilishi darhol; IGMP snooping domeni — segmentdagi
+barcha switchlarda yoqilgan bo'lsa; ns-3'da snooping yo'q.
+
+### VRRP: gateway zaxirasi (first-hop redundancy)
+
+Router `config.vrrp` (bir xil `vrid` + `vip` — bitta guruh):
+
+```json
+"vrrp": [{"iface": "r1-eth1", "vrid": 1, "vip": "10.0.1.254/24",
+          "priority": 120, "preempt": true, "advert_ms": 1000}]
+```
+
+Hostlar gateway sifatida VIP'ni oladi. Master — kabeli ishlayotgan routerlar ichida eng
+yuqori `priority` (teng bo'lsa — interfeys IP'si kattasi). `vrrpd` daemon avtomatik qo'shiladi.
+
+| Dvigatel | Qanday |
+|---|---|
+| Mininet (FRR) | `vrrpd` (VRRPv3) + router namespace'ida macvlan `vrrp4-<port>-<vrid>` (MAC `00:00:5e:00:01:<vrid>`, VIP bilan; backup'da vrrpd uni protodown qiladi). `arp_ignore=1` — backup ota interfeysi VIP uchun ARP javob bermaydi. Inspect: `show vrrp` + model bashorati |
+| Analitik / demo | master saylovi; master kabeli uzilsa VIP egasiz, backup `Master_Down_Interval` = 3×advert + (256−priority)/256×advert (standart ~3.6 s) dan keyin master; preempt — darhol (FRR 8.4 kabi). `route_events` / `convergence` da ko'rinadi |
+| ns-3 | VRRP yo'q — model vaqt jadvali bo'yicha VIP master interfeysiga qo'shimcha manzil sifatida ko'chiriladi, ARP keshlari tozalanadi (gratuitous ARP ekvivalenti) |
+
+Ssenariy sozlamalari: `vrrp_convergence_s` (failover vaqtini qo'lda), `vrrp_preempt_s`
+(preempt kechikishi, standart 0).
+
+Namuna: `vrrp_lab` — r1 (120) va r2 (100) LAN'da 10.0.1.254 ni bo'lishadi, r3 orqali
+srv1. `zaxira` ssenariysi: t=10 s r1 LAN kabeli uziladi, t=20 s tiklanadi.
+
+| | failover (r2 master) | trafik uzilishi | preempt |
+|---|---|---|---|
+| Analitik | 3.6 s | 4 s | 0 s, uzilishsiz |
+| ns-3 | 3.6 s | ~3 s | uzilishsiz |
+| Mininet (real FRR) | 3.2–3.4 s | ~8 s* | 0.03 s, uzilishsiz |
+
+\* realda javob yo'lida OSPF ham yaqinlashadi: r3 ECMP marshrutining r1 tarmog'i LAN
+dead-interval (4 s) tugaguncha qoladi — modelda IGP konvergensiyasi darhol deb olinadi.
+
+Yo'l-yo'lakay: model IGP'si (OSPF/RIP BFS) endi kabeli uzilgan interfeys subnetini
+e'lon qilmaydi (real FRR kabi).
+
+Real test: `sudo flock /tmp/netlab-real.lock python3 -m lab.tests.real_vrrp`;
+smoke: `python3 -m lab.tests.smoke_vrrp`.
+
+### Link aggregation (802.3ad LACP / bond)
+
+Ikki switch orasidagi bir nechta parallel kabelni bitta mantiqiy kanalga birlashtirish.
+Switch `config.bonds` (qo'shni switch'da xuddi shu kabellarning ikkinchi uchlari bilan
+mos bond bo'lishi shart):
+
+```json
+"bonds": {"bond1": {"ports": [3, 4], "mode": "balance-tcp", "lacp": "active"}}
+```
+
+- `mode`: `balance-tcp` (oqim — L4 hash), `balance-slb` (manba MAC), `active-backup`
+  (faqat birlamchi a'zo, qolganlari zaxira).
+- `lacp`: `active` / `passive` / `off` (ikkala tomon passive yoki faqat bir tomon off —
+  validatsiya xatosi).
+- Faqat switch <-> switch: host/router bonding qo'llab-quvvatlanmaydi (konteyner/WSL
+  kernelida Linux bonding moduli bo'lmasligi mumkin; OVS bond'i switch'lar orasida ishlaydi).
+
+| Dvigatel | Qanday |
+|---|---|
+| Mininet | a'zo portlar `ovs-vsctl add-bond <sw> <sw>-<bond> … bond_mode=… lacp=… lacp-time=fast` bilan bitta OVS portiga aylantiriladi (ofport va tc saqlanadi). Inspect: `ovs-appctl bond/show`, `lacp/show` + model jadvali |
+| Analitik / demo | bond — bitta L2 qo'shnichilik; har oqim deterministik hash bo'yicha BITTA a'zodan o'tadi (kabel statistikasi a'zo bo'yicha). A'zo uzilsa — `bond_failover_s` (standart 0.5 s) davomida unga hash qilingan oqimlar yo'qoladi, keyin qolgan a'zolarga qayta taqsimlanadi |
+| ns-3 | bonding yo'q — bond bitta vakil a'zo kabel orqali yuradi, tezligi = ishlaydigan a'zolar yig'indisi (qolganlari yopiq); oqim bo'yicha hash yo'q, statistika vakil kabelda |
+
+**STP bilan:** OVS STP/RSTP yoqilgan bridge'da bond porti "disabled" rolda qoladi va
+hech qachon forwarding'ga o'tmaydi (real sinovda tekshirildi). Shuning uchun bond'li
+switch'da STP avtomatik o'chiriladi (ogohlantirish bilan) — model ham shunday hisoblaydi.
+Bond'ning parallel a'zolari halqa hisoblanmaydi (bitta qirra); bond'siz parallel kabellar
+STP bilan — bittasi blocking, STP'siz — broadcast storm. Bond'li switch'da boshqa zaxira
+yo'llar halqa hosil qilmasin.
+
+Namuna: `lag_lab` — s1–s2 2×100 Mbit/s bond (balance-tcp, LACP), t=10 s da a'zo `l5` uziladi.
+
+| | 2 oqim (oldin) | `l5` uzilgandan keyin |
+|---|---|---|
+| Analitik | 200 Mbit/s (har a'zo ~100) | 100 Mbit/s |
+| ns-3 | 200 Mbit/s | ~3 s uzilish (MAC qayta o'rganish), keyin 100 Mbit/s |
+| Mininet (real, userspace OVS) | 4 parallel oqim: 134 Mbit/s (bitta oqim 95); LACP `negotiated` | trafik darhol davom etadi |
+
+Real sinovda balance-tcp hash oqimlarni a'zolarga notekis taqsimladi (masalan 75 MB / 31 MB) —
+ikkita oqim ham bitta a'zoga tushishi mumkin (hash to'qnashuvi).
+
 ## Wi-Fi (simsiz tarmoq)
 
 Kabel asbobi (`C`) bilan Wi-Fi AP'ni va host/server/router'ni ketma-ket bosing —
@@ -497,6 +975,13 @@ masalan `5,10,15,20,25` dBm qiymatlarida uzoqdagi stansiya tezligini ko'ring.
 - `sdn_router_lab`: SDN switch + SDN router (`l3_router` ilovasi).
 - `vlan_lab`: VLAN 10/20, trunk, router-on-a-stick, izolyatsiya. Ssenariy: `vlanlar`.
 - `nat_dhcp_lab`: DHCP server + NAT (masquerade) + provayder. Ssenariy: `internet`.
+- `bgp_lab`: AS65001 (OSPF + iBGP) va AS65002, eBGP r2-r3. Ssenariy: `ebgp_uzilish`.
+- `stp_lab`: uch switch halqasi (STP, s1 root), bloklangan port va konvergensiya.
+- `firewall_lab`: LAN, DMZ veb-server (:80), internet; stateful firewall qoidalari.
+- `mcast_lab`: IGMP + PIM-SM (RP r1), 239.1.1.1 oqimi pc1 va pc3 ga, IGMP snooping.
+- `vrrp_lab`: r1 (prio 120) / r2 (prio 100) virtual gateway 10.0.1.254, failover va preempt.
+- `lag_lab`: s1–s2 orasida 2×100 Mbit/s bond (balance-tcp, LACP), a'zo kabel uzilishi.
+- `reliability_lab`: OSPF halqa + zaxirasiz r3–srv2 kabeli; MTBF/MTTR nosozliklari (`ishonchlilik` 600 s, `qisqa` 60 s).
 
 ## Klaviatura
 

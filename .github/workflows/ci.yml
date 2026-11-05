@@ -119,6 +119,19 @@ jobs:
         run: git diff --stat --exit-code -- lab/web-react || (echo "lab/web-react eskirgan: cd lab/ui && npm run build" && exit 1)
       - name: NetLab smoke test (demo driver, analytic + ns-3 scenario runs, token)
         run: python lab/tests/smoke_demo.py
+      - name: NetLab smoke tests (BGP, STP, Firewall)
+        run: |
+          python -m lab.tests.smoke_bgp
+          python -m lab.tests.smoke_stp
+          python -m lab.tests.smoke_fw
+          python -m lab.tests.smoke_mcast
+          python -m lab.tests.smoke_vrrp
+          python -m lab.tests.smoke_lag
+          python -m lab.tests.smoke_survivability
+          python -m lab.tests.smoke_failures
+          python -m lab.tests.smoke_perf
+          python -m lab.tests.smoke_report
+          python -m lab.tests.smoke_survivability_n2
 
   docker-build:
     runs-on: ubuntu-latest

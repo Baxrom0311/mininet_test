@@ -43,24 +43,38 @@ _NODESTATS_CPP = r"""
 #include <sstream>
 namespace netlab {
 using namespace ns3;
+// Hisoblagichlar node id bo'yicha vektorda (har paketda std::map qidiruvi yo'q). TX = mahalliy
+// yuborilgan (SendOutgoing) + uzatilgan (UnicastForward, MulticastForward) — Linux OutRequests +
+// ForwDatagrams kabi.
+// "Tx" trace ishlatilmaydi: unga ulanilsa ns-3 har hop'da paketni nusxalab sarlavha qo'shadi.
 struct Cnt { uint64_t fwd = 0, rx = 0, tx = 0, noroute = 0, drop = 0; };
-static std::map<uint32_t, Cnt> g_cnt;
-static void OnFwd(uint32_t id, const Ipv4Header&, Ptr<const Packet>, uint32_t) { g_cnt[id].fwd++; }
-static void OnRx(uint32_t id, Ptr<const Packet>, Ptr<Ipv4>, uint32_t) { g_cnt[id].rx++; }
-static void OnTx(uint32_t id, Ptr<const Packet>, Ptr<Ipv4>, uint32_t) { g_cnt[id].tx++; }
-static void OnDrop(uint32_t id, const Ipv4Header&, Ptr<const Packet>, Ipv4L3Protocol::DropReason r,
+static std::vector<Cnt> g_cnt;
+static inline Cnt& C(uint32_t id) { if (id >= g_cnt.size()) g_cnt.resize(id + 1); return g_cnt[id]; }
+static void OnFwd(Cnt* c, const Ipv4Header&, Ptr<const Packet>, uint32_t) { c->fwd++; c->tx++; }
+static void OnOut(Cnt* c, const Ipv4Header&, Ptr<const Packet>, uint32_t) { c->tx++; }
+static void OnRx(Cnt* c, Ptr<const Packet>, Ptr<Ipv4>, uint32_t) { c->rx++; }
+static void OnDrop(Cnt* c, const Ipv4Header&, Ptr<const Packet>, Ipv4L3Protocol::DropReason r,
                    Ptr<Ipv4>, uint32_t) {
-  if (r == Ipv4L3Protocol::DROP_NO_ROUTE) g_cnt[id].noroute++; else g_cnt[id].drop++;
+  if (r == Ipv4L3Protocol::DROP_NO_ROUTE) c->noroute++; else c->drop++;
 }
+void Reserve(uint32_t n) { g_cnt.reserve(n + 1); g_cnt.resize(n + 1); }
 void Attach(Ptr<Node> n) {
   uint32_t id = n->GetId();
   Ptr<Ipv4L3Protocol> ip = n->GetObject<Ipv4L3Protocol>();
   if (!ip) return;
-  g_cnt[id];
-  ip->TraceConnectWithoutContext("UnicastForward", MakeBoundCallback(&OnFwd, id));
-  ip->TraceConnectWithoutContext("Rx", MakeBoundCallback(&OnRx, id));
-  ip->TraceConnectWithoutContext("Tx", MakeBoundCallback(&OnTx, id));
-  ip->TraceConnectWithoutContext("Drop", MakeBoundCallback(&OnDrop, id));
+  Cnt* c = &C(id);   // Reserve() oldindan chaqiriladi — vektor qayta joylashmaydi
+  ip->TraceConnectWithoutContext("UnicastForward", MakeBoundCallback(&OnFwd, c));
+  ip->TraceConnectWithoutContext("SendOutgoing", MakeBoundCallback(&OnOut, c));
+  ip->TraceConnectWithoutContext("MulticastForward", MakeBoundCallback(&OnOut, c));   // har chiqish interfeysi
+  ip->TraceConnectWithoutContext("Rx", MakeBoundCallback(&OnRx, c));
+  ip->TraceConnectWithoutContext("Drop", MakeBoundCallback(&OnDrop, c));
+}
+// barcha tugunlar hisoblagichlari bitta chaqiruvda (Python<->C++ o'tishlari kamroq)
+std::vector<uint64_t> GetAll(const std::vector<uint32_t>& ids) {
+  std::vector<uint64_t> out;
+  out.reserve(ids.size() * 5);
+  for (uint32_t id : ids) { Cnt& c = C(id); out.insert(out.end(), {c.fwd, c.rx, c.tx, c.noroute, c.drop}); }
+  return out;
 }
 // cheklangan uzatish (FTP/HTTP): PacketSink Rx -> maqsad baytga yetgan aniq vaqt
 static std::map<uint32_t, std::pair<uint64_t, uint64_t>> g_sink;
@@ -78,8 +92,32 @@ double DoneAt(uint32_t key) {
   auto it = g_done.find(key);
   return it == g_done.end() ? -1.0 : it->second;
 }
+// multicast qabul qiluvchilar: SeqTsSizeHeader (yuborilgan vaqt, seq) bo'yicha bayt/paket/kechikish
+struct Mc { double bytes = 0, pkts = 0, dsum = 0, jsum = 0, last = -1; };
+static std::map<uint32_t, Mc> g_mc;
+static std::map<uint32_t, double> g_mctx;
+static void OnMcRx(uint32_t key, Ptr<const Packet> p, const Address&, const Address&, const SeqTsSizeHeader& h) {
+  Mc& m = g_mc[key];
+  double d = (Simulator::Now() - h.GetTs()).GetSeconds();
+  m.bytes += p->GetSize(); m.pkts += 1; m.dsum += d;
+  if (m.last >= 0) m.jsum += std::abs(d - m.last);
+  m.last = d;
+}
+static void OnMcTx(uint32_t key, Ptr<const Packet>) { g_mctx[key] += 1; }
+void WatchMc(Ptr<Application> sink, uint32_t key) {
+  g_mc[key];
+  sink->TraceConnectWithoutContext("RxWithSeqTsSize", MakeBoundCallback(&OnMcRx, key));
+}
+void WatchMcTx(Ptr<Application> src, uint32_t key) {
+  g_mctx[key] = 0;
+  src->TraceConnectWithoutContext("Tx", MakeBoundCallback(&OnMcTx, key));
+}
+std::vector<double> McGet(uint32_t key, uint32_t gkey) {
+  Mc& m = g_mc[key];
+  return {m.bytes, m.pkts, m.dsum, m.jsum, g_mctx[gkey]};
+}
 std::vector<uint64_t> Get(uint32_t id) {
-  Cnt& c = g_cnt[id];
+  Cnt& c = C(id);
   return {c.fwd, c.rx, c.tx, c.noroute, c.drop};
 }
 std::string Routes(Ptr<Node> n) {
@@ -110,6 +148,17 @@ def parse_ns3_routes(text, idx_ifn):
         ifn = idx_ifn.get(int(v[-1]), f"if{v[-1]}") if v[-1].isdigit() else v[-1]
         out.add(route_key(net, None if v[1] == "0.0.0.0" else v[1], ifn))
     return out
+
+
+def _set_err(em, rate):
+    """RateErrorModel: rate=0 da o'chiriladi (har paketda tasodifiy son chizilmaydi; natija bir xil —
+    har model o'z RNG oqimiga ega)."""
+    from ns import ns
+    em.SetAttribute("ErrorRate", ns.DoubleValue(float(rate)))
+    if float(rate) > 0:
+        em.Enable()
+    else:
+        em.Disable()
 
 
 def emit(**kw):
@@ -151,7 +200,19 @@ def main(inp_path, out_path):
     # TCP: Linux (Mininet) ga yaqin standartlar — ns-3 o'zi MSS=536, bufer=128KB
     # ishlatadi, bu oyna bilan o'tkazuvchanlikni sun'iy cheklaydi va dvigatellar
     # natijalarini solishtirib bo'lmas qiladi.
-    ns.Config.SetDefault("ns3::TcpSocket::SegmentSize", ns.UintegerValue(1448))
+    # Tezkor rejim (ixtiyoriy, `ns3_fast: true` yoki NETLAB_NS3_FAST=1): jumbo MTU 9000 / MSS 8948 —
+    # TCP paketlari ~6x kam (ns-3 vaqti paketlar soniga proporsional). Navbatlar BAYT bo'yicha
+    # teng qoldiriladi (paket soni x1500/9000). Natija TAXMINIY: o'tkazuvchanlik deyarli bir xil,
+    # paket darajasidagi kechikish/jitter va kichik navbatlarda yo'qotish farq qilishi mumkin.
+    # Wi-Fi bo'lsa qo'llanmaydi (MSDU 2304 — fragmentatsiya bo'lardi).
+    fast = bool(sc.get("ns3_fast")) or os.environ.get("NETLAB_NS3_FAST") == "1"
+    if fast and any((l.get("params") or {}).get("medium") == "wifi" for l in project["links"].values()):
+        emit(log="ns3_fast: Wi-Fi kabellari bor — tezkor rejim qo'llanmadi")
+        fast = False
+    mtu = 9000 if fast else 1500
+    if fast:
+        emit(log="ns3_fast: MTU 9000 / MSS 8948, navbatlar bayt bo'yicha teng (taxminiy rejim)")
+    ns.Config.SetDefault("ns3::TcpSocket::SegmentSize", ns.UintegerValue(mtu - 52))
     ns.Config.SetDefault("ns3::TcpSocket::SndBufSize", ns.UintegerValue(4 * 1024 * 1024))
     ns.Config.SetDefault("ns3::TcpSocket::RcvBufSize", ns.UintegerValue(6 * 1024 * 1024))
     ns.Config.SetDefault("ns3::TcpL4Protocol::SocketType", ns.StringValue("ns3::TcpCubic"))
@@ -218,6 +279,7 @@ def main(inp_path, out_path):
     nl = cppyy.gbl.netlab
     from lab.engines.nodestats import L3_NS, RouteTracker, convergence
     stat_nodes = [n for n, d in devs.items() if d["type"] in L3_NS]
+    nl.Reserve(max(nd.GetId() for nd in nodes.values()))
     for n in stat_nodes:
         nl.Attach(nodes[n])
 
@@ -242,6 +304,18 @@ def main(inp_path, out_path):
         pc = switch_port_cfg(devs[dev], port)
         return pc["vlan"] if pc["mode"] == "access" else 0
     sw_ports = {n: {} for n, d in devs.items() if d["type"] in L2}
+    # STP: ns-3 BridgeNetDevice'da spanning tree yo'q — model daraxti (lab.stp) bo'yicha
+    # blocking portlar bridge'ga ulanmaydi; STP'siz halqa — ns-3 cheksiz aylanadi -> xato.
+    from lab.stp import compute as stp_compute
+    _st = stp_compute(project)
+    if _st["storm"]:
+        sw_ = sorted(_st["storm"])[0]
+        raise RuntimeError(f"ns-3: L2 halqa (STP o'chiq) — broadcast storm: {', '.join(sorted(_st['storm']))} "
+                           f"[{', '.join(_st['storm_cycle'].get(sw_, []))}]. Switch'larda stp: true qiling")
+    if _st["blocked"]:
+        emit(log="STP (model daraxti): blocking portlar " + ", ".join(f"{a}:{b}" for a, b in sorted(_st["blocked"]))
+                 + " — blocking segment ma'lumot uchun yopiladi (ErrorModel=1), hodisalarda daraxt "
+                   "qayta hisoblanadi (802.1D 30/50 s, RSTP ~1 s)")
     jitter_warn = False
     wifi_links = []
     port_q = {}       # (dev, port) -> navbat hajmi ("1000p") — L3 tomonda qdisc uchun
@@ -253,7 +327,7 @@ def main(inp_path, out_path):
             wifi_links.append((lid, l))
             continue
         rate, delay = rate_str(p.get("bw", 100)), time_str(p.get("delay", "1ms"))
-        q = f"{int(p.get('queue', 1000))}p"
+        q = f"{max(10, round(int(p.get('queue', 1000)) * 1500 / mtu))}p"
         if str(p.get("jitter", "0ms")) not in ("0ms", "0", "0us", "0s", ""):
             jitter_warn = True
         pair = ns.NodeContainer()
@@ -277,11 +351,14 @@ def main(inp_path, out_path):
             pass
         nd = h.Install(pair)
         d1, d2 = nd.Get(0), nd.Get(1)
+        if fast:
+            for dv in (d1, d2):
+                dv.SetMtu(mtu)
         errs = []
         for dv in (d1, d2):
             em = ns.CreateObject[ns.RateErrorModel]()
             em.SetAttribute("ErrorUnit", ns.StringValue("ERROR_UNIT_PACKET"))
-            em.SetAttribute("ErrorRate", ns.DoubleValue(float(p.get("loss", 0)) / 100.0))
+            _set_err(em, float(p.get("loss", 0)) / 100.0)
             dv.SetAttribute("ReceiveErrorModel", ns.PointerValue(em))
             errs.append(em)
         port_dev[(a["dev"], a["port"])] = d1
@@ -369,6 +446,12 @@ def main(inp_path, out_path):
 
     emit(log=f"kabellar: {len(link_objs)}")
     bridge = ns.BridgeHelper()
+    from lab.lag import groups as _lag_groups0
+    if _st["bridges"] or _lag_groups0(project):
+        # STP topologiya o'zgarishi (TCN) / bond vakil a'zosi almashishi FDB'ni tozalaydi; ns-3
+        # bridge'da bunday mexanizm yo'q — MAC yozuvlari
+        # qisqa yashaydi (aks holda 300 s eski port bo'yicha yuborilib qoladi)
+        bridge.SetDeviceAttribute("ExpirationTime", ns.TimeValue(ns.Seconds(2)))
     for n, by_vlan in sw_ports.items():
         for _vl, cont in sorted(by_vlan.items()):
             if cont.GetN():
@@ -469,7 +552,30 @@ def main(inp_path, out_path):
                 return str(ii.ip)
         return None
 
+    fw_on = any((d.get("config") or {}).get("firewall") for d in devs.values())
+    if fw_on:
+        emit(log="eslatma: firewall ns-3 da paket darajasida yo'q — model bo'yicha bloklangan oqimlar ishga tushirilmaydi")
+
+    fw_block = {}       # ilova -> (sabab, start, stop)
+
+    def fw_blocked(app, i, dip):
+        from lab.firewall import check_path, check_roundtrip, _why
+        n_ = Net(state)
+        sip_ = n_.ip_of(app["src"])
+        ok_, _w, h_, _l, _d = n_.forward(app["src"], ipaddress.ip_address(dip))
+        if not ok_ or not sip_:
+            return None
+        t_ = app.get("type", "udp")
+        pkt = {"proto": "icmp" if t_ == "ping" else t_, "src": str(sip_.ip), "dst": dip, "sport": 40000,
+               "dport": None if t_ == "ping" else (int(app["dport"]) if app.get("dport") not in (None, "") else 5201 + i)}
+        if t_ == "udp":
+            okf, v, w, c, r = check_path(n_, app["src"], dip, h_, pkt)
+            return None if okf else _why(v, w, c, r, pkt)
+        okf, why, _v = check_roundtrip(n_, app["src"], sip_.ip, app["dst"], dip, h_, pkt)
+        return None if okf else why
+
     apps = []
+    mc_groups = {}
     for i, app in enumerate(sc.get("apps") or []):
         src, dst = app.get("src"), app.get("dst")
         if src not in nodes or dst not in nodes:
@@ -482,6 +588,40 @@ def main(inp_path, out_path):
         port = 9000 + i
         start, stop = float(app.get("start", 1)), float(app.get("stop", duration))
         typ = app.get("type", "udp")
+        if fw_on:
+            # ns-3 da iptables yo'q: model (lab.firewall) bloklagan oqim ishga tushirilmaydi
+            blocked = fw_blocked(app, i, dip)
+            if blocked:
+                emit(log=f"ilova {app.get('id')}: firewall bloklaydi ({blocked}) — ishga tushirilmaydi")
+                fw_block[app.get("id") or f"a{i + 1}"] = (blocked, start, min(stop, duration))
+                start = stop = duration + 1.0
+        if app.get("mcast"):
+            # multicast: guruh uchun BITTA OnOff (manba -> guruh manzili), har qabul qiluvchida sink
+            g = app["mcast"]
+            if g not in mc_groups:
+                gi = len(mc_groups)
+                gport = 9500 + gi
+                oo = ns.OnOffHelper("ns3::UdpSocketFactory",
+                                    ns.InetSocketAddress(ns.Ipv4Address(app["mgroup"]), gport).ConvertTo())
+                oo.SetConstantRate(ns.DataRate(rate_str(app.get("rate", "1Mbps"))), int(app.get("size", 1000)))
+                oo.SetAttribute("EnableSeqTsSizeHeader", ns.BooleanValue(True))
+                gca = oo.Install(nodes[src])
+                gca.Start(ns.Seconds(start)); gca.Stop(ns.Seconds(stop))
+                nl.WatchMcTx(gca.Get(0), 100000 + gi)
+                mc_groups[g] = {"port": gport, "gkey": 100000 + gi, "src": src, "group": app["mgroup"],
+                                "rcv": [], "app": gca}
+            mg = mc_groups[g]
+            sink = ns.PacketSinkHelper("ns3::UdpSocketFactory",
+                                       ns.InetSocketAddress(ns.Ipv4Address.GetAny(), mg["port"]).ConvertTo())
+            sink.SetAttribute("EnableSeqTsSizeHeader", ns.BooleanValue(True))
+            sa = sink.Install(nodes[dst]); sa.Start(ns.Seconds(0.0))
+            nl.WatchMc(sa.Get(0), i)
+            mg["rcv"].append((dst, dip))
+            apps.append({"id": app.get("id") or f"a{i + 1}", "type": "udp", "src": src, "dst": dst, "port": mg["port"],
+                         "label": app.get("label") or f"mcast {src}→{dst}", "start": start, "stop": min(stop, duration),
+                         "mc_key": i, "mc_gkey": mg["gkey"], "mcast": g, "group": app.get("group", g),
+                         "role": app.get("role")})
+            continue
         from lab.model import dscp_class
         tos = 0xb8 if dscp_class(app.get("dscp")) == 0 else 0     # yuqori sinf -> EF
         addr = ns.InetSocketAddress(ns.Ipv4Address(dip), port).ConvertTo()
@@ -516,8 +656,66 @@ def main(inp_path, out_path):
                      **({"bytes": int(app["bytes"]), "sink_key": i} if app.get("bytes") and typ == "tcp" else {}),
                      **({"group": app["group"], "role": app.get("role")} if app.get("group") else {})})
 
+    # multicast marshrutlari: model daraxti (lab.mcast.branch) bo'yicha statik (PIM yo'q)
+    mc_installed = []
+
+    def install_mcast():
+        if not mc_groups:
+            return
+        from lab.mcast import branch as mc_branch
+        n_ = Net(state)
+        for node_, origin, grp, iif in mc_installed:
+            try:
+                srh.GetStaticRouting(node_.GetObject[ns.Ipv4]()).RemoveMulticastRoute(origin, grp, iif)
+            except Exception:  # noqa: BLE001
+                pass
+        mc_installed.clear()
+        for g, mg in mc_groups.items():
+            sip = ip_of(mg["src"])
+            per_router = {}     # router -> [kirish port, {chiqish portlari}]
+            src_eg = None
+            for rcv, rip in mg["rcv"]:
+                ok, _w, hops, _l, _d = n_.forward(mg["src"], ipaddress.ip_address(rip))
+                if not ok:
+                    continue
+                okb, _wb, txp = mc_branch(n_, mg["src"], ipaddress.ip_address(rip), hops)
+                if not okb or not txp:
+                    continue
+                src_eg = src_eg or txp[0][1]
+                for (dv, eg), (_nd, in_ip) in zip(txp[1:], hops):
+                    in_port = next((p_ for p_, f_, ipi in n_.ifaces(dv) if ipi and str(ipi.ip) == in_ip), None)
+                    ent = per_router.setdefault(dv, [in_port, set()])
+                    ent[1].add(parse_ifname(eg)[1])
+            if src_eg and not mg.get("src_route"):
+                ns.Ipv4StaticRoutingHelper().SetDefaultMulticastRoute(
+                    nodes[mg["src"]], port_dev[(mg["src"], parse_ifname(src_eg)[1])])
+                mg["src_route"] = True
+            for dv, (in_port, outs) in per_router.items():
+                if in_port is None or (dv, in_port) not in port_dev:
+                    continue
+                oc = ns.NetDeviceContainer()
+                for o in sorted(outs):
+                    if (dv, o) in port_dev:
+                        oc.Add(port_dev[(dv, o)])
+                srh.AddMulticastRoute(nodes[dv], ns.Ipv4Address(sip), ns.Ipv4Address(mg["group"]),
+                                      port_dev[(dv, in_port)], oc)
+                ipv4_ = nodes[dv].GetObject[ns.Ipv4]()
+                mc_installed.append((nodes[dv], ns.Ipv4Address(sip), ns.Ipv4Address(mg["group"]),
+                                     ipv4_.GetInterfaceForDevice(port_dev[(dv, in_port)])))
+        emit(log=f"multicast: {len(mc_groups)} guruh, {len(mc_installed)} router'da statik mroute (PIM ekvivalenti)")
+
+    install_mcast()
     fmh = ns.FlowMonitorHelper()
-    mon = fmh.InstallAll()
+    if os.environ.get("NETLAB_NS3_FM", "endpoints") == "all":
+        mon = fmh.InstallAll()
+    else:
+        # FlowMonitor faqat ilovalar uchlarida: oqim statistikasi (tx manbada, rx/kechikish/jitter
+        # qabul qiluvchida) uchlarda yoziladi — har hop'dagi probe'lar (paket tegi, hash) behuda.
+        fm_nodes = ns.NodeContainer()
+        for n_ in sorted({x for a_ in apps for x in (a_["src"], a_["dst"])}, key=lambda n_: devs[n_]["id"]):
+            if devs[n_]["type"] in L3:
+                fm_nodes.Add(nodes[n_])
+        mon = fmh.Install(fm_nodes)
     clf = ns.DynamicCast[ns.Ipv4FlowClassifier](fmh.GetClassifier())
 
     # hodisalar
@@ -536,10 +734,10 @@ def main(inp_path, out_path):
             if "loss" in params:
                 lo["loss"] = float(params["loss"]) / 100.0
                 for em in lo["errs"]:
-                    em.SetAttribute("ErrorRate", ns.DoubleValue(lo["loss"]))
+                    _set_err(em, lo["loss"])
         if up is not None:
             for em in lo["errs"]:
-                em.SetAttribute("ErrorRate", ns.DoubleValue(lo["loss"] if up else 1.0))
+                _set_err(em, lo["loss"] if up else 1.0)
             for end in lo["ends"]:
                 k = (end["dev"], end["port"])
                 if k in iface:
@@ -548,6 +746,73 @@ def main(inp_path, out_path):
             if lid in state["links"]:
                 state["links"][lid]["up"] = bool(up)
             install_routes()
+            install_mcast()
+
+    # STP: model daraxti; blocking (va konvergensiya kutayotgan) segmentlar ma'lumot uchun yopiq
+    from lab.stp import compute as stp_compute2, convergence_time as stp_conv_time, stp_enabled
+    stp_on = any(stp_enabled(d) for d in devs.values())
+    stp_s = {"up": {}, "fwd": None, "hold": {}}
+
+    def stp_tick(t):
+        if not stp_on:
+            return
+        up_now = {lid: l.get("up") is not False for lid, l in state["links"].items()}
+        failed = [lid for lid, u in up_now.items() if stp_s["up"].get(lid, True) and not u]
+        changed = up_now != stp_s["up"]
+        stp_s["up"] = up_now
+        if changed or stp_s["fwd"] is None:
+            st_new = stp_compute2(state)
+            fwd_new = {(x, p_) for x, b in st_new["bridges"].items() for p_, v in b["ports"].items()
+                       if v["state"] == "forwarding"}
+            if stp_s["fwd"] is not None:
+                for x, p_ in fwd_new - stp_s["fwd"]:
+                    stp_s["hold"][(x, p_)] = t + stp_conv_time(state, x, failed, sc)
+                    emit(log=f"STP: {x} port {p_} -> forwarding {stp_s['hold'][(x, p_)] - t:.0f} s dan keyin")
+                for key in list(stp_s["hold"]):
+                    if key not in fwd_new:
+                        stp_s["hold"].pop(key)
+            stp_s["fwd"] = fwd_new
+        for key in [k_ for k_, t_ in stp_s["hold"].items() if t + 1e-9 >= t_]:
+            stp_s["hold"].pop(key)
+        st = stp_compute2(state, sorted(stp_s["hold"]))
+        for lid, lo in link_objs.items():
+            ends = lo["ends"]
+            if not all(stp_enabled(devs[e_["dev"]]) for e_ in ends):
+                continue
+            up = state["links"][lid].get("up") is not False
+            blk = any((e_["dev"], e_["port"]) in st["blocked"] for e_ in ends)
+            for em in lo["errs"]:
+                _set_err(em, 1.0 if (not up or blk) else lo["loss"])
+        for x, b in sorted(st["bridges"].items()):     # tartib deterministik (set iteratsiyasi hash'ga bog'liq)
+            rtrack.update(t, x, {f"port{p_} {v['role']}/{v['state']}" for p_, v in b["ports"].items()})
+
+    # Link aggregation: ns-3 da bonding yo'q — bond BITTA "vakil" a'zo kabel orqali yuradi,
+    # uning DataRate'i = ishlaydigan a'zolar yig'indisi; qolgan a'zolar yopiq (ErrorModel=1,
+    # aks holda bridge'lar orasida L2 halqa). Oqim bo'yicha hash modellashtirilmaydi; kabel
+    # statistikasi vakil a'zoda (yig'indi). STP tick'idan keyin qo'llanadi.
+    from lab.lag import groups as lag_groups
+    lag_g = lag_groups(state)
+    if lag_g:
+        emit(log="bond (LAG): ns-3 da bitta vakil kabel, tezlik = a'zolar yig'indisi: "
+                 + ", ".join(f"{g['a'][0]}/{g['a'][1]}<->{g['b'][0]}/{g['b'][1]} [{', '.join(g['links'])}]" for g in lag_g))
+
+    def lag_tick(_t):
+        for g in lag_g:
+            up = [lid for lid in g["links"] if state["links"][lid].get("up") is not False and lid in link_objs]
+            total = sum(float((state["links"][lid].get("params") or {}).get("bw", 100)) for lid in up)
+            for lid in g["links"]:
+                lo = link_objs.get(lid)
+                if not lo:
+                    continue
+                if up and lid == up[0]:
+                    r = ns.StringValue(rate_str(total))
+                    for dv in lo["devs"]:
+                        dv.SetAttributeFailSafe("DataRate", r)
+                    for em in lo["errs"]:
+                        _set_err(em, lo["loss"])
+                else:
+                    for em in lo["errs"]:
+                        _set_err(em, 1.0)
 
     events = sorted(sc.get("events") or [], key=lambda e: float(e.get("t", 0)))
     initially_down = [lid for lid, l in project["links"].items() if l.get("up") is False]
@@ -557,7 +822,9 @@ def main(inp_path, out_path):
     # qadamli ijro: har 1s (va har hodisa vaqtida) to'xtab, FlowMonitor o'lchanadi
     step = float(sc.get("sample", 1.0))
     marks = sorted({round(k * step, 6) for k in range(1, int(math.ceil(duration / step)) + 1)}
-                   | {round(float(e["t"]), 6) for e in events if 0 < float(e.get("t", 0)) < duration})
+                   | {round(float(e["t"]), 6) for e in events if 0 < float(e.get("t", 0)) < duration}
+                   | ({round(float(e["t"]) + dd, 6) for e in events for dd in (1.0, 30.0, 50.0)
+                       if 0 < float(e.get("t", 0)) + dd < duration} if stp_on else set()))
     # harakat: pozitsiyalar har 0.5s da yangilanadi (oraliq nuqtalarda namuna olinmaydi)
     from lab.mobility import has_moves, positions_at
     movers = has_moves(sc)
@@ -669,6 +936,54 @@ def main(inp_path, out_path):
     for n in stat_nodes:        # t=0 holat
         rtrack.update(0, n, parse_ns3_routes(str(nl.Routes(nodes[n])), idx_ifn.get(n, {})))
         node_prev[n] = [int(x) for x in nl.Get(nodes[n].GetId())]
+    # VRRP: ns-3 da yo'q — model vaqt jadvali (lab/vrrp.timeline: Master_Down_Interval, preempt)
+    # bo'yicha VIP joriy master interfeysiga qo'shimcha manzil sifatida qo'yiladi/olinadi va
+    # ARP keshlari tozalanadi (gratuitous ARP ekvivalenti).
+    from lab import vrrp as _vrrp
+    vrrp_tl = _vrrp.timeline(project, sc)
+    vrrp_hold = {}       # group_key -> (router, port) VIP hozir qayerda
+    vrrp_ent = {key: {r: e for r, e in mem} for key, mem in _vrrp.groups(project).items()}
+
+    def vrrp_tick(t):
+        if not vrrp_tl:
+            return
+        want = _vrrp.masters_at(vrrp_tl, t)
+        changed = False
+        for key, r in want.items():
+            cur = vrrp_hold.get(key)
+            if (cur[0] if cur else None) == r:
+                continue
+            vip = ipaddress.ip_interface(next(iter(vrrp_ent[key].values()))["vip"])
+            if cur and cur in iface:
+                ipv4, idx, _ii = iface[cur]
+                for ai in range(ipv4.GetNAddresses(idx) - 1, -1, -1):
+                    if str(ipv4.GetAddress(idx, ai).GetLocal()) == str(vip.ip):
+                        ipv4.RemoveAddress(idx, ai)
+            vrrp_hold.pop(key, None)
+            if r:
+                port = parse_ifname(vrrp_ent[key][r]["iface"])[1]
+                if (r, port) in iface:
+                    ipv4, idx, _ii = iface[(r, port)]
+                    ipv4.AddAddress(idx, ns.Ipv4InterfaceAddress(ns.Ipv4Address(str(vip.ip)), ns.Ipv4Mask(str(vip.netmask))))
+                    vrrp_hold[key] = (r, port)
+            changed = True
+            if t > 0:
+                emit(log=f"t={t:.1f}s: VRRP {key} master -> {r or 'yoq'}")
+        if changed:
+            state["_vrrp_master"] = want
+            for nn, dd in devs.items():
+                if dd["type"] not in L3:
+                    continue
+                l3p = nodes[nn].GetObject[ns.Ipv4L3Protocol]()
+                for ii_ in range(l3p.GetNInterfaces()):
+                    c_ = l3p.GetInterface(ii_).GetArpCache()
+                    if c_:
+                        c_.Flush()
+    if vrrp_tl:
+        emit(log="eslatma: VRRP ns-3 da yo'q — master model vaqt jadvali bo'yicha (VIP qo'shimcha manzil sifatida ko'chiriladi)")
+        marks = sorted(set(marks) | {round(tt, 6) for tt, _k, _r in vrrp_tl if 0 < tt < duration})
+        vrrp_tick(0.0)
+
     for mark in marks:
         while ev_i < len(events) and float(events[ev_i].get("t", 0)) <= now + 1e-9:
             e = events[ev_i]; ev_i += 1
@@ -678,6 +993,9 @@ def main(inp_path, out_path):
                          params=e.get("params") if act == "link_params" else None)
             applied.append({"t": now, **e})
             emit(log=f"t={now:.1f}s: {act} {e.get('link') or e.get('device')}")
+        stp_tick(now)
+        vrrp_tick(now)
+        lag_tick(now)
         if movers:
             update_positions(now)
         ns.Simulator.Stop(ns.Seconds(mark - now))
@@ -702,6 +1020,17 @@ def main(inp_path, out_path):
             roam_state[sta] = cur_ap
         mon.CheckForLostPackets()
         for app in apps:
+            if "mc_key" in app:         # multicast qabul qiluvchi: C++ sink hisoblagichlari
+                cur = [float(x) for x in nl.McGet(app["mc_key"], app["mc_gkey"])]
+                p0 = prev.get(app["id"], [0.0] * 5)
+                prev[app["id"]] = cur
+                d_ = [c - q for c, q in zip(cur, p0)]
+                series[app["id"]].append({
+                    "t": round(now, 3), "thr_bps": round(d_[0] * 8 / max(dt, 1e-9)),
+                    "delay_ms": round(d_[2] / d_[1] * 1000, 3) if d_[1] > 0 else None,
+                    "jitter_ms": round(d_[3] / d_[1] * 1000, 3) if d_[1] > 0 else None,
+                    "loss_pct": round(max(d_[4] - d_[1], 0) / d_[4] * 100, 2) if d_[4] > 0 else None})
+                continue
             fwd, rev = flows_for(app)
             cur = (agg(fwd), agg(rev))
             p0 = prev.get(app["id"], ((0, 0, 0, 0.0, 0.0), (0, 0, 0, 0.0, 0.0)))
@@ -730,6 +1059,17 @@ def main(inp_path, out_path):
     # yakuniy xulosa
     flows = {}
     for app in apps:
+        if "mc_key" in app:
+            b_, pk_, ds_, js_, tx_ = [float(x) for x in nl.McGet(app["mc_key"], app["mc_gkey"])]
+            active = max(app["stop"] - app["start"], 1e-9)
+            flows[app["id"]] = {**{k: v for k, v in app.items() if k not in ("mc_key", "mc_gkey")},
+                                "series": series[app["id"]],
+                                "summary": {"tx_pkts": int(tx_), "rx_pkts": int(pk_), "rx_bytes": int(b_),
+                                            "avg_thr_bps": round(b_ * 8 / active),
+                                            "avg_delay_ms": round(ds_ / pk_ * 1000, 3) if pk_ else None,
+                                            "avg_jitter_ms": round(js_ / pk_ * 1000, 3) if pk_ else None,
+                                            "loss_pct": round(max(tx_ - pk_, 0) / tx_ * 100, 2) if tx_ else None}}
+            continue
         fwd, rev = flows_for(app)
         tx, rx, rxb, dl, jt = agg(fwd)
         _rtx, rrx, _rb, rdl, _rj = agg(rev)
@@ -743,6 +1083,14 @@ def main(inp_path, out_path):
             summ["avg_rtt_ms"] = round((dl / rx + rdl / rrx) * 1000, 3)
         flows[app["id"]] = {**{k: v for k, v in app.items() if k != "sink_key"},
                             "series": series[app["id"]], "summary": summ}
+        if app["id"] in fw_block:
+            why_, st_, sp_ = fw_block[app["id"]]
+            flows[app["id"]].update(
+                start=st_, stop=sp_, blocked=why_,
+                series=[{"t": float(t), "thr_bps": 0, "delay_ms": None, "jitter_ms": None, "loss_pct": 100.0}
+                        for t in range(int(st_) + 1, int(sp_) + 1)],
+                summary={"avg_thr_bps": 0, "avg_delay_ms": None, "avg_jitter_ms": None, "loss_pct": 100.0,
+                         "blocked": why_})
         if "sink_key" in app:
             dt_ = float(nl.DoneAt(app["sink_key"]))
             flows[app["id"]]["done_t"] = round(dt_, 4) if dt_ >= 0 else None
@@ -753,9 +1101,13 @@ def main(inp_path, out_path):
            "convergence": convergence(applied, rtrack.events, duration),
            "wall_s": round(time.time() - t_wall, 2),
            "notes": ["dinamik routing: ripd → ns-3 RIPv2 (haqiqiy konvergensiya); qolganlari — analitik bilan bir xil SPF modeli statik marshrut sifatida (hodisada darhol qayta hisoblanadi)",
-                     "TCP: Cubic, MSS 1448, bufer 4/6 MB (Linux'ga yaqin)",
+                     f"TCP: Cubic, MSS {mtu - 52}, bufer 4/6 MB (Linux'ga yaqin)",
                      "Wi-Fi: YansWifi + LogDistance(n=3), IdealWifiManager; joylashuv = kanvas * meters_per_px",
                      "jitter parametri modellashtirilmaydi", "P4/SDN mantiqi: switch L2 bridge, SDN router — L3 router sifatida"]}
+    if fast:
+        out["ns3_fast"] = True
+        out["notes"].append("ns3_fast: jumbo MTU 9000 (TCP paketlari ~6x kam) — taxminiy rejim; "
+                            "paket darajasidagi kechikish/jitter aniq rejimdan farq qilishi mumkin")
     with open(out_path, "w") as f:
         json.dump(out, f)
     emit(progress=1.0, log=f"tugadi ({out['wall_s']}s)")

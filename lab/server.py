@@ -16,7 +16,7 @@ import re
 import secrets
 
 from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from lab.drivers.base import DriverError, EventBus, p4_compile_standalone, p4_pipeline_from_json
@@ -283,6 +283,58 @@ def create_app(driver_name="demo", token=None):
                                 body.get("param") or {}, body.get("values") or [],
                                 body.get("param2") or None, body.get("values2") or None)
 
+    @app.post("/api/topogen")
+    def topogen(body: dict = Body(...)):
+        """Topologiya generatori (ring | star | tree | campus) -> loyiha JSON (saqlanmaydi)."""
+        from lab.topogen import KINDS, generate
+        kind = body.get("kind")
+        allowed = {"routers", "branches", "depth", "core", "dist", "access", "hosts", "flows", "name"}
+        kw = {k: v for k, v in body.items() if k in allowed and v not in (None, "")}
+        if kind not in KINDS:
+            raise ValueError(f"kind: {' | '.join(KINDS)}")
+        p = generate(kind, **kw)
+        errs = validate_project(p)
+        if errs:
+            raise ValueError("; ".join(errs[:5]))
+        return p
+
+    @app.post("/api/analysis/survivability")
+    def survivability(body: dict = Body(...)):
+        """Nosozliklar ta'siri (N-1; order=2 — N-2 juftliklar; srlg — umumiy xavf guruhlari) + sig'im
+        rejasi — analitik model, sinxron (N-1 bir necha soniya, N-2 o'nlab soniyagacha)."""
+        from lab.survivability import analyze
+        project = body.get("project") or {}
+        errs = validate_project(project)
+        if errs:
+            raise ValueError("; ".join(errs[:5]))
+        sc = body.get("scenario")
+        sc_obj = (project.get("scenarios") or {}).get(sc) if isinstance(sc, str) else sc
+        if not sc_obj:
+            raise ValueError(f"ssenariy '{sc}' yo'q")
+        errs = validate_scenario(project, sc_obj)
+        if errs:
+            raise ValueError("; ".join(errs[:5]))
+        targets = body.get("targets", "both")
+        if targets not in ("links", "devices", "both"):
+            raise ValueError("targets: links | devices | both")
+        try:
+            order = int(body.get("order") or 1)
+            max_cases = int(body.get("max_cases") or 2000)
+        except (TypeError, ValueError):
+            raise ValueError("order / max_cases butun son bo'lsin")
+        if order not in (1, 2) or not 1 <= max_cases <= 20000:
+            raise ValueError("order: 1 | 2; max_cases 1..20000")
+        rep = analyze(project, sc_obj, targets, include_hosts=bool(body.get("include_hosts")),
+                      order=order, srlg=body.get("srlg"), max_cases=max_cases,
+                      exclude_access=bool(body.get("exclude_access")))
+        rep["scenario"] = sc if isinstance(sc, str) else rep.get("scenario")
+        return rep
+
+    @app.post("/api/analysis/survivability/report")
+    def survivability_report_html(body: dict = Body(...)):
+        from lab.report import survivability_report
+        return _html(survivability_report(survivability(body)), "survivability.html")
+
     @app.get("/api/runs/{project}")
     def run_list(project: str):
         return {"runs": runs.list(project)}
@@ -302,6 +354,45 @@ def create_app(driver_name="demo", token=None):
     def run_delete(project: str, run_id: str):
         runs.delete(project, run_id)
         return {"ok": True}
+
+    # ───────────── hisobotlar (lab/report.py): mustaqil HTML + CSV zip ─────────────
+    def _run_or_404(project, run_id):
+        try:
+            return runs.get(project, run_id)
+        except FileNotFoundError:
+            raise HTTPException(404, "natija topilmadi")
+
+    def _html(doc, fname):
+        return HTMLResponse(doc, headers={"Content-Disposition": f'inline; filename="{fname}"'})
+
+    @app.get("/api/runs/{project}/{run_id}/report.html")
+    def run_report_html(project: str, run_id: str):
+        from lab.report import run_report
+        return _html(run_report(_run_or_404(project, run_id)), f"{run_id}.html")
+
+    @app.get("/api/runs/{project}/{run_id}/export.zip")
+    def run_export_zip(project: str, run_id: str):
+        from lab.report import csv_bundle
+        data = csv_bundle(_run_or_404(project, run_id))
+        return Response(data, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{run_id}.zip"'})
+
+    @app.post("/api/reports/compare")
+    def report_compare(body: dict = Body(...)):
+        from lab.report import compare_report
+        project, ids = body.get("project"), body.get("run_ids") or []
+        if not isinstance(ids, list) or not (1 <= len(ids) <= 20):
+            raise ValueError("run_ids: 1..20 ta natija")
+        return _html(compare_report([_run_or_404(project, rid) for rid in ids]), "solishtirish.html")
+
+    @app.get("/api/studies/{project}/{study_id}/report.html")
+    def study_report_html(project: str, study_id: str):
+        from lab.report import study_report
+        rs = [runs.get(project, r["run_id"]) for r in runs.list(project)
+              if r.get("study_id") == study_id and r.get("status") not in ("running", None)]
+        if not rs:
+            raise HTTPException(404, "tadqiqot natijalari topilmadi")
+        return _html(study_report(rs), f"{study_id}.html")
 
     # ───────────── WebSocket: hodisalar ─────────────
     @app.websocket("/ws/events")

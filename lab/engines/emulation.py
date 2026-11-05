@@ -13,6 +13,10 @@ import re
 import subprocess
 import threading
 import time
+import os
+import sys
+
+MCAST_TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcast_tool.py")
 
 from lab.model import ifname
 
@@ -108,6 +112,12 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
         t = threading.Thread(target=go, daemon=True); t.start(); threads.append(t)
 
     apps = []
+    port_users, shared_ports, port_count = {}, {}, {}
+    mc_groups = {}          # multicast ilova id -> UDP port
+    for a in sc.get("apps") or []:
+        if a.get("dport") not in (None, "") and a.get("type") == "tcp":
+            k_ = (a["dst"], int(a["dport"]))
+            port_count[k_] = port_count.get(k_, 0) + 1
     for i, a in enumerate(sc.get("apps") or []):
         aid = a.get("id") or f"a{i + 1}"
         dip = a.get("dst_ip") or ip_of(a["dst"])
@@ -122,7 +132,38 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
             log(f"{aid}: {a['dst']} da IP yo'q — o'tkazib yuborildi")
             continue
         port = 5201 + i
+        if a.get("dport") not in (None, "") and a["type"] != "ping":
+            key = (a["dst"], int(a["dport"]))
+            if a["type"] == "udp" and key in port_users:
+                log(f"{aid}: {a['dst']}:{a['dport']} band (UDP) — {port} port ishlatiladi")
+            else:
+                port = int(a["dport"])         # firewall qoidalari haqiqiy port bo'yicha ishlashi uchun
+                port_users.setdefault(key, []).append(aid)
         dur = max(int(round(stop - start)), 1)
+        if a.get("mcast"):
+            # multicast: guruh uchun BITTA yuboruvchi; qabul qiluvchi guruhga qo'shiladi (IGMP -> pimd)
+            g = a["mcast"]
+            if g not in mc_groups:
+                mc_groups[g] = 5600 + len(mc_groups)
+                from lab.model import parse_rate
+                send_argv = [sys.executable, MCAST_TOOL, "send", a["mgroup"], str(mc_groups[g]),
+                             str(parse_rate(a.get("rate", "1Mbps"))), str(int(a.get("size", 1000))), str(dur), "16"]
+                at(start, lambda d_=a["src"], argv=send_argv: reader(spawn(d_, argv), lambda _l: None))
+
+            def mc_parser(line, rec=rec):
+                v = line.split()
+                if len(v) == 7 and v[0] == "STAT":
+                    sec = int(float(v[1]) - T0) + 1
+                    b_, n_, lost_ = int(v[2]), int(v[3]), int(v[4])
+                    rec["thr"][sec] = b_ * 8
+                    rec["loss"][sec] = lost_ / (n_ + lost_) * 100 if n_ + lost_ else None
+                    if float(v[5]) >= 0:
+                        rec["rtt"].setdefault(sec, []).append(2 * float(v[5]))    # seriyada RTT/2 = bir tomonlama
+                    if float(v[6]) >= 0:
+                        rec["jit"][sec] = float(v[6])
+            recv_argv = [sys.executable, MCAST_TOOL, "recv", a["mgroup"], str(mc_groups[g]), str(dur + 2.5)]
+            at(max(start - 1.5, 0), lambda d_=a["dst"], argv=recv_argv, f=mc_parser: reader(spawn(d_, argv), f))
+            continue
 
         def ping_parser(rec=rec):
             def f(line):
@@ -141,7 +182,16 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
         if a["type"] == "ping":
             rec["expected_per_s"] = 1.0 / max(interval, 0.2)
             continue
-        srv = spawn(a["dst"], ["iperf3", "-s", "-1", "-p", str(port), "-i", "1", "--forceflush"])
+        shared = shared_ports.get((a["dst"], port))
+        if shared is None:
+            # bir (dst, port) da bir nechta TCP ilova (masalan HTTP sahifalari, port 80) — bitta doimiy server
+            multi = a["type"] == "tcp" and port_count.get((a["dst"], port), 0) > 1
+            srv = spawn(a["dst"], ["iperf3", "-s"] + ([] if multi else ["-1"]) + ["-p", str(port), "-i", "1", "--forceflush"])
+            shared_ports[(a["dst"], port)] = srv
+            if a["type"] == "tcp":
+                reader(srv, lambda _l: None)     # server chiqishi ham o'qilsin (pipe to'lmasin)
+        else:
+            srv = shared
         nbytes = int(a.get("bytes") or 0) if a["type"] == "tcp" else 0
         cli = ["iperf3", "-c", dip, "-p", str(port), "-i", "1", "--forceflush"] + (["-S", str(tos)] if tos else []) + (
             ["-n", str(nbytes)] if nbytes else ["-t", str(dur)])

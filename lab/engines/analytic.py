@@ -15,6 +15,7 @@ va "nima bo'ladi?" tahlili uchun. Aniq natija: ns-3 yoki Mininet dvigateli.
 """
 
 import copy
+import json
 import ipaddress
 import math
 import time
@@ -25,7 +26,11 @@ from lab.mobility import apply_positions, has_moves, positions_at
 from lab.wifi import ap_config, channels_overlap, ess_key, max_range_m, meters_per_px
 from lab.wifi import estimate as wifi_estimate
 from lab.wifi import link_estimate as wifi_link_estimate
+from lab.mcast import branch as mc_branch, flood_keys as mc_flood_keys
 from lab.engines.nodestats import L3_NS, RouteTracker, convergence, route_key
+from lab.firewall import _why as fw_why
+from lab.firewall import check_path as fw_check_path
+from lab.firewall import check_roundtrip as fw_roundtrip
 
 MSS_BITS = 1448 * 8
 
@@ -56,7 +61,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     for i, a in enumerate(sc.get("apps") or []):
         apps.append({**a, "id": a.get("id") or f"a{i + 1}",
                      "label": a.get("label") or f"{a.get('type')} {a.get('src')}→{a.get('dst')}",
-                     "start": float(a.get("start", 1)), "stop": min(float(a.get("stop", duration)), duration)})
+                     "start": float(a.get("start", 1)), "stop": min(float(a.get("stop", duration)), duration),
+                     # firewall uchun port: dport yoki Mininet dvigateli bilan bir xil iperf3 porti
+                     "_dport": int(a["dport"]) if a.get("dport") not in (None, "") else 5201 + i})
     events = sorted(sc.get("events") or [], key=lambda e: float(e.get("t", 0)))
     series = {a["id"]: [] for a in apps}
     link_series = {lid: [] for lid in proj["links"]}
@@ -83,11 +90,36 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     # cheklangan TCP uzatishlar (FTP fayl / HTTP sahifa): qolgan bayt, tugash vaqti, ulanish+slow start
     remaining = {a["id"]: int(a["bytes"]) for a in apps if a.get("type") == "tcp" and a.get("bytes")}
     done_at, setup_left = {}, {}
+    last_path = {}      # ilova -> oxirgi qadamdagi (yo'l, sabab) — survivability tahlili uchun
     node_series = {dv: [] for dv, d in proj["devices"].items() if d["type"] in L3_NS}
     rtrack = RouteTracker()
+    from lab.stp import compute as stp_compute, convergence_time as stp_conv_time, stp_enabled
+    stp_on = any(stp_enabled(d) for d in proj["devices"].values())
+    stp_up, stp_fwd, stp_hold = {}, None, {}
+    # VRRP: master o'zgarishlari vaqt modeli (Master_Down_Interval, preempt) — lab/vrrp.py
+    from lab import vrrp as _vrrp
+    vrrp_tl = _vrrp.timeline(proj, sc)
+    if vrrp_tl:
+        prev_m = {}
+        for tt, key, r in vrrp_tl:
+            old_m = prev_m.get(key)
+            prev_m[key] = r
+            if tt <= 0 or old_m == r:
+                continue
+            if old_m:
+                rtrack.events.append({"t": tt, "dev": old_m, "added": [], "removed": [f"VRRP {key} master"]})
+            if r:
+                rtrack.events.append({"t": tt, "dev": r, "added": [f"VRRP {key} master"], "removed": []})
+            log(f"VRRP {key}: t={tt:.1f}s master -> {r or 'yo`q (Master_Down_Interval kutilmoqda)'}")
+    from lab.lag import failover_s as lag_failover_s, groups as lag_groups
+    lag_links = {lid for g in lag_groups(proj) for lid in g["links"]}
+    lag_failover, lag_hold = lag_failover_s(sc), {}
     steps = int(math.ceil(duration))
+    net_cache = [None]
     for k in range(steps):
         t0, t1 = float(k), float(min(k + 1, duration))
+        if vrrp_tl:
+            proj["_vrrp_master"] = _vrrp.masters_at(vrrp_tl, t0 + 0.5)    # qadam o'rtasidagi holat
         while ev_i < len(events) and float(events[ev_i].get("t", 0)) <= t0 + 1e-9:
             e = events[ev_i]; ev_i += 1
             l = proj["links"].get(e.get("link"))
@@ -97,6 +129,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             if l and e["action"] == "link_up" and bgp_set and bgp_conv > 0 and l.get("up") is False:
                 bgp_stale = (copy.deepcopy(proj), t0 + bgp_conv)
                 log(f"BGP: {bgp_conv:.0f}s sessiya qayta o'rnatilmoqda")
+            if l and e["action"] == "link_down" and l.get("up") is not False and lag_links and e["link"] in lag_links:
+                lag_hold[e["link"]] = t0 + lag_failover      # bond a'zosi: failover tugaguncha hash eski
             if l:
                 if e["action"] == "link_down":
                     l["up"] = False
@@ -154,13 +188,56 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         if bgp_stale and t0 < bgp_stale[1]:
             bgp_stale[0]["devices"] = proj["devices"]
             bgp_ov = ((bgp_stale[0], bgp_set),)
-        if stale and t0 < stale[1]:
+        if lag_links:
+            # bond failover: uzilgan a'zo qadamning ko'p qismida hali "tanlangan" bo'lsa — shu
+            # a'zoga hash qilingan oqimlar yo'qoladi; keyin qolgan a'zolarga qayta taqsimlanadi
+            hold_now = sorted(lid for lid, u in lag_hold.items() if t0 + 0.5 < u)
+            if hold_now:
+                proj["_lag_hold"] = hold_now
+            else:
+                proj.pop("_lag_hold", None)
+        if stp_on:
+            # STP konvergensiyasi: blocking/disabled -> forwarding o'tayotgan portlar `hold` da
+            # (802.1D: 2*forward_delay [+max_age], RSTP ~1 s); forwarding -> blocking — darhol.
+            up_now = {lid: l.get("up") is not False for lid, l in proj["links"].items()}
+            failed = [lid for lid, u in up_now.items() if stp_up.get(lid, True) and not u]
+            changed = up_now != stp_up
+            stp_up = up_now
+            proj.pop("_stp_hold", None)
+            if changed or stp_fwd is None:
+                st_new = stp_compute(proj)
+                fwd_new = {(x, p_) for x, b in st_new["bridges"].items() for p_, v in b["ports"].items()
+                           if v["state"] == "forwarding"}
+                if stp_fwd is not None:
+                    for x, p_ in sorted(fwd_new - stp_fwd):
+                        stp_hold[(x, p_)] = t0 + stp_conv_time(proj, x, failed, sc)
+                        log(f"STP: {x} port {p_} -> forwarding {stp_hold[(x, p_)] - t0:.0f} s dan keyin")
+                    for key in list(stp_hold):
+                        if key not in fwd_new:
+                            stp_hold.pop(key)
+                stp_fwd = fwd_new
+            for key in [k_ for k_, t_ in stp_hold.items() if t0 + 1e-9 >= t_]:
+                stp_hold.pop(key)
+            if stp_hold:
+                proj["_stp_hold"] = sorted(stp_hold)
+        # Net (marshrut/L2 keshlari bilan) holat o'zgarmagan qadamlarda qayta ishlatiladi:
+        # imzo = kabellar + qurilmalar (pozitsiya/sozlama) + ichki holatlar (_stp_hold, _lag_hold,
+        # _vrrp_master) + faol eski-marshrut oynalari (RIP/BGP).
+        st_on = bool(stale and t0 < stale[1])
+        sig = (json.dumps(proj["links"], sort_keys=True, default=str),
+               json.dumps(proj["devices"], sort_keys=True, default=str),
+               json.dumps({k_: v_ for k_, v_ in proj.items() if k_.startswith("_")}, sort_keys=True, default=str),
+               id(stale[0]) if st_on else None, tuple(id(o) for o, _s in bgp_ov))
+        if net_cache[0] is not None and net_cache[0][0] == sig:
+            n = net_cache[0][1]
+        elif st_on:
             stale[0]["devices"] = proj["devices"]   # eski routing jadvali, lekin joriy pozitsiyalar
             n = _StaleNet(proj, stale[0], rip_set, bgp_ov)
         elif bgp_ov:
             n = _StaleNet(proj, None, set(), bgp_ov)
         else:
             n = Net(proj)
+        net_cache[0] = (sig, n)
         cap = {}
         wifi_of = {}    # lid -> (ap, stansiya foydali sig'imi bit/s)
         for lid, l in proj["links"].items():
@@ -217,6 +294,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     # TCP: qaytuvchi ACK'lar ham efir oladi (~9%)
                     out.append((("air", wifi_of[lid][0]), (1.09 if tcp else 1.0) / wifi_of[lid][1]))
             return out
+        has_fw = any((d.get("config") or {}).get("firewall") for d in proj["devices"].values())
         flows = []   # har aktiv ilova uchun holat
         for a in apps:
             st = {"app": a, "ok": False, "path": [], "back": [], "rate": 0.0}
@@ -224,15 +302,33 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 dip = a.get("dst_ip") or (str(n.ip_of(a["dst"]).ip) if n.ip_of(a["dst"]) else None)
                 sip = n.ip_of(a["src"])
                 if dip and sip:
+                    n.flow_key = (a["src"], a["dst"], a["id"])     # bond (LAG) a'zosi hash'i
                     ok, why, _h, path, _d = n.forward(a["src"], ipaddress.ip_address(dip))
                     ok2, _w2, _h2, back, _d2 = (n.reply(a["src"], sip.ip, a["dst"], ipaddress.ip_address(dip), _h)
                                                 if ok else (False, "", [], [], 0))
                     st.update(ok=ok and ok2, why=why, path=path, back=back)
+                    if a.get("mcast") and ok:      # multicast: shoxchada PIM bo'lishi shart
+                        okb, whyb, txp = mc_branch(n, a["src"], ipaddress.ip_address(dip), _h)
+                        st["tx"] = txp
+                        if not okb:
+                            st.update(ok=False, why=whyb)
+                    if ok and ok2 and has_fw:
+                        pkt = {"proto": "icmp" if a["type"] == "ping" else a["type"], "src": str(sip.ip),
+                               "dst": dip, "dport": None if a["type"] == "ping" else a["_dport"], "sport": 40000}
+                        if a["type"] == "udp":      # bir tomonlama
+                            okf, v_, w_, c_, r_ = fw_check_path(n, a["src"], dip, _h, pkt)
+                            whyf = None if okf else fw_why(v_, w_, c_, r_, pkt)
+                        else:                      # tcp/ping: so'rov + javob (stateful)
+                            okf, whyf, _v = fw_roundtrip(n, a["src"], sip.ip, a["dst"], dip, _h, pkt)
+                        if not okf:
+                            st.update(ok=False, why=whyf)
                 st["active"] = True
+                last_path[a["id"]] = ([[lid, d_] for lid, d_ in st["path"]], None if st["ok"] else st.get("why"))
             flows.append(st)
 
         # 1) UDP/ping — inelastik
         load = {k2: 0.0 for k2 in cap}
+        mc_seen, mc_off = set(), {}
         for f in flows:
             a = f["app"]
             if not f.get("active") or not f["ok"] or a["type"] == "tcp":
@@ -243,7 +339,20 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 f["offered"] = parse_rate(a.get("rate", "1Mbps"))
             f["res"] = resources(f["path"])
             for key, w in f["res"]:
+                if a.get("mcast"):                 # multicast: har kabelda BITTA nusxa
+                    if (a["mcast"], key) in mc_seen:
+                        continue
+                    mc_seen.add((a["mcast"], key))
+                    mc_off[a["mcast"]] = f["offered"]
                 load[key] += f["offered"] * w
+        # snooping'siz L2 segmentlarda daraxtdan tashqari flood (qabul qiluvchisiz shoxlar ham yuklanadi)
+        mc_flood = {}
+        for g in mc_off:
+            txs = [x for f in flows if f["app"].get("mcast") == g and f.get("ok") for x in f.get("tx") or []]
+            tree = {key for (g2, key) in mc_seen if g2 == g}
+            mc_flood[g] = [k_ for k_ in mc_flood_keys(n, txs, tree) if k_ in cap]
+            for key in mc_flood[g]:
+                load[key] += mc_off[g]
         # QoS: `prio` kabelida yuqori sinf (DSCP >= 40) birinchi xizmat qilinadi — oddiy sinf
         # faqat qolgan sig'imni oladi; fifo/fq_codel — umumiy (proporsional) kesish.
         def qdisc_of(key):
@@ -263,6 +372,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 scale_cls[k2] = (s_hi, min(1.0, left / lo) if lo > 0 else 1.0)
         used = {k2: 0.0 for k2 in cap}
         used_hi = {k2: 0.0 for k2 in cap}
+        mc_used = {}
         for f in flows:
             if "offered" in f:
                 cls = dscp_class(f["app"].get("dscp"))
@@ -270,9 +380,18 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 f["rate"] = f["offered"] * s_min
                 f["overload_drop"] = 1 - s_min
                 for key, w in f["res"]:
+                    if f["app"].get("mcast"):      # bitta nusxa: shu kabeldagi eng katta tezlik
+                        mk = (f["app"]["mcast"], key)
+                        mc_used[mk] = max(mc_used.get(mk, 0.0), f["rate"] * w)
+                        continue
                     used[key] += f["rate"] * w
                     if cls == 0:
                         used_hi[key] += f["rate"] * w
+        for (g, key), r_ in mc_used.items():
+            used[key] += r_
+        for g, keys in mc_flood.items():
+            for key in keys:
+                used[key] += mc_off[g] * min(1.0, scale[key])
         # 2) TCP — max-min adolat (progressive filling) qolgan sig'imda
         tcp = [f for f in flows if f.get("active") and f["ok"] and f["app"]["type"] == "tcp"]
         for f in tcp:
@@ -437,8 +556,14 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     cnt[dst_]["rx"] += pps
                     if i_ < len(hops) - 1:
                         cnt[dst_]["fwd"] += pps
+        if stp_on:      # STP port holatlari -> route_events (konvergensiya vaqti uchun)
+            for x, b in n.stp()["bridges"].items():
+                rtrack.update(t0, x, {f"port{p_} {v['role']}/{v['state']}" for p_, v in b["ports"].items()})
         for dv in node_series:
-            rts = {route_key(r[0], r[1], r[2]) for r in n.routes(dv)}
+            rk = n.__dict__.setdefault("_rk_cache", {})
+            if dv not in rk:
+                rk[dv] = {route_key(r[0], r[1], r[2]) for r in n.routes(dv)}
+            rts = rk[dv]
             rtrack.update(t0, dv, rts)
             disc = sum(link_series[lid][-1][f"drops_{d}"] for lid, l in proj["links"].items()
                        for side, d in (("a", "ab"), ("b", "ba")) if l[side]["dev"] == dv)
@@ -463,6 +588,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             flows_out[a["id"]].update(bytes=int(a["bytes"]), done_t=round(done_at[a["id"]], 3) if a["id"] in done_at else None)
         if a.get("group"):
             flows_out[a["id"]].update(group=a["group"], role=a.get("role"))
+        if a["id"] in last_path:
+            flows_out[a["id"]].update(path=last_path[a["id"]][0], why=last_path[a["id"]][1])
     return {"engine": "analytic", "engine_label": "Analitik (oqim modeli)", "duration": duration,
             "flows": flows_out, "links": link_series, "events": applied,
             "nodes": node_series, "route_events": rtrack.events,

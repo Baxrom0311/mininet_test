@@ -198,12 +198,25 @@ class RunManager:
                 if field == "rip_update" and int(tm.get("timeout", 180)) <= int(v):
                     tm["timeout"] = int(v) * 6
                 cfg["rip_timers"] = tm
+        elif kind == "failure":
+            f = sc2.get("failures")
+            if not f or field not in ("mtbf_s", "mttr_s", "seed"):
+                raise ValueError("ssenariyda failures yo'q yoki maydon noto'g'ri (mtbf_s | mttr_s | seed)")
+            if field == "seed":
+                f["seed"] = int(v)
+            else:
+                grp = param.get("group") or ("links" if f.get("links") else "devices")
+                if not f.get(grp):
+                    raise ValueError(f"failures.{grp} yo'q")
+                f[grp][field] = float(v)
         else:
-            raise ValueError("param.kind: link | app | ap | router")
+            raise ValueError("param.kind: link | app | ap | router | failure")
 
     @staticmethod
     def _param_label(param):
         who = param.get("link") or param.get("app") or param.get("ap") or param.get("router")
+        if param.get("kind") == "failure":
+            who = "failures" if param.get("field") == "seed" else f"failures.{param.get('group') or 'links'}"
         if param.get("kind") == "router" and param.get("all"):
             who = "routerlar"
         return f"{who}.{param.get('field')}"
@@ -248,31 +261,57 @@ class RunManager:
         pdesc = {**param, "label": self._param_label(param)}
         pdesc2 = {**param2, "label": self._param_label(param2)} if two_d else None
 
+        def one(k, i, j, v, v2, p2, sc2, n):
+            rid = f"{study_id}-v{k + 1:02d}"
+            label = f"{pdesc['label']}={v}" + (f", {pdesc2['label']}={v2}" if two_d else "")
+            with self._lock:
+                self.active[rid] = {"project": pname, "scenario_name": scenario_name, "engine": engine,
+                                    "progress": 0.0, "created": time.time(), "study_id": study_id, "label": label}
+            self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "index": k, "total": n,
+                              "value": label, "run_id": rid})
+            extra = {"study_id": study_id, "study_param": pdesc, "study_value": v, "study_index": i, "label": label}
+            if two_d:
+                extra.update(study_param2=pdesc2, study_value2=v2, study_index2=j)
+            self._worker(rid, pname, p2, scenario_name, sc2, engine, extra=extra)
+
         def go():
             n = len(variants)
-            for k, (i, j, v, v2, p2, sc2) in enumerate(variants):
-                rid = f"{study_id}-v{k + 1:02d}"
-                label = f"{pdesc['label']}={v}" + (f", {pdesc2['label']}={v2}" if two_d else "")
-                with self._lock:
-                    self.active[rid] = {"project": pname, "scenario_name": scenario_name, "engine": engine,
-                                        "progress": 0.0, "created": time.time(), "study_id": study_id, "label": label}
-                self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "index": k, "total": n,
-                                  "value": label, "run_id": rid})
-                extra = {"study_id": study_id, "study_param": pdesc, "study_value": v, "study_index": i, "label": label}
-                if two_d:
-                    extra.update(study_param2=pdesc2, study_value2=v2, study_index2=j)
-                self._worker(rid, pname, p2, scenario_name, sc2, engine, extra=extra)
+            par = self.study_parallelism(engine)
+            if par <= 1:
+                for k, var in enumerate(variants):
+                    one(k, *var, n)
+            else:
+                # ns-3: har ishga tushirish alohida jarayon — variantlar bir vaqtda (CPU yadrolari bo'yicha)
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(max_workers=par) as ex:
+                    for f in [ex.submit(one, k, *var, n) for k, var in enumerate(variants)]:
+                        f.result()
             self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "done": True, "total": n})
 
         threading.Thread(target=go, daemon=True).start()
         return {"study_id": study_id, "runs": len(variants)}
+
+    @staticmethod
+    def study_parallelism(engine):
+        """Tadqiqotda bir vaqtda nechta ishga tushirish: faqat ns-3 (alohida jarayon; analitik —
+        GIL tufayli foydasiz, Mininet — bitta jonli tarmoq). NETLAB_NS3_PARALLEL bilan; standart —
+        yadrolar soni / 2 (1..4)."""
+        if engine != "ns3":
+            return 1
+        env = os.environ.get("NETLAB_NS3_PARALLEL", "").strip()
+        if env.isdigit():
+            return max(1, int(env))
+        return max(1, min(4, (os.cpu_count() or 2) // 2))
 
     def _worker(self, run_id, pname, project, sc_name, sc, engine, extra=None):
         prog = lambda f: self._pub(run_id, progress=round(f, 3))  # noqa: E731
         log = lambda m: self._pub(run_id, log=m)                  # noqa: E731
         t0 = time.time()
         from lab import apps as appmodels
-        sc_user, sc = sc, appmodels.expand(sc)      # voip/http/ftp -> udp/tcp
+        from lab import failures as failmodel
+        sc_user = sc
+        sc_fail = failmodel.expand(project, sc)     # MTBF/MTTR -> link_down/link_up hodisalari
+        sc = appmodels.expand(sc_fail)              # voip/http/ftp -> udp/tcp
         try:
             if engine == "analytic":
                 from lab.engines import analytic
@@ -284,6 +323,7 @@ class RunManager:
                 res = emulation.run(self.driver, sc, prog, log)
             res.update(status="done")
             res = appmodels.postprocess(res, sc_user)     # MOS, sahifa/fayl vaqti
+            res = failmodel.postprocess(res, sc_user, sc_fail, project)   # mavjudlik (availability)
         except Exception as e:  # noqa: BLE001
             res = {"engine": engine, "status": "error", "error": f"{type(e).__name__}: {e}", "flows": {}}
             log(f"XATO: {e}")
