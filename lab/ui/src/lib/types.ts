@@ -51,7 +51,8 @@ export interface RunResult {
 export type RunListItem = Pick<RunResult, 'run_id' | 'scenario_name' | 'engine' | 'created' | 'wall_s' | 'status' | 'label' | 'study_id' | 'study_param' | 'study_value' | 'study_index' | 'study_param2' | 'study_value2' | 'study_index2'> & { progress?: number }
 /** POST /api/analysis/survivability — yakka nosozliklar ta'siri (N-1) va sig'im rejasi */
 export interface SurvivabilityCase {
-  kind: 'link' | 'device'; target: string; down_links: string[]; score: number
+  kind: 'link' | 'device' | 'srlg' | 'pair'; target: string; down_links: string[]; score: number
+  members?: { kind: 'link' | 'device'; target: string }[]
   broken: { flow: string; label?: string; why?: string | null }[]; broken_demand_pct: number
   rerouted: string[]; degraded: { flow: string; label?: string; thr_change_pct: number; thr_bps: number; base_thr_bps: number }[]
   udp_loss: { flow: string; loss_pct: number }[]; overloaded: { link: string; util: number }[]
@@ -65,6 +66,14 @@ export interface SurvivabilityReport {
   scenario: string; targets: 'links' | 'devices' | 'both'; wall_s: number; notes: string[]
   baseline: { flows: Record<string, { label?: string; type: string; thr_bps: number; loss_pct: number | null; alive: boolean; why?: string | null }>
               down_flows: string[]; links: Record<string, number>; mos: Record<string, number | null> }
-  cases: SurvivabilityCase[]; spof: { kind: 'link' | 'device'; target: string; broken: string[] }[]
+  cases: SurvivabilityCase[]; spof: { kind: 'link' | 'device' | 'srlg'; target: string; broken: string[] }[]
   capacity_plan: CapacityPlanRow[]; upgrades: CapacityPlanRow[]
+  /** order=2: juft nosozliklar */
+  n2?: { pairs_total: number; pairs_candidates: number; pairs_evaluated: number; pruned: number; truncated: boolean
+         max_cases: number; cases: SurvivabilityCase[]; cases_omitted: number
+         vulnerabilities: { pair: string[]; target: string; broken: string[]; broken_demand_pct: number }[]
+         capacity_plan: CapacityPlanRow[]; upgrades: CapacityPlanRow[] }
+  /** oqim -> minimal kesim: 1 (SPOF), 2, '>=2' | '>=3', null (asosiy holatda ishlamaydi) */
+  min_cut?: Record<string, number | string | null>
+  srlg?: Record<string, string[]>; srlg_broken?: Record<string, string[]>; exclude_access?: boolean
 }

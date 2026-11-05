@@ -300,7 +300,8 @@ def create_app(driver_name="demo", token=None):
 
     @app.post("/api/analysis/survivability")
     def survivability(body: dict = Body(...)):
-        """Yakka nosozliklar ta'siri (N-1) + sig'im rejasi — analitik model, sinxron (bir necha soniya)."""
+        """Nosozliklar ta'siri (N-1; order=2 — N-2 juftliklar; srlg — umumiy xavf guruhlari) + sig'im
+        rejasi — analitik model, sinxron (N-1 bir necha soniya, N-2 o'nlab soniyagacha)."""
         from lab.survivability import analyze
         project = body.get("project") or {}
         errs = validate_project(project)
@@ -316,7 +317,16 @@ def create_app(driver_name="demo", token=None):
         targets = body.get("targets", "both")
         if targets not in ("links", "devices", "both"):
             raise ValueError("targets: links | devices | both")
-        rep = analyze(project, sc_obj, targets, include_hosts=bool(body.get("include_hosts")))
+        try:
+            order = int(body.get("order") or 1)
+            max_cases = int(body.get("max_cases") or 2000)
+        except (TypeError, ValueError):
+            raise ValueError("order / max_cases butun son bo'lsin")
+        if order not in (1, 2) or not 1 <= max_cases <= 20000:
+            raise ValueError("order: 1 | 2; max_cases 1..20000")
+        rep = analyze(project, sc_obj, targets, include_hosts=bool(body.get("include_hosts")),
+                      order=order, srlg=body.get("srlg"), max_cases=max_cases,
+                      exclude_access=bool(body.get("exclude_access")))
         rep["scenario"] = sc if isinstance(sc, str) else rep.get("scenario")
         return rep
 
