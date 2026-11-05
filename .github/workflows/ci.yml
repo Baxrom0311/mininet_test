@@ -131,6 +131,7 @@ jobs:
           python -m lab.tests.smoke_failures
           python -m lab.tests.smoke_perf
           python -m lab.tests.smoke_report
+          python -m lab.tests.smoke_survivability_n2
 
   docker-build:
     runs-on: ubuntu-latest
