@@ -25,6 +25,8 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
    Birgalikdagi 27 test va queued API orqali haqiqiy ns-3 STP suite ham o‘tdi.
 7. `feat/p4-bmv2` — mavjud P4 real testini qat’iy prerequisite/skip holati bilan
    tayyorlash. O‘rnatish va real validation root/BMv2/p4c yo‘qligiga bog‘liq.
+   Strict compile/runtime gate qo‘shildi. Hozirgi instance’da ikkala tekshiruv
+   ham blocked; tizim apt repozitoriyalari o‘zgartirilmadi.
 8. `ci/real-mininet` — alohida qo‘lda/tungi real job; CI ishlagan deb faqat GitHub
    natijasi mavjud bo‘lsa aytish.
 9. `docs/architecture` — dvigatellar, kesh, expand/postprocess, API va flock qoidalari.
