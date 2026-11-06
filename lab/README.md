@@ -77,6 +77,10 @@ Daemonlashgan FRR network namespace orqali hisobga olinadi; umumiy OVS RSS alohi
 0.5 s namunalar aniq kernel high-water mark emas. Pcap capture o‘chiq.
 RSS budjeti tugallangan run’ni baholaydi, startup uchun qat’iy xotira limiti emas.
 `--timeout` run’ni cheklaydi, `finally` driver cleanup’ni bajaradi.
+Schema 2 hisobot har tugallangan run’dan so‘ng atomik saqlanadi. Sampler xatosi,
+yetishmayotgan oqim, nonfinite metrika yoki `driver.stop()` exception’i `passed`
+bo‘la olmaydi. Ctrl+C/SIGTERM natija va oldingi o‘lchovlarni saqlab, keyingi
+topologiyalarni boshlamaydi. Tafsilotlar: [scale benchmark](../docs/scale-benchmark.md).
 
 Exit 2 — prerequisite yetishmaydi; exit 1 — test/budjet xatosi. Bitta muvaffaqiyatli
 20-router test hostning maksimal sig‘imini isbotlamaydi. Alohida root hostda

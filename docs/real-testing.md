@@ -13,6 +13,9 @@ sudo timeout 600 python3 -m lab.benchmarks.real_scale --routers 10 20 --output /
 sudo python3 -m lab.benchmarks.real_calibration --reps 10 --output /tmp/calibration.csv
 ```
 
+Katta benchmarkning checkpoint, sampler xatosi va uzilishdagi hisobot qoidalari:
+[scale-benchmark.md](scale-benchmark.md).
+
 Avvalgi wrapper ham ishlaydi:
 
 ```bash

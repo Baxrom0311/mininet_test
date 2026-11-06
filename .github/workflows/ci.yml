@@ -144,6 +144,8 @@ jobs:
 
       - name: Real network lock regression (no root or Mininet required)
         run: python -m unittest lab.tests.test_real_lock -v
+      - name: Scale benchmark evidence regression (no root or Mininet required)
+        run: python -m unittest lab.tests.test_scale_benchmark -v
       - name: Calibration evidence and CLI regression
         run: python -m unittest lab.tests.test_calibration_evidence -v
 
