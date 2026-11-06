@@ -1,9 +1,9 @@
 # Review va merge tartibi
 
-Barcha ishlar `main`dan tashqarida. Branchlar ketma-ket ustma-ust qurilgan.
-Har bir oldingi PR main’ga kirgach keyingisini yangilangan main bilan taqqoslang
-yoki rebase qiling. Quyidagi base branch delta review uchun; asosiy merge target
-main bo‘lishi kerak. Agent PR ochmagan, merge yoki environment publish qilmagan.
+Barcha ishlar `main`dan tashqarida. Quyidagi 1–15 branchlar tarixiy stack bo‘lib,
+`main`ga birlashtirilgan (oxirgisi PR #16). Eski branchda yangi PR diff bo‘lmasligi
+kutilgan holat. Yangi `feat/ospf-convergence` branchi `main` `207ba52`dan (PR #17)
+boshlangan; uning PR bazasi `main`. PR va merge’ni foydalanuvchi bajaradi.
 
 | Tartib | Branch | Delta base | Commit |
 |---:|---|---|---|
@@ -22,8 +22,13 @@ main bo‘lishi kerak. Agent PR ochmagan, merge yoki environment publish qilmaga
 | 13 | `feat/paired-experiment-comparison` | `feat/analysis-windows` | `2bbdade` |
 | 14 | `feat/experiment-campaigns` | `feat/paired-experiment-comparison` | `4b686b1` |
 | 15 | `perf/campaign-analysis` | `feat/experiment-campaigns` | request-local analysis/compact JSON branchi |
+| 16 | `feat/ospf-convergence` | `main` (`207ba52`) | ixtiyoriy OSPF/OSPFv3 vaqt modeli |
 
 ## Tekshirilgan imkoniyatlar
+
+- `feat/ospf-convergence`: 91 backend testi, 19 model/ns-3 testi, aniq fractional
+  hodisa bilan IPv4/IPv6 paket regressiyasi va 8 asl smoke suite o‘tdi.
+  [OSPF modeli](ospf-convergence.md), [natijalar](validation/ospf-convergence-2026-11-06.md).
 
 - `perf/campaign-analysis`: 82 backend testi va 8 subprocessli haqiqiy IPv4/IPv6
   campaign sinovi o‘tdi. Reference va optimized qiymatlar teng; 15 runli fixture’da
@@ -79,8 +84,8 @@ main bo‘lishi kerak. Agent PR ochmagan, merge yoki environment publish qilmaga
 
 | Ish | Holat | Kerakli keyingi dalil |
 |---|---|---|
-| Real 20+ router FRR CPU/RSS/startup | Benchmark vositasi tayyor, local blocked | Dedicated root host yoki manual real CI JSON/log |
-| Real IS-IS adjacency/recovery | Konfiguratsiya/test tayyor, local blocked | FRR isisd bilan 6 adjacency Up va recovery natijasi |
+| Real 20+ router FRR CPU/RSS/startup | 10/20/30 router natijalari PR #15 orqali saqlangan | Maksimal sig‘im hali aniqlanmagan; [real hisobot](validation/real-env-2026-11-06.md) |
+| Real IS-IS adjacency/recovery | Real FRR xatolari tuzatilgan, passed natija PR #15 orqali saqlangan | Joriy cloud’da qayta o‘lchanmagan; o‘sha real hisobotga qarang |
 | Kalibratsiya konstantalarini moslash | Compare vositasi tayyor, defaults o‘zgarmagan | Bir xil metric/unit/topologiyadagi takroriy real o‘lchovlar |
 | P4 template compile va BMv2 forwarding | Strict gate tayyor, local blocked | p4c, BMv2, Mininet/root bilan haqiqiy passed natija |
 | Real Mininet GitHub CI | Workflow YAML tekshirilgan | Merge’dan keyingi haqiqiy GitHub job natijasi |

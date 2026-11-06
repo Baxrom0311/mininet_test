@@ -1,8 +1,9 @@
 # Branchlar va ish ketma-ketligi
 
 Foydalanuvchi PR va merge’ni o‘zi bajaradi. Agent main’ga push qilmaydi va environment
-publish qilmaydi. Keyingi branchlar oldingi branch ustiga quriladi; PR base’ini shunga
-mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
+publish qilmaydi. Quyidagi 1–15 branch tarixi `main`ga birlashtirilgan
+(oxirgi merge PR #16). 2026-11-06 dagi yangi baza `207ba52` (PR #17, CI YAML fix).
+Keyingi ishlar yangilangan `main`dan alohida branchlarda boshlanadi.
 
 1. `feat/netlab-ipv6-scale-review` — `300f7e4`, `67ba546`: IPv6 model/ns-3, katta real FRR
    benchmark vositasi, address-family kodini ajratish. Push qilindi. Real FRR
@@ -71,9 +72,15 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
     `docs/campaign-analysis-performance.md` va xom benchmark JSON’ga qarang.
     82 backend testi hamda IPv4/IPv6 full/compact metric equivalence sinovi
     8 haqiqiy ns-3 subprocess bilan o‘tdi.
-16. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
+16. `feat/ospf-convergence` — `main` `207ba52` ustida. Analitik/ns-3 uchun
+    ixtiyoriy OSPF/OSPFv3 jadval kechikishi, umumiy vaqt modeli, validatsiya va
+    kalibratsiya taklifi. Standart 0 s saqlanadi; [hujjat](ospf-convergence.md).
+    91 backend testi, 19 model/ns-3 testi, qo‘shimcha fractional-event packet
+    regressiyasi va 8 asl smoke suite o‘tdi. [Natijalar](validation/ospf-convergence-2026-11-06.md).
+17. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
     Agent mavjud UI’dagi tasdiqlangan sync xatosidan tashqari dizaynni o‘zgartirmaydi.
 
-Asl audit `233054b`da bajarilgan. Checkout endi PR #3 bilan kelgan `7c6e317` ustida;
-topilmalar shu bazada qayta tekshirilmoqda. Oldingi tashqi hisobotni yangi main’ning
-test natijasi sifatida talqin qilmang.
+Asl audit `233054b`da bajarilgan. Real FRR/20–30 router o‘lchovlari keyinchalik
+PR #15 orqali qo‘shilgan: [real hisobot](validation/real-env-2026-11-06.md).
+Yuqoridagi tarixiy local blocked yozuvlari o‘sha paytdagi muhit holatini bildiradi.
+Har yangi branch uchun amalda qayta bajarilgan testlar alohida qayd etiladi.

@@ -1,16 +1,16 @@
 # Model va real o‘lchovlarni taqqoslash
 
-Bu cloud instance’da root/FRR yo‘q; yangi real protokol yoki resurs o‘lchovi yo‘q.
-Oldingi suhbatdagi STP ~23 s va VRRP ~8 s qiymatlari foydalanuvchi yuborgan
-hisobotdan olingan, bu sessiyada qayta tasdiqlanmagan. Ular model konstantalarini
-avtomatik almashtirishga asos qilinmadi.
+Real root hostda olingan tekshiruvlar va xom CSV/JSON
+[2026-11-06 hisobotida](validation/real-env-2026-11-06.md) saqlangan. Quyidagi
+qiymatlar o‘sha hisobotdan; bu cloud draftida yangi FRR o‘lchovi bajarilmagan.
+Oldingi STP ~23 s taxmini o‘sha tekshiruv bilan tuzatilgan.
 
-| Hodisa | Hozirgi model | Tashqi hisobot | Bu sessiyadagi real tekshiruv |
+| Hodisa | Hozirgi model | Saqlangan real hisobot | Takror |
 |---|---|---|---|
-| STP direct link, forwarding | 2 × forward_delay = 30 s | ~23 s | blocked |
-| VRRP master down | RFC MDI (~3.6 s, priority/advertga bog‘liq) | end-to-end trafikda ~8 s | blocked |
-| OSPF route update | analitik SPF darhol | alohida o‘lchov kerak | blocked |
-| 20+ router startup/CPU/RSS | taxmin kiritilmagan | yangi benchmark kerak | blocked |
+| STP direct link, forwarding | 2 × forward_delay = 30 s | median 29.7 s | 3 |
+| VRRP master down | RFC MDI (~3.6 s, priority/advertga bog‘liq) | median 3.52 s | 3 |
+| OSPF route update | standart 0 s; ixtiyoriy `ospf_convergence_s` | median 1.74 s | 2 |
+| 20/30 router peak RSS | model taxmini kiritilmagan | 1.11/1.63 GB | har hajmga 1 |
 
 VRRP master saylovi bilan end-to-end trafik uzilishini aralashtirmang: qaytish
 OSPF yo‘li, neighbor resolution va probe interval ham uzilishga qo‘shiladi.
@@ -38,6 +38,8 @@ real kuzatuv yo‘q. NaN/Inf/manfiy raqamlar rad etiladi. Standartlar o‘zgarma
 
 Faqat mos metric uchun ko‘rib chiqiladigan ssenariy override taklif qilinadi:
 STP `port_forwarding_s`, VRRP `master_down_s`, RIP `route_recovery_s`, BGP
-`session_recovery_s`. `traffic_gap_s` yoki OSPF uchun mavjud bo‘lmagan timer
-uydirib qo‘shilmaydi. Taklifni qabul qilishdan oldin modelni ayni topologiya,
+`session_recovery_s`, OSPF `route_update_s` → `ospf_convergence_s`.
+`traffic_gap_s` protokol timeriga aylantirilmaydi. OSPF standart qiymati 0 s;
+[OSPF vaqt modeli](ospf-convergence.md) cheklovlarini o‘qing.
+Taklifni qabul qilishdan oldin modelni ayni topologiya,
 failure turi, probe intervali va trafik bilan qayta sinang.

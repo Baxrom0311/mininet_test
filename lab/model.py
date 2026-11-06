@@ -382,6 +382,14 @@ APP_TYPES = ("udp", "tcp", "ping")
 EVENT_ACTIONS = ("link_down", "link_up", "link_params", "move")
 
 
+def ospf_convergence_delay(sc):
+    """Optional modeled route-install delay; no live OSPF timer is inferred."""
+    value = sc.get("ospf_convergence_s", 0)
+    if type(value) not in (int, float) or not 0 <= value <= 3600:
+        raise ValueError("ospf_convergence_s: number 0..3600 s")
+    return float(value)
+
+
 def validate_scenario(project, sc):
     """Ssenariy (trafik ilovalari + vaqtli hodisalar) xatolari ro'yxati."""
     errors = []
@@ -403,6 +411,10 @@ def validate_scenario(project, sc):
         errors.append("sample: number 0.001..3600 s")
     elif dur / sample > 100000:
         errors.append("sample: at most 100000 intervals per scenario")
+    try:
+        ospf_convergence_delay(sc)
+    except ValueError as e:
+        errors.append(str(e))
     devs = project.get("devices") or {}
     ids = set()
     for i, a in enumerate(sc.get("apps") or []):
