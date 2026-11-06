@@ -97,6 +97,20 @@ paired Student t CI hisoblaydi; runtime/clock/flow identity mosligi tekshiriladi
 `experiment_comparison_report.py` audit CSV/raw-input ZIP va standalone HTML’ni
 alohida formatlaydi. [experiment-comparison.md](experiment-comparison.md).
 
+`campaigns.py` bir xil seed bilan baseline va parametr variantlarini oldindan
+validatsiyalab rejalaydi. `engines/run_submission.py` normal/study/replication/
+campaign joblarini umumiy transaction va scheduling gate orqali admit qiladi.
+`engines/campaign_store.py` plan va kichik metadatani shu SQLite’da saqlaydi;
+status qimmat series’ni o‘qimaydi, report esa exact planned run ID’laridan olinadi.
+Queued payloadlar alohida registry’da: cancel bo‘lgach katta loyiha executor
+work-item’da ushlanmaydi. [campaigns.md](campaigns.md).
+
+Campaign analysis bitta request ichida `_ComparisonInput` orqali cohort summary,
+runtime/flow guard va normalized design’ni qayta ishlatadi. Context manager/global
+keshda qolmaydi; keyingi request faylni yangidan o‘qiydi. Compact JSON takroriy
+summary o‘rniga shu dokumentdagi cohort reference’ni beradi; default full format
+saqlangan. [campaign-analysis-performance.md](campaign-analysis-performance.md).
+
 ## Real testlar va qulf
 
 Mininet cleanup global; alohida real testlar yoki serverlarni bir vaqtda ko‘tarmang.

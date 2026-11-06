@@ -133,9 +133,9 @@ jobs:
           python -m lab.tests.smoke_report
           python -m lab.tests.smoke_survivability_n2
       - name: IPv6 model and ns-3 packet regression
-        run: python -m unittest lab.tests.smoke_ipv6 lab.tests.smoke_isis lab.tests.smoke_experiments lab.tests.smoke_experiment_comparison -v
+        run: python -m unittest lab.tests.smoke_ipv6 lab.tests.smoke_isis lab.tests.smoke_experiments lab.tests.smoke_experiment_comparison lab.tests.smoke_campaigns -v
       - name: Runtime safety and dataset labeling regression
-        run: python -m unittest lab.tests.test_runtime_safety ml.test_labeling lab.tests.test_calibration lab.tests.test_traffic lab.tests.test_run_queue lab.tests.test_experiments lab.tests.test_result_index lab.tests.test_analysis_windows lab.tests.test_experiment_comparison -v
+        run: python -m unittest lab.tests.test_runtime_safety ml.test_labeling lab.tests.test_calibration lab.tests.test_traffic lab.tests.test_run_queue lab.tests.test_experiments lab.tests.test_result_index lab.tests.test_analysis_windows lab.tests.test_experiment_comparison lab.tests.test_campaigns lab.tests.test_campaign_analysis -v
 
   docker-build:
     runs-on: ubuntu-latest

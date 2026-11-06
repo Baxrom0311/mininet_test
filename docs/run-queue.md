@@ -35,3 +35,10 @@ History lists now use a persistent metadata/file-signature index, optional pagin
 queries and filters. Legacy SQLite schemas migrate with a pre-upgrade backup;
 unchanged result series are not parsed on each poll. See [result-index.md](result-index.md)
 for compatibility, reconciliation, downgrade and benchmark details.
+
+Normal, study and replicated submissions now share transactional admission with
+campaigns. A batch's rows commit before scheduling, and workers wait until all
+submissions finish. Scheduler failure cancels the admitted batch; queued cancellation
+also releases its project payload while other workers remain busy. Unexpected
+pre-result failures clear in-memory ownership, while committed JSON measurements
+survive post-result callback/index failures. See [campaigns.md](campaigns.md).

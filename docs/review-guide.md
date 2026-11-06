@@ -19,9 +19,21 @@ main bo‘lishi kerak. Agent PR ochmagan, merge yoki environment publish qilmaga
 | 10 | `feat/experiment-statistics` | `docs/architecture` | `521fb5b` |
 | 11 | `perf/run-result-index` | `feat/experiment-statistics` | `9b16071` |
 | 12 | `feat/analysis-windows` | `perf/run-result-index` | `470ca17` |
-| 13 | `feat/paired-experiment-comparison` | `feat/analysis-windows` | paired effects/report/CLI branchi |
+| 13 | `feat/paired-experiment-comparison` | `feat/analysis-windows` | `2bbdade` |
+| 14 | `feat/experiment-campaigns` | `feat/paired-experiment-comparison` | `4b686b1` |
+| 15 | `perf/campaign-analysis` | `feat/experiment-campaigns` | request-local analysis/compact JSON branchi |
 
 ## Tekshirilgan imkoniyatlar
+
+- `perf/campaign-analysis`: 82 backend testi va 8 subprocessli haqiqiy IPv4/IPv6
+  campaign sinovi o‘tdi. Reference va optimized qiymatlar teng; 15 runli fixture’da
+  median 440.13 → 259.65 ms, compact JSON 37.96% kichik.
+  [campaign-analysis-performance.md](campaign-analysis-performance.md).
+
+- `feat/experiment-campaigns`: 13 yangi test bilan 76 backend regressiyasi o‘tdi;
+  8 haqiqiy ns-3 subprocessli IPv4/IPv6 campaign va asl demo/report smoke ham o‘tdi.
+  Atomic admission, scheduler/storage rollback, foreign-owner/orphan diagnostics,
+  queued payload release va restart qoidalari: [campaigns.md](campaigns.md).
 
 - `feat/paired-experiment-comparison`: 11 yangi test bilan 63 backend regressiyasi
   o‘tdi. Haqiqiy ns-3 IPv4/IPv6 paired bandwidth sinovi ham o‘tdi (8 subprocess).
