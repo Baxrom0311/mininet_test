@@ -98,7 +98,7 @@ def m_vrrp(drv):
 
 
 def _route_via(drv, r, dst):
-    out = drv.net.get(r).cmd(f"ip -4 route get {dst} 2>/dev/null")
+    out = drv.net.get(r).cmd(f"ip -color=never -4 route get {dst} 2>/dev/null")
     m = re.search(r"via (\S+)", out)
     return m.group(1) if m else None
 
@@ -136,7 +136,7 @@ def m_bgp(drv):
     srv = _ip(p, "srv1")
     if wait_ping(drv, "pc1", srv, 120) is None:
         raise RuntimeError("bgp: boshlang'ich holat tayyor emas")
-    has = lambda: bool(drv.net.get("r3").cmd("ip -4 route show 10.1.0.0/24").strip())  # noqa: E731
+    has = lambda: bool(drv.net.get("r3").cmd("ip -color=never -4 route show 10.1.0.0/24").strip())  # noqa: E731
     drv.update_link("l4", up=False)
     if poll(lambda: not has(), 20) is None:
         raise RuntimeError("bgp: marshrut olib tashlanmadi")
