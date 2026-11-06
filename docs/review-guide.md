@@ -15,9 +15,16 @@ main bo‘lishi kerak. Agent PR ochmagan, merge yoki environment publish qilmaga
 | 6 | `feat/run-queue` | `feat/traffic-matrix` | `c3d0c50` |
 | 7 | `feat/p4-bmv2` | `feat/run-queue` | `d276af0` |
 | 8 | `ci/real-mininet` | `feat/p4-bmv2` | `59c5580` |
-| 9 | `docs/architecture` | `ci/real-mininet` | hujjat branchi |
+| 9 | `docs/architecture` | `ci/real-mininet` | `08bbbe4` |
+| 10 | `feat/experiment-statistics` | `docs/architecture` | replication/CI/replay branchi |
 
 ## Tekshirilgan imkoniyatlar
+
+- `feat/experiment-statistics`: 33 unit/integration test o‘tdi (oldingi 27 + 6 yangi
+  experiment testi). Haqiqiy ns-3 replication/replay testi IPv4 va IPv6 uchun jami
+  6 alohida jarayon bilan o‘tdi; aynan bir input qayta bajarilganda flow metrikalari
+  teng. Eski report va failures smoke suite ham yangi branchda o‘tdi.
+  [experiments.md](experiments.md) API, statistika shartlari va eksport cheklovlarini beradi.
 
 - Yangi funksional to‘plam: **27 test o‘tdi** (runtime/auth, label, calibration,
   traffic va queue). Queue testlari cheklangan parallelizm, queued/running cancel,

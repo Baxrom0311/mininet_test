@@ -299,6 +299,38 @@ def create_app(driver_name="demo", token=None):
                                 body.get("param") or {}, body.get("values") or [],
                                 body.get("param2") or None, body.get("values2") or None)
 
+    @app.post("/api/experiments")
+    def experiment_start(body: dict = Body(...)):
+        return runs.start_experiment(body.get("project") or {}, body.get("scenario"), body.get("engine", "analytic"),
+                                     body.get("repetitions", 10), body.get("seed", 1))
+
+    def _experiment(project, experiment_id):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", experiment_id):
+            raise ValueError("invalid experiment_id")
+        rs = [runs.get(project, r["run_id"]) for r in runs.list(project)
+              if r.get("experiment_id") == experiment_id]
+        rs.sort(key=lambda r: r["replication_index"])
+        if not rs:
+            raise HTTPException(404, "experiment not found")
+        from lab.experiments import summarize
+        return rs, summarize(rs)
+
+    @app.get("/api/experiments/{project}/{experiment_id}")
+    def experiment_get(project: str, experiment_id: str):
+        return _experiment(project, experiment_id)[1]
+
+    @app.get("/api/experiments/{project}/{experiment_id}/report.html")
+    def experiment_html(project: str, experiment_id: str):
+        from lab.report import experiment_report
+        return _html(experiment_report(_experiment(project, experiment_id)[1]), f"{experiment_id}.html")
+
+    @app.get("/api/experiments/{project}/{experiment_id}/export.zip")
+    def experiment_zip(project: str, experiment_id: str):
+        from lab.report import experiment_bundle
+        rs, summary = _experiment(project, experiment_id)
+        return Response(experiment_bundle(rs, summary), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{experiment_id}.zip"'})
+
     @app.post("/api/topogen")
     def topogen(body: dict = Body(...)):
         """Topologiya generatori (ring | star | tree | campus) -> loyiha JSON (saqlanmaydi)."""

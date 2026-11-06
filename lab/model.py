@@ -388,6 +388,10 @@ def validate_scenario(project, sc):
     version = sc.get("ip_version", 4)
     if type(version) is not int or version not in (4, 6):
         errors.append("ip_version: 4 | 6")
+    for field, limit in (("seed", 2147483647), ("rng_run", 2147483647)):
+        value = sc.get(field, 1)
+        if type(value) is not int or not 1 <= value <= limit:
+            errors.append(f"{field}: integer 1..{limit}")
     try:
         dur = float(sc.get("duration", 0))
     except (TypeError, ValueError):

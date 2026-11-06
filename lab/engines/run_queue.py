@@ -20,6 +20,27 @@ class RunCancelled(Exception):
 
 
 class QueuedRunManager(manager.RunManager):
+    def start_experiment(self, project, scenario_name, engine, repetitions=10, seed=1):
+        from lab.experiments import variants
+        if engine not in ("analytic", "ns3"):
+            raise ValueError("independent replications require analytic or ns3")
+        project, _, _ = self._prepare(project, scenario_name, engine)
+        projects = variants(project, scenario_name, repetitions, seed)
+        # Stochastic expansion may exceed model limits for one particular seed.
+        # Reject every invalid variant before submitting the first run.
+        for p in projects:
+            self._prepare(p, scenario_name, engine)
+        experiment_id = manager.new_run_id()
+        with self.queue_lock:
+            if self.closed or len(self.futures) + len(projects) > 256:
+                raise ValueError("run queue closed or full (256 pending/running)")
+            ids = []
+            for i, p in enumerate(projects):
+                extra = {"experiment_id": experiment_id, "replication_index": i,
+                         "replication_count": repetitions, "seed": seed, "rng_run": i + 1}
+                ids.append(self.start(p, scenario_name, engine, extra=extra)["run_id"])
+        return {"experiment_id": experiment_id, "run_ids": ids, "repetitions": repetitions}
+
     def __init__(self, bus, driver, workers=None, database=None):
         super().__init__(bus, driver)
         workers = int(workers or os.environ.get("NETLAB_RUN_WORKERS", "2"))

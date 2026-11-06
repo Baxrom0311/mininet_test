@@ -62,7 +62,7 @@ loyihasini joyida o‘zgartirmaydi.
 ## Run lifecycle va saqlash
 
 API server `QueuedRunManager`dan foydalanadi. Global executor normal run va study
-variantlari uchun umumiy limit beradi. SQLite — identity/status metadata, JSON —
+variantlari hamda takroriy experiment runlari uchun umumiy limit beradi. SQLite — identity/status metadata, JSON —
 oqim/link/node series. UUID bir soniyada va turli loyihalarda ID to‘qnashuvini
 oldini oladi. Qayta startda dead-owner pending run’lar interrupted bo‘ladi;
 ular o‘z-o‘zidan takroran ishga tushmaydi. Bitta results katalogida bitta server
@@ -73,6 +73,13 @@ to‘xtaydi. Silent ns-3 child ham cancel qilinadi va reaped bo‘ladi. Emulyats
 cleanup’i callback xatosida ham tracked child processlarni yopadi. Batafsil:
 [run-queue.md](run-queue.md). SQLite, foydalanuvchi loyihalari va run natijalari ignored
 lokal holat; source commit bilan live process saqlanmaydi.
+
+`experiments.py` 2..25 mustaqil takrorni tayyorlaydi; ns-3 bir seed bilan alohida
+run substreamlardan foydalanadi. Har run summary bitta statistik namuna bo‘ladi,
+to‘liq/mos to‘plam uchun Student t 95% CI hisoblanadi. `reproducibility.py` asl loyiha,
+expand qilingan ssenariy, input hash va runtime manifestni run natijasiga qo‘shadi.
+HTML/ZIP eksport shu snapshotlardan olinadi, jonli loyihaning keyingi holatidan emas.
+[experiments.md](experiments.md) semantika va qayta bajarish shartlarini tushuntiradi.
 
 ## Real testlar va qulf
 

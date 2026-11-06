@@ -609,6 +609,41 @@ def csv_bundle(runs):
             if rows or name in ("flows.csv", "flow_summary.csv"):
                 z.writestr(name, _csv(rows, headers[name]))
         z.writestr("results.json", json.dumps(runs if len(runs) > 1 else runs[0], ensure_ascii=False, default=str))
+        from lab.reproducibility import verify
+        for index, run in enumerate(runs):
+            record = run.get("reproducibility") or {}
+            if not verify(record):
+                continue  # Legacy results contain no topology snapshot; do not invent one.
+            prefix = "" if len(runs) == 1 else f"runs/{index + 1:02d}/"
+            manifest = {k: v for k, v in record.items() if k not in ("project", "effective_scenario")}
+            payloads = {"project.json": record["project"], "manifest.json": manifest,
+                        "effective-input.json": {"project": record["project"], "scenario": record["effective_scenario"]},
+                        "run-request.json": {"project": record["project"], "scenario": record["scenario_name"],
+                                             "engine": run.get("engine")}}
+            for name, payload in payloads.items():
+                z.writestr(prefix + name, json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False))
+    return buf.getvalue()
+
+
+def experiment_report(summary):
+    body = kv([("Expected", summary["expected"]), ("Observed", summary["observed"]),
+               ("Complete", summary["complete"]), ("Confidence", "95%")])
+    body += "<h2>Per-run summary statistics</h2>"
+    body += table(["Flow", "Metric", "n", "Missing", "Mean", "Sample SD", "95% CI"],
+                  [[r["flow"], r["metric"], r["n"], r["missing"], r["mean"], r["sample_stddev"],
+                    " … ".join(_num(v, 6) for v in r["ci95"]) if r["ci95"] is not None else "—"]
+                   for r in summary["metrics"]], num=(2, 3, 4, 5))
+    body += "<h2>Method</h2><p>" + e(summary["method"]) + "</p><ul>"
+    body += "".join("<li>" + e(note) + "</li>" for note in summary["notes"]) + "</ul>"
+    body += "<p>" + e(json.dumps(summary["statuses"], sort_keys=True)) + "</p>"
+    return page("Experiment: " + summary["experiment_id"], body)
+
+
+def experiment_bundle(runs, summary):
+    buf = io.BytesIO(csv_bundle(runs))
+    with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("experiment.json", json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False))
+        z.writestr("report.html", experiment_report(summary))
     return buf.getvalue()
 
 

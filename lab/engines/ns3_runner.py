@@ -222,6 +222,7 @@ def main(inp_path, out_path):
     for comp in filter(None, os.environ.get("NETLAB_NS3_LOG", "").split(",")):   # debug: ns-3 loglari (stderr)
         ns.LogComponentEnable(comp.strip(), ns.LOG_LEVEL_INFO)
     ns.RngSeedManager.SetSeed(int(sc.get("seed", 1)) or 1)
+    ns.RngSeedManager.SetRun(int(sc.get("rng_run", 1)))
     # TCP: Linux (Mininet) ga yaqin standartlar — ns-3 o'zi MSS=536, bufer=128KB
     # ishlatadi, bu oyna bilan o'tkazuvchanlikni sun'iy cheklaydi va dvigatellar
     # natijalarini solishtirib bo'lmas qiladi.

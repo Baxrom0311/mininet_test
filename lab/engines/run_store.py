@@ -39,7 +39,8 @@ class RunStore:
             db.close()
 
     def save(self, data):
-        keys = ("run_id", "project", "scenario_name", "engine", "status", "created", "duration", "progress", "error", "label", "study_id")
+        keys = ("run_id", "project", "scenario_name", "engine", "status", "created", "duration", "progress", "error", "label", "study_id",
+                "experiment_id", "replication_index", "replication_count", "seed", "rng_run")
         metadata = {k: data[k] for k in keys if k in data}
         with self.connect() as db:
             db.execute("INSERT INTO runs VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET status=excluded.status,updated=excluded.updated,metadata=excluded.metadata",

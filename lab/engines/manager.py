@@ -83,7 +83,8 @@ class RunManager:
                 out.append({k: r.get(k) for k in ("run_id", "scenario_name", "engine", "engine_label", "created",
                                                    "duration", "wall_s", "status", "label", "study_id",
                                                    "study_param", "study_value", "study_index",
-                                                   "study_param2", "study_value2", "study_index2")})
+                                                   "study_param2", "study_value2", "study_index2",
+                                                   "experiment_id", "replication_index", "replication_count", "seed", "rng_run")})
             except (OSError, ValueError):
                 continue
         with self._lock:
@@ -92,7 +93,8 @@ class RunManager:
             if a["project"] == project_name:
                 out.insert(0, {"run_id": rid, "scenario_name": a["scenario_name"], "engine": a["engine"],
                                "status": "running", "progress": a["progress"], "created": a["created"],
-                               "study_id": a.get("study_id"), "label": a.get("label")})
+                               "study_id": a.get("study_id"), "label": a.get("label"),
+                               **{k: a[k] for k in ("experiment_id", "replication_index", "replication_count", "seed", "rng_run") if k in a}})
         return out
 
     def get(self, project_name, run_id):
@@ -122,11 +124,18 @@ class RunManager:
         os.replace(tmp, p)
 
     # ---------- ishga tushirish ----------
-    def start(self, project, scenario_name, engine):
+    def _prepare(self, project, scenario_name, engine):
+        if not isinstance(project, dict) or not isinstance(scenario_name, str) or not isinstance(engine, str):
+            raise ValueError("project: object; scenario/engine: string")
         project = copy.deepcopy(project)
-        sc = (project.get("scenarios") or {}).get(scenario_name)
+        scenarios = project.get("scenarios") or {}
+        if not isinstance(scenarios, dict):
+            raise ValueError("scenarios: object")
+        sc = scenarios.get(scenario_name)
         if not sc:
             raise ValueError(f"ssenariy '{scenario_name}' yo'q")
+        if not isinstance(sc, dict):
+            raise ValueError("scenario: object")
         if engine == "mininet" and sc.get("ip_version", 4) == 6:
             raise ValueError("IPv6 faqat analytic va ns3 dvigatellarida qo'llab-quvvatlanadi")
         errs = validate_project(project) + validate_scenario(project, sc)
@@ -139,13 +148,21 @@ class RunManager:
             raise ValueError(f"{eng['label']}: {eng['hint']}")
         pname = project.get("name") or "untitled"
         self._dir(pname)
+        return project, sc, pname
+
+    def start(self, project, scenario_name, engine, *, extra=None):
+        project, sc, pname = self._prepare(project, scenario_name, engine)
         run_id = new_run_id()
         with self._lock:
             if any(a["engine"] == "mininet" for a in self.active.values()) and engine == "mininet":
                 raise ValueError("Mininet'da bir vaqtda faqat bitta ssenariy ishlaydi")
             self.active[run_id] = {"project": pname, "scenario_name": scenario_name, "engine": engine,
-                                   "progress": 0.0, "created": time.time()}
-        self._launch_worker(run_id, pname, project, scenario_name, sc, engine)
+                                   "progress": 0.0, "created": time.time(), **(extra or {})}
+        args = (run_id, pname, project, scenario_name, sc, engine)
+        if extra:
+            self._launch_worker(*args, extra)
+        else:
+            self._launch_worker(*args)
         return {"run_id": run_id}
 
     def _launch_worker(self, *args):
@@ -326,15 +343,20 @@ class RunManager:
         t0 = time.time()
         from lab import apps as appmodels
         from lab import failures as failmodel
+        from lab.reproducibility import capture, digest
         sc_user = sc
+        provenance = {"schema": 1, "error": "capture did not complete"}
         emulation_locked = False
         try:
+            provenance = capture(project, sc_name, sc_user, None, engine)
             if engine == "mininet":
                 emulation_locked = self._emulation_lock.acquire(blocking=False)
                 if not emulation_locked:
                     raise ValueError("Mininet'da bir vaqtda faqat bitta ssenariy ishlaydi")
             sc_fail = failmodel.expand(project, sc)     # MTBF/MTTR -> link_down/link_up
             sc = appmodels.expand(sc_fail)              # voip/http/ftp -> udp/tcp
+            provenance["effective_scenario"] = copy.deepcopy(sc)
+            provenance["effective_scenario_sha256"] = digest(sc)
             if engine == "analytic":
                 from lab.engines import analytic
                 res = analytic.run(project, sc, prog, log)
@@ -355,6 +377,7 @@ class RunManager:
         res.update(run_id=run_id, project=pname, scenario_name=sc_name, scenario=sc_user, created=t0,
                    topology={"devices": len(project["devices"]), "links": len(project["links"])})
         res.setdefault("wall_s", round(time.time() - t0, 2))
+        res["reproducibility"] = provenance
         if extra:
             res.update(extra)
         try:
