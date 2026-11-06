@@ -77,11 +77,10 @@ class QueueTests(unittest.TestCase):
         def start(*args, **kwargs):
             if "lab.engines.ns3_runner" not in args[0]:
                 return real_popen(*args, **kwargs)
-            process = real_popen([sys.executable, "-c", "import time; time.sleep(30)"],
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            process = real_popen([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
             children.append(process); spawned.set()
             return process
-        with patch("lab.engines.run_queue.subprocess.Popen", side_effect=start), \
+        with patch("lab.engines.ns3_process.subprocess.Popen", side_effect=start), \
                 patch("lab.engines.manager._ns3_available", return_value=True):
             rid = self.manager.start(self.project, "test", "ns3")["run_id"]
             self.assertTrue(spawned.wait(3))
