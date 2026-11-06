@@ -104,6 +104,8 @@ jobs:
         run: pip install --quiet -r lab/requirements.txt httpx ns3 pandas
       - name: Syntax check lab/
         run: python -m py_compile lab/*.py lab/drivers/*.py lab/engines/*.py lab/templates/sdn/*.py lab/tests/*.py
+      - name: OSPF startup policy regression
+        run: python -m unittest lab.tests.test_ospf_policy lab.tests.smoke_ospf_policy -v
       # Real driver must import without Mininet present (all mininet imports are lazy).
       - name: Import real driver without Mininet
         run: python -c "import lab.drivers.mininet_driver"

@@ -608,7 +608,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             "nodes": node_series, "route_events": rtrack.events,
             "convergence": convergence(applied, rtrack.events, duration), "wall_s": round(time.time() - t_wall, 3),
             "notes": ["oqim darajasidagi taxmin: UDP qat'iy, TCP max-min adolat + Mathis, navbat M/M/1",
-                      "dinamik routing: demo modeli (dinamik daemonli routerlar o'zaro barcha subnetlarni biladi)",
+                      "dinamik routing: demo modeli; IPv4 OSPF startup network/passive interfeys siyosatiga amal qiladi",
                       "RIP: kabel uzilgandan keyin update/2 (rip_timers, standart 30 s -> 15 s) yoki rip_convergence_s davomida eski yo'llar",
                       ospf.note(),
                       "Wi-Fi: SNR→MCS (ns-3 ga kalibrlangan), efir vaqti bo'yicha adolat (A-MPDU), TCP ACK efiri ~9%",
