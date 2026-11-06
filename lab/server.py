@@ -304,15 +304,42 @@ def create_app(driver_name="demo", token=None):
         return runs.start_experiment(body.get("project") or {}, body.get("scenario"), body.get("engine", "analytic"),
                                      body.get("repetitions", 10), body.get("seed", 1))
 
-    def _experiment(project, experiment_id, start_s=None, end_s=None):
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", experiment_id):
+    def _experiment_runs(project, experiment_id):
+        if not isinstance(experiment_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", experiment_id):
             raise ValueError("invalid experiment_id")
         rs = [runs.get(project, r["run_id"]) for r in runs.list(project, experiment_id=experiment_id)]
         rs.sort(key=lambda r: r["replication_index"])
         if not rs:
             raise HTTPException(404, "experiment not found")
+        return rs
+
+    def _experiment(project, experiment_id, start_s=None, end_s=None):
+        rs = _experiment_runs(project, experiment_id)
         from lab.experiments import summarize
         return rs, summarize(rs, start_s=start_s, end_s=end_s)
+
+    def _comparison(body):
+        from lab.experiment_comparison import compare
+        baseline = _experiment_runs(body.get("project"), body.get("baseline_id"))
+        candidate = _experiment_runs(body.get("project"), body.get("candidate_id"))
+        result = compare(baseline, candidate, start_s=body.get("start_s"), end_s=body.get("end_s"))
+        return baseline, candidate, result
+
+    @app.post("/api/experiments/compare")
+    def experiment_compare(body: dict = Body(...)):
+        return _comparison(body)[2]
+
+    @app.post("/api/experiments/compare/report.html")
+    def experiment_compare_html(body: dict = Body(...)):
+        from lab.experiment_comparison_report import comparison_report
+        return _html(comparison_report(_comparison(body)[2]), "experiment-comparison.html")
+
+    @app.post("/api/experiments/compare/export.zip")
+    def experiment_compare_zip(body: dict = Body(...)):
+        from lab.experiment_comparison_report import comparison_bundle
+        baseline, candidate, result = _comparison(body)
+        return Response(comparison_bundle(baseline, candidate, result), media_type="application/zip",
+                        headers={"Content-Disposition": 'attachment; filename="experiment-comparison.zip"'})
 
     @app.get("/api/experiments/{project}/{experiment_id}")
     def experiment_get(project: str, experiment_id: str, start_s: float | None = None, end_s: float | None = None):

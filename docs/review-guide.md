@@ -18,9 +18,15 @@ main bo‘lishi kerak. Agent PR ochmagan, merge yoki environment publish qilmaga
 | 9 | `docs/architecture` | `ci/real-mininet` | `08bbbe4` |
 | 10 | `feat/experiment-statistics` | `docs/architecture` | `521fb5b` |
 | 11 | `perf/run-result-index` | `feat/experiment-statistics` | `9b16071` |
-| 12 | `feat/analysis-windows` | `perf/run-result-index` | warm-up/window analysis branchi |
+| 12 | `feat/analysis-windows` | `perf/run-result-index` | `470ca17` |
+| 13 | `feat/paired-experiment-comparison` | `feat/analysis-windows` | paired effects/report/CLI branchi |
 
 ## Tekshirilgan imkoniyatlar
+
+- `feat/paired-experiment-comparison`: 11 yangi test bilan 63 backend regressiyasi
+  o‘tdi. Haqiqiy ns-3 IPv4/IPv6 paired bandwidth sinovi ham o‘tdi (8 subprocess).
+  Seed/runtime/flow compatibility, partial CI policy, source/archive hash,
+  raw export va offline CLI qoidalari: [experiment-comparison.md](experiment-comparison.md).
 
 - `feat/analysis-windows`: 9 yangi test bilan 52 backend regressiyasi. Warm-up,
   fractional bin, missing coverage, app interval propagation, legacy ambiguity,

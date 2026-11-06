@@ -55,7 +55,11 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
     Qo‘llanma: `docs/analysis-windows.md`.
     52 backend va 19 IPv6/IS-IS/replication testi o‘tdi; haqiqiy ns-3’da fractional
     sample/tail va replay tekshirildi. Asl demo/report suite ham o‘tdi.
-13. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
+13. `feat/paired-experiment-comparison` — baseline/candidate paired Student t,
+    config diff, raw-pair audit, HTML/CSV/ZIP va offline CLI. `feat/analysis-windows`
+    ustida. 11 yangi test bilan 63 backend testi o‘tdi; IPv4/IPv6 paired bandwidth
+    sinovi 8 haqiqiy ns-3 subprocess bilan o‘tdi. `docs/experiment-comparison.md`.
+14. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
     Agent mavjud UI’dagi tasdiqlangan sync xatosidan tashqari dizaynni o‘zgartirmaydi.
 
 Asl audit `233054b`da bajarilgan. Checkout endi PR #3 bilan kelgan `7c6e317` ustida;
