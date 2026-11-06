@@ -1,5 +1,11 @@
 # Review va merge tartibi
 
+2026-11-06 holati: quyidagi 1–15 branchlar `main`ga birlashtirilgan (oxirgisi
+PR #16); baza `207ba52` (PR #17). Jadvaldagi Delta base tarixiy review tartibidir.
+Real sinov natijalari [alohida hisobotda](validation/real-env-2026-11-06.md):
+o‘lchov bazasi PR #12, artefaktlar PR #15 bilan qo‘shilgan. PR #13–#17 uchun
+yangi real to‘plam natijasi hali shu repozitoriyga qo‘shilmagan.
+
 Barcha ishlar `main`dan tashqarida. Branchlar ketma-ket ustma-ust qurilgan.
 Har bir oldingi PR main’ga kirgach keyingisini yangilangan main bilan taqqoslang
 yoki rebase qiling. Quyidagi base branch delta review uchun; asosiy merge target
@@ -79,10 +85,10 @@ main bo‘lishi kerak. Agent PR ochmagan, merge yoki environment publish qilmaga
 
 | Ish | Holat | Kerakli keyingi dalil |
 |---|---|---|
-| Real 20+ router FRR CPU/RSS/startup | Benchmark vositasi tayyor, local blocked | Dedicated root host yoki manual real CI JSON/log |
-| Real IS-IS adjacency/recovery | Konfiguratsiya/test tayyor, local blocked | FRR isisd bilan 6 adjacency Up va recovery natijasi |
+| Real 20+ router FRR CPU/RSS/startup | 10/20/30 router natijalari saqlangan | [Real hisobot](validation/real-env-2026-11-06.md); maksimal sig‘im aniqlanmagan |
+| Real IS-IS adjacency/recovery | Real FRR xatolari tuzatilib, passed natija saqlangan | O‘sha hisobot; yangi `main` uchun qayta tekshiruv kerak |
 | Kalibratsiya konstantalarini moslash | Compare vositasi tayyor, defaults o‘zgarmagan | Bir xil metric/unit/topologiyadagi takroriy real o‘lchovlar |
-| P4 template compile va BMv2 forwarding | Strict gate tayyor, local blocked | p4c, BMv2, Mininet/root bilan haqiqiy passed natija |
+| P4 template compile va BMv2 forwarding | Gate tayyor; real hostda p4c/BMv2 yo‘q | p4c, BMv2, Mininet/root bilan haqiqiy passed natija |
 | Real Mininet GitHub CI | Workflow YAML tekshirilgan | Merge’dan keyingi haqiqiy GitHub job natijasi |
 | UI yangi protocol/statistics editorlari | Yuborilgan taqsimot bo‘yicha foydalanuvchida | UI implementation va browser acceptance |
 
