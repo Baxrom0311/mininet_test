@@ -12,6 +12,7 @@ import threading
 import time
 
 from lab.engines import manager
+from lab.engines.result_index import ResultIndex
 from lab.engines.run_store import RunStore, TERMINAL
 
 
@@ -47,6 +48,7 @@ class QueuedRunManager(manager.RunManager):
         if not 1 <= workers <= 16:
             raise ValueError("NETLAB_RUN_WORKERS: 1..16")
         self.store = RunStore(database or Path(manager.RESULTS_DIR, "runs.sqlite3"))
+        self.result_index = ResultIndex(self.store, manager.RESULTS_DIR)
         self.executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="netlab-run")
         self.futures, self.tokens = {}, {}
         self.queue_lock = threading.RLock()
@@ -84,9 +86,10 @@ class QueuedRunManager(manager.RunManager):
     def _execute(self, rid, pname, project, name, sc, engine, extra):
         self.local.run_id = rid
         try:
-            data = self.store.get(pname, rid)
-            data["status"] = "running"
-            self.store.save(data)
+            with self.queue_lock:
+                data = self.store.get(pname, rid)
+                data["status"] = "running"
+                self.store.save(data)
             if self.tokens[rid].is_set():
                 self._save(pname, {**data, "status": "cancelled", "flows": {}})
                 with self._lock:
@@ -110,11 +113,30 @@ class QueuedRunManager(manager.RunManager):
         return super()._pub(rid, **kw)
 
     def _save(self, pname, result):
-        token = self.tokens.get(result["run_id"])
-        if token and token.is_set():
-            result.update(status="cancelled", error=None)
-        super()._save(pname, result)
-        self.store.save(result)
+        with self.result_index.lock:
+            with self._lock:
+                active = self.active.get(result["run_id"], {})
+                if active.get("project") == pname and "_label_override" in active:
+                    result["label"] = active["_label_override"]
+            token = self.tokens.get(result["run_id"])
+            if token and token.is_set():
+                result.update(status="cancelled", error=None)
+            super()._save(pname, result)
+            self.result_index.record(pname, result)
+
+    def update_label(self, project, rid, label):
+        with self.queue_lock, self.result_index.lock:
+            data = self.get(project, rid)
+            data["project"], data["label"] = project, str(label)[:80]
+            with self._lock:
+                active = self.active.get(rid)
+                if active and active["project"] == project:
+                    active["_label_override"] = data["label"]
+            if data["status"] not in TERMINAL and active and active["project"] == project:
+                self.store.save(data)  # Pending label edits must not create partial result JSON files.
+            else:
+                self._save(project, data)
+            return data
 
     def get(self, project, rid):
         try:
@@ -122,16 +144,30 @@ class QueuedRunManager(manager.RunManager):
         except FileNotFoundError:
             return self.store.get(project, rid)
 
-    def list(self, project):
-        rows = {r["run_id"]: r for r in super().list(project)}
-        for data in self.store.list(project):
-            rid = data["run_id"]
-            if rid in rows and data["status"] not in TERMINAL:
-                # Legacy clients already poll status=running; expose actual phase separately.
-                rows[rid]["queue_state"] = data["status"]
-            elif rid not in rows:
-                rows[rid] = data
-        return sorted(rows.values(), key=lambda r: r.get("created") or 0, reverse=True)
+    def _overlay_active(self, rows):
+        with self._lock:
+            active = {rid: dict(data) for rid, data in self.active.items()}
+        for row in rows:
+            data = active.get(row["run_id"])
+            if data and data["project"] == row["project"] and row["status"] not in TERMINAL:
+                # Keep legacy status=running while exposing the actual queue phase.
+                row["queue_state"] = row["status"]
+                row["status"] = "running"
+                row["progress"] = data.get("progress", 0)
+        return rows
+
+    def list(self, project, **filters):
+        self.result_index.reconcile(project)
+        return self._overlay_active(self.store.list(project, **filters))
+
+    def page(self, project, limit=100, offset=0, **filters):
+        self.result_index.reconcile(project)
+        page = self.store.page(project, limit, offset, **filters)
+        self._overlay_active(page["runs"])
+        return page
+
+    def reindex(self, project):
+        return self.result_index.reconcile(project, force=True)
 
     def cancel(self, project, rid):
         with self.queue_lock:
@@ -157,8 +193,9 @@ class QueuedRunManager(manager.RunManager):
         with self.queue_lock:
             if rid in self.futures and self.store.get(project, rid)["status"] not in TERMINAL:
                 raise ValueError("cancel an active run before deleting it")
-            super().delete(project, rid)
-            self.store.delete(project, rid)
+            with self.result_index.lock:
+                super().delete(project, rid)
+                self.store.delete(project, rid)
 
     def close(self):
         with self.queue_lock:

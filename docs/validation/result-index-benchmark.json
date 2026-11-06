@@ -1,0 +1,60 @@
+{
+  "kind": "synthetic result metadata I/O; not Mininet/ns-3 throughput",
+  "runs": 100,
+  "points_per_run": 10000,
+  "json_bytes": 64904890,
+  "cold_index": {
+    "median_s": 0.7737368310044985,
+    "samples_s": [
+      0.7737368310044985
+    ],
+    "full_json_reads": [
+      100
+    ]
+  },
+  "warm_list": {
+    "median_s": 0.0016658329986967146,
+    "samples_s": [
+      0.001283230994886253,
+      0.0016658329986967146,
+      0.0017831660006777383
+    ],
+    "full_json_reads": [
+      0,
+      0,
+      0
+    ]
+  },
+  "warm_page_20": {
+    "median_s": 0.0014638990032835864,
+    "samples_s": [
+      0.0015207109972834587,
+      0.0014023769981577061,
+      0.0014638990032835864
+    ],
+    "full_json_reads": [
+      0,
+      0,
+      0
+    ]
+  },
+  "legacy_list": {
+    "median_s": 0.5031987719994504,
+    "samples_s": [
+      0.496459688001778,
+      0.5090677969928947,
+      0.5031987719994504
+    ],
+    "full_json_reads": [
+      100,
+      100,
+      100
+    ]
+  },
+  "warm_speedup": 302.0703590294671,
+  "notes": [
+    "OS page cache and filesystem affect timings; this is a local measurement.",
+    "Warm requests still stat every result file; directory work is O(number of results).",
+    "Cold indexing reads each legacy result once and writes metadata to SQLite."
+  ]
+}

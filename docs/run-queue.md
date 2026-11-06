@@ -30,3 +30,8 @@ Graceful server shutdown requests cancellation and joins its executor before
 stopping the driver. Abrupt process death instead leaves recoverable interrupted
 metadata. Tests cover worker caps, both cancellation paths, silent subprocess
 cleanup and a real child-process registry/restart case.
+
+History lists now use a persistent metadata/file-signature index, optional paginated
+queries and filters. Legacy SQLite schemas migrate with a pre-upgrade backup;
+unchanged result series are not parsed on each poll. See [result-index.md](result-index.md)
+for compatibility, reconciliation, downgrade and benchmark details.
