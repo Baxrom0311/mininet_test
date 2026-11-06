@@ -195,9 +195,42 @@ KINDS = {"ring": ring, "star": star, "tree": tree, "campus": campus}
 def generate(kind, **kw):
     if kind not in KINDS:
         raise ValueError(f"tur {tuple(KINDS)} dan biri")
+    ipv6 = kw.pop("ipv6", False)
     p = KINDS[kind](**kw)
     if len(p["devices"]) > 3000:
         raise ValueError("juda katta (> 3000 qurilma)")
+    return add_ipv6(p) if ipv6 else p
+
+
+def add_ipv6(project):
+    """Add ULA /64s alongside generated IPv4 LAN/transit nets.
+
+    OSPFv3 is a hop-based model in analytic/ns-3, not a live protocol there.
+    The original IPv4 scenarios and FRR startup are preserved.
+    """
+    import copy
+    import ipaddress
+    p = copy.deepcopy(project)
+    networks, addresses = {}, {}
+    for d in p["devices"].values():
+        cfg = d["config"]
+        for ic in cfg.get("interfaces", {}).values():
+            ii = ipaddress.ip_interface(ic["ip"])
+            subnet = networks.setdefault(ii.network, len(networks) + 1)
+            # ns-3 intentionally drops forwarded RFC 3849 documentation addresses.
+            address = ipaddress.IPv6Address(int(ipaddress.IPv6Address(f"fd00:1:{subnet:x}::"))
+                                           + int(ii.ip) - int(ii.network.network_address))
+            ic["ip6"] = f"{address}/64"
+            addresses[str(ii.ip)] = str(address)
+        if d["type"] == "router":
+            if "isisd" not in cfg.get("daemons", []):
+                cfg["daemons"] = list(dict.fromkeys(cfg.get("daemons", []) + ["ospf6d"]))
+    for d in p["devices"].values():
+        cfg = d["config"]
+        if cfg.get("gateway"):
+            cfg["gateway6"] = addresses[cfg["gateway"]]
+    for name, sc in list(p["scenarios"].items()):
+        p["scenarios"][name + "_ipv6"] = {**copy.deepcopy(sc), "ip_version": 6}
     return p
 
 
@@ -213,6 +246,7 @@ def main(argv=None):
     ap.add_argument("--hosts", type=int)
     ap.add_argument("--flows", type=int)
     ap.add_argument("--name")
+    ap.add_argument("--ipv6", action="store_true", help="IPv6 /64 + IPv6 scenario nusxasi")
     a = ap.parse_args(argv)
     kw = {k: v for k, v in vars(a).items() if k != "kind" and v is not None}
     json.dump(generate(a.kind, **kw), sys.stdout, indent=1)

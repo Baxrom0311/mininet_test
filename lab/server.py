@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 
 from lab.drivers.base import DriverError, EventBus, p4_compile_standalone, p4_pipeline_from_json
 from lab.engines.manager import RunManager
+from lab.web_security import same_origin
 from lab.model import (APP_TYPES, DEVICE_TYPES, EVENT_ACTIONS, FRR_DAEMONS, PROJECT_VERSION, empty_project,
                        validate_project, validate_scenario)
 
@@ -82,12 +83,14 @@ def create_app(driver_name="demo", token=None):
 
     @app.middleware("http")
     async def _auth(request: Request, call_next):
+        if request.method not in ("GET", "HEAD", "OPTIONS") and not same_origin(request.headers.get("origin"), request.url):
+            return JSONResponse({"error": "Origin denied"}, status_code=403)
         if not app.state.token:
             return await call_next(request)
         q = request.query_params
         if q.get("token") and secrets.compare_digest(q.get("token"), app.state.token):
             resp = RedirectResponse(url=request.url.path) if request.url.path == "/" else await call_next(request)
-            resp.set_cookie(COOKIE, app.state.token, httponly=True, samesite="strict")
+            resp.set_cookie(COOKIE, app.state.token, httponly=True, samesite="strict", secure=request.url.scheme == "https")
             return resp
         if not _authorized(request.cookies, q):
             return JSONResponse({"error": "token kerak: http://host:port/?token=..."}, status_code=401)
@@ -397,6 +400,9 @@ def create_app(driver_name="demo", token=None):
     # ───────────── WebSocket: hodisalar ─────────────
     @app.websocket("/ws/events")
     async def ws_events(ws: WebSocket):
+        if not same_origin(ws.headers.get("origin"), ws.url):
+            await ws.close(code=1008, reason="Origin denied")
+            return
         if not _authorized(ws.cookies, ws.query_params):
             await ws.close(code=4401)
             return
@@ -426,6 +432,9 @@ def create_app(driver_name="demo", token=None):
     # ───────────── WebSocket: terminal ─────────────
     @app.websocket("/ws/term/{name}")
     async def ws_term(ws: WebSocket, name: str, shell: str = "default"):
+        if not same_origin(ws.headers.get("origin"), ws.url):
+            await ws.close(code=1008, reason="Origin denied")
+            return
         if not _authorized(ws.cookies, ws.query_params):
             await ws.close(code=4401)
             return

@@ -12,12 +12,15 @@ import glob
 import json
 import os
 import re
+import shlex
+import subprocess
+import uuid
 import threading
 import time
 
 import routing
 import topologies
-from analytics.data import DataStore
+from studio.remote import RemoteJob
 try:
     from studio.config import load_config, save_config
 except ModuleNotFoundError:
@@ -44,6 +47,7 @@ class _StoreCache:
         absf = os.path.abspath(folder)
         st = self._stores.get(absf)
         if st is None:
+            from analytics.data import DataStore
             st = DataStore(absf)
             self._stores[absf] = st
         return st
@@ -72,9 +76,17 @@ class RunManager:
         self._lock = threading.Lock()
 
     def _new_id(self, params):
-        with self._lock:
-            self._counter += 1
-            return f"{params.get('topology','topo')}_{params.get('routing','mode')}_{int(time.time())}_{self._counter}"
+        return "run_" + uuid.uuid4().hex
+
+    def _exec_script(self, cfg, script, timeout=30):
+        client = self._ssh(cfg)
+        try:
+            # The configured SSH endpoint is Windows OpenSSH launching WSL.
+            command = subprocess.list2cmdline(self._b64cmd(cfg["wsl_distro"], script))
+            _, stdout, stderr = client.exec_command(command, timeout=timeout)
+            return stdout.read().decode(errors="replace"), stderr.read().decode(errors="replace")
+        finally:
+            client.close()
 
     @staticmethod
     def _b64cmd(distro, script):
@@ -85,21 +97,18 @@ class RunManager:
     def _ssh(self, cfg):
         import paramiko
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.load_system_host_keys()
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
         client.connect(cfg["ssh_host"], username=cfg["ssh_user"],
                        password=cfg["ssh_pass"], timeout=15, banner_timeout=15)
         return client
 
     def test(self, cfg):
         try:
-            c = self._ssh(cfg)
-            argv = self._b64cmd(cfg["wsl_distro"], "echo studio-ok; uname -a")
-            stdin, stdout, stderr = c.exec_command(" ".join(argv), timeout=20)
-            out = stdout.read().decode(errors="replace")
-            c.close()
+            out, err = self._exec_script(cfg, "echo studio-ok; uname -a", 20)
             if "studio-ok" in out:
                 return {"ok": True, "message": out.strip().splitlines()[-1][:120]}
-            return {"ok": False, "message": (stderr.read().decode(errors="replace") or out)[:200]}
+            return {"ok": False, "message": (err or out)[:200]}
         except Exception as e:
             return {"ok": False, "message": f"{type(e).__name__}: {e}"}
 
@@ -107,10 +116,17 @@ class RunManager:
         cfg = self._cfg()
         if not cfg.get("ssh_host"):
             return {"ok": False, "error": "SSH server sozlanmagan (Sozlamalar bo'limiga qarang)."}
+        topology = params.get("topology", "three_as")
+        mode = params.get("routing", "l2_learn")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", topology) or mode not in _ROUTING_MODES:
+            return {"ok": False, "error": "Topologiya yoki routing nomi noto'g'ri"}
+        duration = int(params.get("duration", cfg["default_duration"]))
+        if not 1 <= duration <= 3600:
+            return {"ok": False, "error": "Davomiylik 1..3600 s"}
         run_id = self._new_id(params)
         st = {"run_id": run_id, "state": "starting", "progress": 0, "phase": "boshlanmoqda",
               "log_tail": [], "done": False, "error": None,
-              "topology": params.get("topology"), "routing": params.get("routing"),
+              "topology": topology, "routing": mode, "_cfg": dict(cfg),
               "duration": int(params.get("duration", cfg["default_duration"])),
               "seed": int(params.get("seed", cfg["default_seed"])), "ts": time.time()}
         self._runs[run_id] = st
@@ -118,62 +134,44 @@ class RunManager:
         return {"ok": True, "run_id": run_id}
 
     def _remote_log(self, run_id):
-        return f"/tmp/studio_{run_id}.log"
+        return RemoteJob(run_id).log
 
     def _worker(self, run_id, params, cfg):
         st = self._runs[run_id]
-        distro = cfg["wsl_distro"]
-        repo = cfg["remote_repo"]
-        log = self._remote_log(run_id)
-        dur = st["duration"]
-        launch = (
-            f"cd {repo} && mn -c >/dev/null 2>&1; "
-            f"nohup timeout -k 15 {dur + 400} python3 -u light_simulation.py "
-            f"--topology {st['topology']} --routing {st['routing']} "
-            f"--duration {dur} --seed {st['seed']} > {log} 2>&1 & echo STUDIO_PID=$!"
-        )
+        job = RemoteJob(run_id)
         try:
-            c = self._ssh(cfg)
-            argv = self._b64cmd(distro, launch)
-            stdin, stdout, stderr = c.exec_command(" ".join(argv), timeout=60)
-            out = stdout.read().decode(errors="replace")
-            c.close()
-            if "STUDIO_PID=" not in out:
-                st.update(state="error", done=True,
-                          error="Masofaviy ishga tushmadi: " + (out[:200] or "noma'lum"))
-                return
-            st["state"] = "running"
+            out, err = self._exec_script(cfg, job.launch(cfg["remote_repo"], st["topology"], st["routing"],
+                                                        st["duration"], st["seed"]), 60)
+            match = re.search(r"STUDIO_PID=(\d+)", out)
+            if not match or int(match[1]) <= 1:
+                raise RuntimeError("Masofaviy jarayon ishga tushmadi: " + (err or out)[:200])
+            st.update(_pid=int(match[1]), state="running")
+            if st.get("_stop"):
+                self.stop(run_id)
+            deadline = time.monotonic() + st["duration"] + 500
+            while time.monotonic() < deadline:
+                time.sleep(1)
+                text, _ = self._exec_script(cfg, job.poll(st["_pid"]), 25)
+                poll = job.parse(text)
+                body = poll["log"]
+                st["log_tail"] = [line for line in body.splitlines() if line.strip()][-14:]
+                st["phase"] = self._phase(body)
+                matches = list(re.finditer(r"\[(\d+)s/(\d+)s\]", body))
+                if matches:
+                    elapsed, total = map(int, matches[-1].groups())
+                    st["progress"] = min(96, int(elapsed / max(total, 1) * 92) + 4)
+                if poll["exit_code"] is not None or not poll["running"]:
+                    if st.get("_stop"):
+                        st.update(state="cancelled", done=True, phase="bekor qilindi")
+                    elif poll["exit_code"] == 0 and poll["dataset"]:
+                        st.update(state="done", progress=100, done=True, phase="tugadi")
+                    else:
+                        st.update(state="error", done=True, error=f"Masofaviy exit code: {poll['exit_code']}; dataset={poll['dataset']}")
+                    return
+            self._exec_script(cfg, job.stop(st["_pid"]))
+            raise TimeoutError("Masofaviy simulyatsiya vaqti tugadi")
         except Exception as e:
-            st.update(state="error", done=True, error=f"SSH: {type(e).__name__}: {e}")
-            return
-
-        # Progressni log orqali kuzatish
-        deadline = time.time() + dur + 500
-        while time.time() < deadline and not st.get("_stop"):
-            time.sleep(4)
-            try:
-                c = self._ssh(cfg)
-                poll = (f"tail -n 40 {log} 2>/dev/null; "
-                        f"echo ===; if [ -f /data/datasets/metadata.json ]; then echo DATASET_READY; fi")
-                argv = self._b64cmd(distro, poll)
-                stdin, stdout, stderr = c.exec_command(" ".join(argv), timeout=25)
-                text = stdout.read().decode(errors="replace")
-                c.close()
-            except Exception as e:
-                st["error"] = f"poll: {e}"
-                continue
-            body = text.split("===")[0]
-            st["log_tail"] = [l for l in body.splitlines() if l.strip()][-14:]
-            st["phase"] = self._phase(body)
-            m = list(re.finditer(r"\[(\d+)s/(\d+)s\]", body))
-            if m:
-                el, tot = int(m[-1].group(1)), max(int(m[-1].group(2)), 1)
-                st["progress"] = min(96, int(el / tot * 92) + 4)
-            if "[Done]" in body or "DATASET_READY" in text:
-                st.update(state="done", progress=100, done=True, phase="tugadi")
-                return
-        if not st["done"]:
-            st.update(state="done", progress=100, done=True, phase="tugadi (vaqt tugadi)")
+            st.update(state="error", done=True, error=f"{type(e).__name__}: {e}")
 
     @staticmethod
     def _phase(body):
@@ -192,9 +190,17 @@ class RunManager:
 
     def stop(self, run_id):
         st = self._runs.get(run_id)
-        if st:
-            st["_stop"] = True
-        return {"ok": True}
+        if not st:
+            return {"ok": False, "error": "run_id topilmadi"}
+        if st.get("done"):
+            return {"ok": True, "state": st["state"]}
+        st.update(_stop=True, state="cancelling")
+        if st.get("_pid"):
+            try:
+                self._exec_script(st["_cfg"], RemoteJob.stop(st["_pid"]))
+            except Exception as e:
+                return {"ok": False, "error": str(e)}
+        return {"ok": True, "state": st["state"]}
 
     def list_runs(self):
         return sorted(
@@ -206,32 +212,41 @@ class RunManager:
         st = self._runs.get(run_id)
         if not st:
             return {"ok": False, "error": "run_id topilmadi"}
-        cfg = self._cfg()
+        if st.get("state") != "done":
+            return {"ok": False, "error": "Run muvaffaqiyatli tugamagan"}
+        cfg = st["_cfg"]
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         dest = os.path.join(repo_root, cfg["results_dir"],
-                            f"{st['topology']}_{st['routing']}_seed{st['seed']}", "datasets")
+                            f"{st['topology']}_{st['routing']}_seed{st['seed']}_{run_id}", "datasets")
         os.makedirs(dest, exist_ok=True)
         remote_tar = f"/tmp/studio_ds_{run_id}.tar.gz"
         try:
             c = self._ssh(cfg)
             argv = self._b64cmd(cfg["wsl_distro"],
-                                f"tar czf {remote_tar} -C /data datasets 2>/dev/null && echo TAR_OK")
-            stdin, stdout, stderr = c.exec_command(" ".join(argv), timeout=120)
+                                f"tar czf {shlex.quote(remote_tar)} -C {RemoteJob(run_id).data} datasets 2>/dev/null && echo TAR_OK")
+            stdin, stdout, stderr = c.exec_command(subprocess.list2cmdline(argv), timeout=120)
             if "TAR_OK" not in stdout.read().decode(errors="replace"):
                 c.close(); return {"ok": False, "error": "Serverda datasets topilmadi"}
             # WSL fayl tizimi -> Windows -> sftp. Oddiylik uchun WSL ichidan
             # Windows-ko'rinadigan /mnt/c ga ko'chirib, sftp bilan olamiz.
             win_tmp = f"/mnt/c/Users/{cfg['ssh_user']}/studio_ds_{run_id}.tar.gz"
-            argv2 = self._b64cmd(cfg["wsl_distro"], f"cp {remote_tar} {win_tmp} && echo CP_OK")
-            stdin, stdout, stderr = c.exec_command(" ".join(argv2), timeout=120)
-            stdout.read()
+            argv2 = self._b64cmd(cfg["wsl_distro"], f"cp {shlex.quote(remote_tar)} {shlex.quote(win_tmp)} && echo CP_OK")
+            stdin, stdout, stderr = c.exec_command(subprocess.list2cmdline(argv2), timeout=120)
+            if "CP_OK" not in stdout.read().decode(errors="replace"):
+                c.close()
+                return {"ok": False, "error": "Dataset arxivini ko'chirish bajarilmadi"}
             sftp = c.open_sftp()
             local_tar = os.path.join(dest, "_import.tar.gz")
             sftp.get(f"C:/Users/{cfg['ssh_user']}/studio_ds_{run_id}.tar.gz", local_tar)
             sftp.close(); c.close()
             import tarfile
             with tarfile.open(local_tar) as tf:
-                tf.extractall(os.path.dirname(dest))
+                from pathlib import PurePosixPath
+                for member in tf.getmembers():
+                    parts = PurePosixPath(member.name).parts
+                    if not parts or parts[0] != "datasets" or ".." in parts or not (member.isfile() or member.isdir()):
+                        raise ValueError("Dataset arxivida xavfli yo'l yoki fayl turi")
+                tf.extractall(os.path.dirname(dest), filter="data")
             os.remove(local_tar)
             return {"ok": True, "folder": os.path.relpath(dest, repo_root)}
         except Exception as e:

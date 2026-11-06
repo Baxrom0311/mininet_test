@@ -101,7 +101,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install NetLab backend deps (+ ns-3 engine wheel)
-        run: pip install --quiet -r lab/requirements.txt httpx ns3
+        run: pip install --quiet -r lab/requirements.txt httpx ns3 pandas
       - name: Syntax check lab/
         run: python -m py_compile lab/*.py lab/drivers/*.py lab/engines/*.py lab/templates/sdn/*.py lab/tests/*.py
       # Real driver must import without Mininet present (all mininet imports are lazy).
@@ -132,6 +132,10 @@ jobs:
           python -m lab.tests.smoke_perf
           python -m lab.tests.smoke_report
           python -m lab.tests.smoke_survivability_n2
+      - name: IPv6 model and ns-3 packet regression
+        run: python -m unittest lab.tests.smoke_ipv6 lab.tests.smoke_isis -v
+      - name: Runtime safety and dataset labeling regression
+        run: python -m unittest lab.tests.test_runtime_safety ml.test_labeling lab.tests.test_calibration -v
 
   docker-build:
     runs-on: ubuntu-latest

@@ -1,5 +1,12 @@
 # Network Studio — vizual boshqaruv ilovasi
 
+Masofaviy ishga tushirishlar `/tmp/netlab-studio/<run_id>/data` ichida ajratiladi;
+muvaffaqiyat faqat shu run’ning exit kodi 0 va dataset mavjudligi bilan aniqlanadi.
+Stop butun process group’ga SIGTERM yuboradi, UI cancelled holatini jarayon tugagach
+ko‘rsatadi. Natijalar importida run ID katalog nomiga kiradi va xavfsiz tar filteri
+ishlatiladi (Python 3.12+). SSH server kaliti oldindan ishonchli `known_hosts`da
+bo‘lishi kerak; noma’lum kalit avtomatik qabul qilinmaydi.
+
 Cisco DNA Center / Packet Tracer uslubidagi **desktop ilova** (alohida oyna,
 brauzer emas): topologiyani vizual qurish, simulyatsiyani serverda ishga
 tushirish, yig'ilgan ma'lumotni jonli ko'rish va tahlil qilish — hammasi bitta

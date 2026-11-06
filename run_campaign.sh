@@ -83,7 +83,7 @@ for topo in "${TOPOLOGIES[@]}"; do
                 continue
             fi
 
-            "${run_cmd[@]}"
+            DATA_DIR="$DATA_DIR" "${run_cmd[@]}"
 
             # Butun datasets/ papkasini (CSV/parquet/metadata.json) ko'chiramiz.
             if [[ ! -d "$DATA_DIR/datasets" ]]; then

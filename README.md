@@ -1,5 +1,12 @@
 # Real Internet Simulation v3
 
+> **O‘lchovlarni talqin qilish:** root simulyatordagi `--routing` — nazariy yo‘l
+> modeli. Real switch forwarding barcha rejimlarda L2 learning bo‘lib qoladi;
+> u haqiqiy OSPF/BGP/ECMP protokolini yoqmaydi. Yangi datasetlar bu farqni
+> `forwarding_mode=l2_learning`, `routing_label_kind=theoretical` bilan belgilaydi.
+> `transport_events` barcha paketlar emas, kontrollerga kelgan PacketIn hodisalaridir.
+> Haqiqiy FRR protokollarini sinash uchun NetLab real driver’dan foydalaning.
+
 Mininet + SDN (os-ken/Ryu) yordamida real internet trafikini simulyatsiya qilish va ML/AI uchun dataset generatsiya qilish.
 
 > **Yangi: Network Studio** — vizual desktop boshqaruv ilovasi (topologiya qurish,

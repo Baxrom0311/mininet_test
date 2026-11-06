@@ -1341,6 +1341,14 @@ exit 0
                            f"-c 'timers basic {tm['update']} {tm['timeout']} {tm['garbage']}' 2>&1")
             if out.strip():
                 self.bus.log("warn", f"rip timers: {out.strip()[-300:]}", name)
+        if "isisd" in daemons:
+            from lab.isis import frr_config
+            path = os.path.join(etc, "isis-netlab.conf")
+            with open(path, "w") as f:
+                f.write(frr_config(self.project, name))
+            out = node.cmd(f"vtysh -N {name} -f {path} 2>&1")
+            if "error" in out.lower() or "unknown command" in out.lower():
+                raise DriverError(f"IS-IS config {name}: {out.strip()[-400:]}")
         if "bgpd" in daemons and cfg.get("bgp"):
             from lab.bgp import frr_config
             path = os.path.join(etc, "bgp-netlab.conf")

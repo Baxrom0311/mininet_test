@@ -5,6 +5,7 @@ ham shu yerda amalga oshiriladi."""
 import json
 import os
 import random
+import shlex
 import threading
 import time
 from collections import deque
@@ -509,60 +510,70 @@ class TrafficGen:
             target = random.choice(srv_list)
             duration = random.randint(2, 15)
 
+            commands = []
+            targets = [target.IP()]
+            def enqueue(_host, command):
+                commands.append(command)
+
             if a_name == "port_scan":
                 start_port = random.randint(1, 1000)
                 count = random.randint(5, 20)
-                self._safe_cmd(attacker,
+                enqueue(attacker,
                     f"hping3 -S -p ++{start_port} -c {count} "
                     f"{target.IP()} 2>/dev/null &")
                 details = f"ports={start_port}-{start_port+count}"
             elif a_name == "syn_flood":
                 count = random.randint(50, 200)
                 port = random.choice([80, 443, 22, 8080])
-                self._safe_cmd(attacker,
+                enqueue(attacker,
                     f"hping3 -S -p {port} -i u10000 "
                     f"-c {count} {target.IP()} 2>/dev/null &")
                 details = f"port={port} count={count}"
             elif a_name == "udp_flood":
                 count = random.randint(50, 200)
                 port = random.choice([53, 123, 161, 1900])
-                self._safe_cmd(attacker,
+                enqueue(attacker,
                     f"hping3 --udp -p {port} -i u10000 -c {count} {target.IP()} 2>/dev/null &")
                 details = f"port={port} count={count}"
             elif a_name == "dns_amplify":
-                self._safe_cmd(attacker,
+                enqueue(attacker,
                     f"hping3 --udp -p 53 -d 40 -c 50 {target.IP()} 2>/dev/null &")
                 details = "dns_amplification"
             elif a_name == "ping_sweep":
                 subnet = target.IP().rsplit(".", 1)[0]
-                self._safe_cmd(attacker, f"ping -c 1 -W 1 {subnet}.1 > /dev/null 2>&1 &")
-                self._safe_cmd(attacker, f"ping -c 1 -W 1 {subnet}.2 > /dev/null 2>&1 &")
-                self._safe_cmd(attacker, f"ping -c 1 -W 1 {subnet}.254 > /dev/null 2>&1 &")
+                targets = [f"{subnet}.{last}" for last in (1, 2, 254)]
+                enqueue(attacker, f"ping -c 1 -W 1 {subnet}.1 > /dev/null 2>&1 &")
+                enqueue(attacker, f"ping -c 1 -W 1 {subnet}.2 > /dev/null 2>&1 &")
+                enqueue(attacker, f"ping -c 1 -W 1 {subnet}.254 > /dev/null 2>&1 &")
                 details = f"subnet={subnet}.0/24"
             elif a_name == "brute_force":
                 for _ in range(random.randint(2, 5)):
-                    self._safe_cmd(attacker,
+                    enqueue(attacker,
                         f"curl -s -o /dev/null --max-time 2 "
-                        f"http://{target.IP()}/login?user=admin&pass={random.randint(1000,9999)} 2>/dev/null &")
+                        f"'http://{target.IP()}/login?user=admin&pass={random.randint(1000,9999)}' 2>/dev/null &")
                 details = "http_brute_force"
             elif a_name == "data_exfil":
                 rate = random.randint(rate_range[0], rate_range[1])
-                self._safe_cmd(attacker,
+                enqueue(attacker,
                     f"iperf3 -c {target.IP()} -p 5201 -t {min(duration,5)} -b {rate}K --logfile /dev/null &")
                 details = f"exfil_rate={rate}K"
             else:
                 # slowloris
                 for _ in range(random.randint(2, 5)):
-                    self._safe_cmd(attacker,
+                    enqueue(attacker,
                         f"curl -s -o /dev/null --max-time {min(duration,5)} "
                         f"http://{target.IP()}/large.bin 2>/dev/null &")
                 details = "slowloris_connections"
 
+            started = time.time()
+            script = "\n".join(commands) + "\nwait"
+            self._safe_cmd(attacker, f"timeout {duration}s bash -c {shlex.quote(script)}")
+            actual_duration = time.time() - started
             entry = {
-                "ts": time.time(), "type": a_name, "attacker": attacker.name,
+                "ts": started, "type": a_name, "attacker": attacker.name,
                 "attacker_ip": attacker.IP(), "target": target.name,
-                "target_ip": target.IP(), "proto": proto,
-                "duration_sec": duration, "details": details,
+                "target_ip": target.IP(), "target_ips": targets, "proto": proto,
+                "duration_sec": actual_duration, "details": details,
                 "severity": {"port_scan": "medium", "syn_flood": "critical",
                              "udp_flood": "critical", "dns_amplify": "high",
                              "slowloris": "high", "ping_sweep": "low",

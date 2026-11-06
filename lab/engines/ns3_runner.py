@@ -41,6 +41,8 @@ WIFI_STD = {"80211g": "WIFI_STANDARD_80211g", "80211n": "WIFI_STANDARD_80211n",
 # C++ ichida sanaladi (Python callback'lari har paketda juda sekin bo'lardi).
 _NODESTATS_CPP = r"""
 #include <sstream>
+#include <cstdlib>
+#include <iostream>
 namespace netlab {
 using namespace ns3;
 // Hisoblagichlar node id bo'yicha vektorda (har paketda std::map qidiruvi yo'q). TX = mahalliy
@@ -68,6 +70,24 @@ void Attach(Ptr<Node> n) {
   ip->TraceConnectWithoutContext("MulticastForward", MakeBoundCallback(&OnOut, c));   // har chiqish interfeysi
   ip->TraceConnectWithoutContext("Rx", MakeBoundCallback(&OnRx, c));
   ip->TraceConnectWithoutContext("Drop", MakeBoundCallback(&OnDrop, c));
+}
+static void OnFwd6(Cnt* c, const Ipv6Header&, Ptr<const Packet>, uint32_t) { c->fwd++; c->tx++; }
+static void OnOut6(Cnt* c, const Ipv6Header&, Ptr<const Packet>, uint32_t) { c->tx++; }
+static void OnRx6(Cnt* c, Ptr<const Packet>, Ptr<Ipv6>, uint32_t) { c->rx++; }
+static void OnDrop6(Cnt* c, const Ipv6Header&, Ptr<const Packet>, Ipv6L3Protocol::DropReason r,
+                    Ptr<Ipv6>, uint32_t) {
+  if (r == Ipv6L3Protocol::DROP_NO_ROUTE) c->noroute++; else c->drop++;
+  static unsigned debugDrops = 0;
+  if (std::getenv("NETLAB_NS3_DEBUG") && debugDrops++ < 5) std::cerr << "IPv6 drop reason=" << r << std::endl;
+}
+void Attach6(Ptr<Node> n) {
+  Ptr<Ipv6L3Protocol> ip = n->GetObject<Ipv6L3Protocol>();
+  if (!ip) return;
+  Cnt* c = &C(n->GetId());
+  ip->TraceConnectWithoutContext("UnicastForward", MakeBoundCallback(&OnFwd6, c));
+  ip->TraceConnectWithoutContext("SendOutgoing", MakeBoundCallback(&OnOut6, c));
+  ip->TraceConnectWithoutContext("Rx", MakeBoundCallback(&OnRx6, c));
+  ip->TraceConnectWithoutContext("Drop", MakeBoundCallback(&OnDrop6, c));
 }
 // barcha tugunlar hisoblagichlari bitta chaqiruvda (Python<->C++ o'tishlari kamroq)
 std::vector<uint64_t> GetAll(const std::vector<uint32_t>& ids) {
@@ -187,6 +207,9 @@ def main(inp_path, out_path):
     with open(inp_path) as f:
         inp = json.load(f)
     project, sc = inp["project"], inp["scenario"]
+    from lab.addressing import project_for_family
+    version = sc.get("ip_version", 4)
+    project = project_for_family(project, version)
     from lab.services import resolve_dhcp
     project, _leases = resolve_dhcp(project)   # DHCP: ns-3 da lizing manzillari statik o'rnatiladi
     duration = float(sc.get("duration", 30))
@@ -194,6 +217,8 @@ def main(inp_path, out_path):
     emit(log="ns-3 yuklanmoqda...")
     from ns import ns  # noqa: E402  (og'ir import — faqat shu jarayonda)
     emit(log="ns-3 tayyor, topologiya qurilmoqda")
+    from lab.engines.ns3_addressing import AddressFamily
+    family = AddressFamily(ns, version)
     for comp in filter(None, os.environ.get("NETLAB_NS3_LOG", "").split(",")):   # debug: ns-3 loglari (stderr)
         ns.LogComponentEnable(comp.strip(), ns.LOG_LEVEL_INFO)
     ns.RngSeedManager.SetSeed(int(sc.get("seed", 1)) or 1)
@@ -211,8 +236,8 @@ def main(inp_path, out_path):
         fast = False
     mtu = 9000 if fast else 1500
     if fast:
-        emit(log="ns3_fast: MTU 9000 / MSS 8948, navbatlar bayt bo'yicha teng (taxminiy rejim)")
-    ns.Config.SetDefault("ns3::TcpSocket::SegmentSize", ns.UintegerValue(mtu - 52))
+        emit(log=f"ns3_fast: MTU 9000 / MSS {mtu - (72 if version == 6 else 52)}, navbatlar bayt bo'yicha teng (taxminiy rejim)")
+    ns.Config.SetDefault("ns3::TcpSocket::SegmentSize", ns.UintegerValue(mtu - (72 if version == 6 else 52)))
     ns.Config.SetDefault("ns3::TcpSocket::SndBufSize", ns.UintegerValue(4 * 1024 * 1024))
     ns.Config.SetDefault("ns3::TcpSocket::RcvBufSize", ns.UintegerValue(6 * 1024 * 1024))
     ns.Config.SetDefault("ns3::TcpL4Protocol::SocketType", ns.StringValue("ns3::TcpCubic"))
@@ -245,6 +270,7 @@ def main(inp_path, out_path):
     _lst_static = ns.Ipv4ListRoutingHelper()
     _lst_static.Add(ns.Ipv4StaticRoutingHelper(), 0)
     stack.SetRoutingHelper(_lst_static)
+    family.configure_stack(stack)
     # RIP taymerlari (config.rip_timers / startup `timers basic`) — har xil taymerli
     # routerlar guruhi uchun alohida RipHelper (atributlar helper darajasida).
     from lab.model import rip_timers
@@ -262,6 +288,7 @@ def main(inp_path, out_path):
             lst.Add(rip, -10)
             st_ = ns.InternetStackHelper()
             st_.SetRoutingHelper(lst)
+            family.configure_stack(st_)
             rip_stacks[key] = st_
             _keep += [rip, lst]
     if rip_nodes:
@@ -281,7 +308,7 @@ def main(inp_path, out_path):
     stat_nodes = [n for n, d in devs.items() if d["type"] in L3_NS]
     nl.Reserve(max(nd.GetId() for nd in nodes.values()))
     for n in stat_nodes:
-        nl.Attach(nodes[n])
+        (nl.Attach6 if version == 6 else nl.Attach)(nodes[n])
 
     # Eslatma: ns-3'da mavjud bo'lmagan atributga SetAttribute — C++ abort (Python
     # istisnosi emas). Noaniq atributlar uchun doim SetAttributeFailSafe.
@@ -465,7 +492,7 @@ def main(inp_path, out_path):
         d = devs[dname]
         if d["type"] not in L3:
             continue
-        ipv4 = nodes[dname].GetObject[ns.Ipv4]()
+        ipv4 = family.protocol(nodes[dname])
         if (dname, port) in port_q:
             # Linux kabi: navbat (queue) IP qatlamidagi qdisc'da — pfifo limit=queue, qurilma
             # navbati kichik. Aks holda (qo'lda AddInterface) qdisc yo'q va TrafficControlLayer
@@ -493,28 +520,19 @@ def main(inp_path, out_path):
                         break
             except Exception:  # noqa: BLE001
                 pass
-        idx = ipv4.AddInterface(dv)
         ip = (((d.get("config") or {}).get("interfaces") or {}).get(f"{dname}-eth{port}") or {}).get("ip")
-        if ip:
-            ii = ipaddress.ip_interface(ip)
-            ipv4.AddAddress(idx, ns.Ipv4InterfaceAddress(ns.Ipv4Address(str(ii.ip)), ns.Ipv4Mask(str(ii.netmask))))
+        idx, ii = family.bind(ipv4, dv, ip, d["type"] in ("router", "sdnrouter"))
+        if ii:
             iface[(dname, port)] = (ipv4, idx, ii)
-        ipv4.SetUp(idx)
     # Hostlar tranzit bo'lmasin. Lekin ns-3 Ipv4GlobalRouting P2P bilan ulangan,
     # IpForward=false bo'lgan hostda segfault beradi (ns-3.44). Bitta interfeysli host
     # baribir tranzit bo'la olmaydi — faqat ko'p interfeyslilarda o'chiramiz.
     for name, d in devs.items():
-        if d["type"] in ("host", "server") and sum(1 for (dn, _p) in iface if dn == name) > 1:
+        if version == 4 and d["type"] in ("host", "server") and sum(1 for (dn, _p) in iface if dn == name) > 1:
             nodes[name].GetObject[ns.Ipv4]().SetAttribute("IpForward", ns.BooleanValue(False))
 
     # statik marshrutlar + gateway (Ipv4StaticRouting ustuvorligi global'dan yuqori)
-    srh = ns.Ipv4StaticRoutingHelper()
-
-    def out_if(dname, via):
-        for (dn, _p), (_ipv4, idx, ii) in iface.items():
-            if dn == dname and via in ii.network:
-                return idx
-        return None
+    srh = family.helper
 
     from lab.drivers.demo_driver import Net
     state = copy.deepcopy(project)      # joriy holat: kabel up/down, pozitsiyalar (routing uchun)
@@ -526,21 +544,24 @@ def main(inp_path, out_path):
         for name, d in devs.items():
             if d["type"] not in L3:
                 continue
-            sr = srh.GetStaticRouting(nodes[name].GetObject[ns.Ipv4]())
-            for i in range(sr.GetNRoutes() - 1, -1, -1):
-                if sr.GetRoute(i).GetGateway().Get() != 0:      # ulangan (gateway'siz) marshrutlar qoladi
-                    sr.RemoveRoute(i)
+            sr = family.routes(nodes[name])
+            family.clear_gateway_routes(sr)
             for net, via, ifn, proto in n.routes(name):
                 if via is None or (name in rip_nodes and proto != "static"):
                     continue
                 k = (name, parse_ifname(ifn)[1])
                 if k not in iface:
                     continue
-                sr.AddNetworkRouteTo(ns.Ipv4Address(str(net.network_address)), ns.Ipv4Mask(str(net.netmask)),
-                                     ns.Ipv4Address(str(via)), iface[k][1])
+                family.add_route(sr, net, via, iface[k][1])
 
-    emit(log="routing jadvallari (SPF, analitik bilan bir xil model)")
+    emit(log=f"IPv{version} routing jadvallari (SPF, analitik bilan bir xil model)")
     install_routes()
+    if version == 6 and os.environ.get("NETLAB_NS3_DEBUG"):
+        for name, node in nodes.items():
+            if devs[name]["type"] in L3:
+                ip = family.protocol(node)
+                emit(log=f"{name}: forwarding={[ip.IsForwarding(i) for i in range(ip.GetNInterfaces())]} "
+                         f"routes={sorted(family.route_keys(node, {}))}")
     emit(log="ilovalar")
 
     # ilovalar
@@ -624,18 +645,18 @@ def main(inp_path, out_path):
             continue
         from lab.model import dscp_class
         tos = 0xb8 if dscp_class(app.get("dscp")) == 0 else 0     # yuqori sinf -> EF
-        addr = ns.InetSocketAddress(ns.Ipv4Address(dip), port).ConvertTo()
+        addr = family.endpoint(dip, port)
         if typ == "ping":
             srv = ns.UdpEchoServerHelper(port)
             sa = srv.Install(nodes[dst]); sa.Start(ns.Seconds(0.0))
-            cl = ns.UdpEchoClientHelper(ns.Ipv4Address(dip).ConvertTo(), port)
+            cl = ns.UdpEchoClientHelper(family.address(dip).ConvertTo(), port)
             cl.SetAttribute("MaxPackets", ns.UintegerValue(10 ** 7))
             cl.SetAttribute("Interval", ns.TimeValue(ns.Seconds(float(app.get("interval", 0.2)))))
             cl.SetAttribute("PacketSize", ns.UintegerValue(int(app.get("size", 64))))
             ca = cl.Install(nodes[src])
         else:
             proto = "ns3::TcpSocketFactory" if typ == "tcp" else "ns3::UdpSocketFactory"
-            sink = ns.PacketSinkHelper(proto, ns.InetSocketAddress(ns.Ipv4Address.GetAny(), port).ConvertTo())
+            sink = ns.PacketSinkHelper(proto, family.any_endpoint(port))
             sa = sink.Install(nodes[dst]); sa.Start(ns.Seconds(0.0))
             if typ == "tcp" and not app.get("rate"):
                 bs = ns.BulkSendHelper(proto, addr)
@@ -716,7 +737,7 @@ def main(inp_path, out_path):
             if devs[n_]["type"] in L3:
                 fm_nodes.Add(nodes[n_])
         mon = fmh.Install(fm_nodes)
-    clf = ns.DynamicCast[ns.Ipv4FlowClassifier](fmh.GetClassifier())
+    clf = family.classifier(fmh)
 
     # hodisalar
     def set_link(lid, up=None, params=None):
@@ -741,8 +762,8 @@ def main(inp_path, out_path):
             for end in lo["ends"]:
                 k = (end["dev"], end["port"])
                 if k in iface:
-                    ipv4, idx, _ = iface[k]
-                    (ipv4.SetUp if up else ipv4.SetDown)(idx)
+                    ipv4, idx, ii = iface[k]
+                    family.set_link_state(ipv4, idx, up, ii)
             if lid in state["links"]:
                 state["links"][lid]["up"] = bool(up)
             install_routes()
@@ -905,7 +926,8 @@ def main(inp_path, out_path):
 
     def sample_nodes(dt):
         for n in stat_nodes:
-            rts = parse_ns3_routes(str(nl.Routes(nodes[n])), idx_ifn.get(n, {}))
+            rts = (family.route_keys(nodes[n], idx_ifn.get(n, {})) if version == 6 else
+                   parse_ns3_routes(str(nl.Routes(nodes[n])), idx_ifn.get(n, {})))
             rtrack.update(now, n, rts)
             cur = [int(x) for x in nl.Get(nodes[n].GetId())]
             p0 = node_prev.get(n, cur)
@@ -934,7 +956,8 @@ def main(inp_path, out_path):
         return tx, rx, rxb, dl, jt
 
     for n in stat_nodes:        # t=0 holat
-        rtrack.update(0, n, parse_ns3_routes(str(nl.Routes(nodes[n])), idx_ifn.get(n, {})))
+        rtrack.update(0, n, (family.route_keys(nodes[n], idx_ifn.get(n, {})) if version == 6 else
+                   parse_ns3_routes(str(nl.Routes(nodes[n])), idx_ifn.get(n, {}))))
         node_prev[n] = [int(x) for x in nl.Get(nodes[n].GetId())]
     # VRRP: ns-3 da yo'q — model vaqt jadvali (lab/vrrp.timeline: Master_Down_Interval, preempt)
     # bo'yicha VIP joriy master interfeysiga qo'shimcha manzil sifatida qo'yiladi/olinadi va
@@ -1096,7 +1119,7 @@ def main(inp_path, out_path):
             flows[app["id"]]["done_t"] = round(dt_, 4) if dt_ >= 0 else None
     ns.Simulator.Destroy()
     out = {"engine": "ns3", "engine_label": "ns-3 (diskret-hodisali simulyatsiya)",
-           "duration": duration, "flows": flows, "links": link_series, "events": applied,
+           "ip_version": version, "duration": duration, "flows": flows, "links": link_series, "events": applied,
            "nodes": node_series, "route_events": rtrack.events,
            "convergence": convergence(applied, rtrack.events, duration),
            "wall_s": round(time.time() - t_wall, 2),

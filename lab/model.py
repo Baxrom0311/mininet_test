@@ -198,6 +198,13 @@ def validate_project(p):
                     errors.append(f"{name}/{ifn}: DHCP mijoz faqat host/server/router'da")
             else:
                 _check_ip(ic.get("ip"), f"{name}/{ifn}", errors)
+            if ic.get("ip6"):
+                _check_ip(ic["ip6"], f"{name}/{ifn} IPv6", errors)
+                try:
+                    if ipaddress.ip_interface(ic["ip6"]).version != 6:
+                        errors.append(f"{name}/{ifn}: ip6 IPv6 bo'lishi kerak")
+                except ValueError:
+                    pass  # _check_ip already reports malformed addresses
             dn, _pt, vl = parse_ifname(ifn)
             if vl is not None:
                 if dn != name or not 1 <= vl <= 4094:
@@ -228,6 +235,11 @@ def validate_project(p):
                 ipaddress.ip_address(gw)
             except ValueError:
                 errors.append(f"{name}: noto'g'ri gateway '{gw}'")
+        if cfg.get("gateway6"):
+            try:
+                ipaddress.IPv6Address(cfg["gateway6"])
+            except ValueError:
+                errors.append(f"{name}: gateway6 IPv6 bo'lishi kerak")
         ctrl = cfg.get("controller")
         if d["type"] == "sdnrouter" or (d["type"] == "switch" and cfg.get("mode") == "sdn"):
             if not ctrl:
@@ -250,6 +262,8 @@ def validate_project(p):
             try:
                 ipaddress.ip_network(r.get("prefix", ""), strict=False)
                 ipaddress.ip_address(r.get("via", ""))
+                if ipaddress.ip_network(r["prefix"], strict=False).version != ipaddress.ip_address(r["via"]).version:
+                    errors.append(f"{name}: prefix va via bir xil IP oilasida bo'lsin")
             except ValueError:
                 errors.append(f"{name}: noto'g'ri statik marshrut {r}")
 
@@ -294,6 +308,8 @@ def validate_project(p):
     errors += validate_services(p)
     from lab.bgp import validate_bgp
     errors += validate_bgp(p)
+    from lab.isis import validate as validate_isis
+    errors += validate_isis(p)
     from lab.stp import validate as validate_stp
     errors += validate_stp(p)
     from lab.mcast import validate_project as validate_mcast
@@ -369,6 +385,9 @@ EVENT_ACTIONS = ("link_down", "link_up", "link_params", "move")
 def validate_scenario(project, sc):
     """Ssenariy (trafik ilovalari + vaqtli hodisalar) xatolari ro'yxati."""
     errors = []
+    version = sc.get("ip_version", 4)
+    if type(version) is not int or version not in (4, 6):
+        errors.append("ip_version: 4 | 6")
     try:
         dur = float(sc.get("duration", 0))
     except (TypeError, ValueError):
@@ -379,6 +398,12 @@ def validate_scenario(project, sc):
     ids = set()
     for i, a in enumerate(sc.get("apps") or []):
         w = f"ilova {a.get('id') or i + 1}"
+        if a.get("dst_ip"):
+            try:
+                if ipaddress.ip_address(a["dst_ip"]).version != version:
+                    errors.append(f"{w}: dst_ip ip_version bilan mos bo'lsin")
+            except ValueError:
+                errors.append(f"{w}: noto'g'ri dst_ip")
         if a.get("id") in ids:
             errors.append(f"{w}: id takrorlangan")
         ids.add(a.get("id"))
@@ -414,6 +439,17 @@ def validate_scenario(project, sc):
                 errors.append(f"{w}: '{a.get(k)}' qurilma yo'q")
             elif not DEVICE_TYPES[d["type"]]["l3"] or d["type"] == "sdnrouter":
                 errors.append(f"{w}: {a.get(k)} trafik manbai/qabul qiluvchisi bo'la olmaydi (host/server/router)")
+            elif version == 6:
+                from lab.addressing import interface_address
+                try:
+                    has_ip6 = any(interface_address(ic, 6) for ic in
+                                  ((d.get("config") or {}).get("interfaces") or {}).values())
+                except ValueError:
+                    has_ip6 = False
+                if not has_ip6:
+                    errors.append(f"{w}: {a.get(k)} da IPv6 manzil yo'q")
+        if version == 6 and a.get("type") == "mcast":
+            errors.append(f"{w}: IPv6 multicast hozircha qo'llab-quvvatlanmaydi")
         try:
             st, sp = float(a.get("start", 0)), float(a.get("stop", dur))
             if not (0 <= st < sp):

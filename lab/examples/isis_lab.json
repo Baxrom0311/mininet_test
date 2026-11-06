@@ -1,0 +1,362 @@
+{
+  "version": 1,
+  "name": "isis_lab",
+  "devices": {
+    "r0": {
+      "id": 1,
+      "type": "router",
+      "x": 1000,
+      "y": 400,
+      "config": {
+        "daemons": [
+          "isisd"
+        ],
+        "interfaces": {
+          "r0-eth1": {
+            "ip": "172.16.0.5/30"
+          },
+          "r0-eth2": {
+            "ip": "172.16.0.14/30"
+          },
+          "r0-eth3": {
+            "ip": "10.0.0.1/24"
+          }
+        },
+        "startup": "",
+        "isis": {
+          "level": "level-2-only",
+          "metric": 10,
+          "interfaces": {
+            "r0-eth2": {
+              "metric": 50
+            }
+          }
+        }
+      }
+    },
+    "r1": {
+      "id": 2,
+      "type": "router",
+      "x": 400,
+      "y": 659,
+      "config": {
+        "daemons": [
+          "isisd"
+        ],
+        "interfaces": {
+          "r1-eth1": {
+            "ip": "172.16.0.6/30"
+          },
+          "r1-eth2": {
+            "ip": "172.16.0.9/30"
+          },
+          "r1-eth3": {
+            "ip": "10.0.1.1/24"
+          }
+        },
+        "startup": "",
+        "isis": {
+          "level": "level-2-only",
+          "metric": 10
+        }
+      }
+    },
+    "r2": {
+      "id": 3,
+      "type": "router",
+      "x": 399,
+      "y": 140,
+      "config": {
+        "daemons": [
+          "isisd"
+        ],
+        "interfaces": {
+          "r2-eth1": {
+            "ip": "172.16.0.10/30"
+          },
+          "r2-eth2": {
+            "ip": "172.16.0.13/30"
+          },
+          "r2-eth3": {
+            "ip": "10.0.2.1/24"
+          }
+        },
+        "startup": "",
+        "isis": {
+          "level": "level-2-only",
+          "metric": 10
+        }
+      }
+    },
+    "s0": {
+      "id": 4,
+      "type": "switch",
+      "x": 1000,
+      "y": 460,
+      "config": {
+        "mode": "standalone",
+        "stp": false
+      }
+    },
+    "h0x0": {
+      "id": 5,
+      "type": "host",
+      "x": 1000,
+      "y": 520,
+      "config": {
+        "interfaces": {
+          "h0x0-eth1": {
+            "ip": "10.0.0.10/24"
+          }
+        },
+        "gateway": "10.0.0.1",
+        "routes": []
+      }
+    },
+    "s1": {
+      "id": 6,
+      "type": "switch",
+      "x": 400,
+      "y": 719,
+      "config": {
+        "mode": "standalone",
+        "stp": false
+      }
+    },
+    "h1x0": {
+      "id": 7,
+      "type": "host",
+      "x": 400,
+      "y": 779,
+      "config": {
+        "interfaces": {
+          "h1x0-eth1": {
+            "ip": "10.0.1.10/24"
+          }
+        },
+        "gateway": "10.0.1.1",
+        "routes": []
+      }
+    },
+    "s2": {
+      "id": 8,
+      "type": "switch",
+      "x": 399,
+      "y": 200,
+      "config": {
+        "mode": "standalone",
+        "stp": false
+      }
+    },
+    "h2x0": {
+      "id": 9,
+      "type": "host",
+      "x": 399,
+      "y": 260,
+      "config": {
+        "interfaces": {
+          "h2x0-eth1": {
+            "ip": "10.0.2.10/24"
+          }
+        },
+        "gateway": "10.0.2.1",
+        "routes": []
+      }
+    }
+  },
+  "links": {
+    "l1": {
+      "a": {
+        "dev": "r0",
+        "port": 1
+      },
+      "b": {
+        "dev": "r1",
+        "port": 1
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l2": {
+      "a": {
+        "dev": "r1",
+        "port": 2
+      },
+      "b": {
+        "dev": "r2",
+        "port": 1
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l3": {
+      "a": {
+        "dev": "r2",
+        "port": 2
+      },
+      "b": {
+        "dev": "r0",
+        "port": 2
+      },
+      "params": {
+        "bw": 1000,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l4": {
+      "a": {
+        "dev": "r0",
+        "port": 3
+      },
+      "b": {
+        "dev": "s0",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l5": {
+      "a": {
+        "dev": "s0",
+        "port": 2
+      },
+      "b": {
+        "dev": "h0x0",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l6": {
+      "a": {
+        "dev": "r1",
+        "port": 3
+      },
+      "b": {
+        "dev": "s1",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l7": {
+      "a": {
+        "dev": "s1",
+        "port": 2
+      },
+      "b": {
+        "dev": "h1x0",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l8": {
+      "a": {
+        "dev": "r2",
+        "port": 3
+      },
+      "b": {
+        "dev": "s2",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    },
+    "l9": {
+      "a": {
+        "dev": "s2",
+        "port": 2
+      },
+      "b": {
+        "dev": "h2x0",
+        "port": 1
+      },
+      "params": {
+        "bw": 100,
+        "delay": "1ms",
+        "jitter": "0ms",
+        "loss": 0,
+        "queue": 1000
+      },
+      "up": true
+    }
+  },
+  "p4_programs": {},
+  "controllers": {},
+  "scenarios": {
+    "asosiy": {
+      "duration": 10,
+      "apps": [
+        {
+          "id": "video",
+          "type": "udp",
+          "src": "h0x0",
+          "dst": "h2x0",
+          "rate": "500kbps",
+          "start": 2,
+          "stop": 10
+        }
+      ],
+      "events": [
+        {
+          "t": 5,
+          "action": "link_down",
+          "link": "l1"
+        },
+        {
+          "t": 7,
+          "action": "link_up",
+          "link": "l1"
+        }
+      ]
+    }
+  },
+  "notes": "generator: 3 router, 3 host, 9 kabel"
+}
