@@ -36,6 +36,22 @@ if [ "$WANT_FRR" -eq 1 ]; then
   # Tizimdagi FRR xizmati kerak emas — NetLab har router uchun o'z daemonlarini
   # namespace ichida (-N <nom>) ishga tushiradi.
   systemctl disable --now frr 2>/dev/null || service frr stop 2>/dev/null || true
+  # Ubuntu 26.04+: FRR demonlari AppArmor profili ostida ishlaydi va /run/frr/<router>/
+  # (har router uchun alohida katalog) ichida pid/vty fayl yaratishni taqiqlaydi. Lokal
+  # override qo'shib profilni qayta yuklaymiz (profil bo'lmasa — hech narsa qilinmaydi).
+  if command -v apparmor_parser >/dev/null 2>&1; then
+    mkdir -p /etc/apparmor.d/local
+    for d in babeld bfdd bgpd eigrpd fabricd isisd ldpd nhrpd ospf6d ospfd pathd pbrd \
+             pim6d pimd ripd ripngd staticd vrrpd; do
+      [ -f "/etc/apparmor.d/$d" ] || continue
+      grep -q NetLab "/etc/apparmor.d/local/$d" 2>/dev/null || cat >> "/etc/apparmor.d/local/$d" <<'EOT'
+# NetLab: har router uchun /run/frr/<router>/ va /etc/frr/<router>/
+/{,var/}run/frr/** rwk,
+/etc/frr/** r,
+EOT
+      apparmor_parser -r "/etc/apparmor.d/$d" 2>/dev/null || true
+    done
+  fi
 fi
 
 if [ "$WANT_SDN" -eq 1 ]; then
