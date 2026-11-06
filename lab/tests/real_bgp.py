@@ -29,6 +29,9 @@ def t_bgp(drv, caps):
           "r2: iBGP (r1) va eBGP (r3) sessiyalari Established (PfxRcd raqam)")
     r1 = drv.net.get("r1").cmd("vtysh -N r1 -c 'show ip route 10.2.0.0/24'")
     check("bgp" in r1.lower() and "10.12.0.2" in r1, "r1: 10.2.0.0/24 iBGP orqali (next-hop-self 10.12.0.2)")
+    transit = drv.net.get("r1").cmd("ip -4 route show")
+    check(not any(line.split()[0] == "203.0.113.0/30" for line in transit.splitlines() if line.strip()),
+          "r1: e'lon qilinmagan 203.0.113.0/30 OSPF marshruti yo'q")
     r3 = drv.net.get("r3").cmd("vtysh -N r3 -c 'show ip bgp 10.1.0.0/24'")
     check("65001" in r3, "r3: 10.1.0.0/24 AS_PATH 65001")
     ins = drv.inspect("r2")

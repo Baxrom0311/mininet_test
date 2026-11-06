@@ -734,8 +734,8 @@ Ssenariy `ebgp_uzilish`: t=10 s da eBGP kabeli uziladi, t=20 s da tiklanadi.
 Testlar: `python3 -m lab.tests.smoke_bgp` (demo + analitik + ns-3),
 `sudo python3 -m lab.tests.real_bgp` (real FRR).
 
-Cheklovlar: modelda IGP qo'shnisining barcha interfeys subnetlari o'rganiladi (OSPF `network`
-bayonotlari tahlil qilinmaydi); BGP atributlari (local-pref, MED, community), route reflector,
+IPv4 OSPF `network` va `passive-interface` qatorlari endi tanlash va qo‘shnichilikni
+cheklaydi: [OSPF startup siyosati](../docs/ospf-policy.md). BGP atributlari (local-pref, MED, community), route reflector,
 multipath va policy (route-map) modellashtirilmaydi — real FRR'da startup orqali yozish mumkin.
 
 ### STP / RSTP (switch halqalari)

@@ -308,6 +308,8 @@ def validate_project(p):
     errors += validate_services(p)
     from lab.bgp import validate_bgp
     errors += validate_bgp(p)
+    from lab.ospf import validate as validate_ospf
+    errors += validate_ospf(p)
     from lab.isis import validate as validate_isis
     errors += validate_isis(p)
     from lab.stp import validate as validate_stp

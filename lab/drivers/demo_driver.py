@@ -280,6 +280,10 @@ class Net:
             except ValueError:
                 pass
         mine = self.dyn_daemons(dev)
+        if "ospfd" in mine:
+            from lab.ospf import routes as ospf_routes
+            rt += ospf_routes(self, dev, {x[0] for x in rt})
+            mine = mine - {"ospfd"}
         if mine == {"isisd"}:
             from lab.isis import routes as isis_routes
             return rt + isis_routes(self, dev, {x[0] for x in rt})

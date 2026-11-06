@@ -42,6 +42,8 @@ MOS, fayl/sahifa vaqti va availability hisoblanadi. Asl ssenariy natijada saqlan
 | Mininet | Haqiqiy namespaces/OVS/FRR/iperf/ping | Root, kernel imkoniyati va host resurslariga bog‘liq |
 
 ns-3’da RIP uchun RIPv2 bor; OSPF/IS-IS model yo‘llari statik routingga aylanadi.
+`ospf.py` IPv4 startup network/area/passive tanlashini va per-area hop SPF’ni
+hisoblaydi; policy keshi bitta `Net` snapshotida qoladi. [OSPF siyosati](ospf-policy.md).
 IPv6 — bir ssenariy uchun alohida family: `ip6`/`gateway6` tanlanadi. Address-family
 farqlari `addressing.py` va `engines/ns3_addressing.py`da ushlanadi. DHCPv6/NAT66/
 IPv6 BGP/multicast bu bosqichga kirmaydi. `ns3_fast` taxminiy rejimining tradeoff’lari
