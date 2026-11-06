@@ -81,6 +81,12 @@ expand qilingan ssenariy, input hash va runtime manifestni run natijasiga qo‘s
 HTML/ZIP eksport shu snapshotlardan olinadi, jonli loyihaning keyingi holatidan emas.
 [experiments.md](experiments.md) semantika va qayta bajarish shartlarini tushuntiradi.
 
+`engines/result_index.py` natija JSON’larining `(mtime_ns,size)` signaturasini SQLite
+metadata bilan solishtiradi. O‘zgarmagan series ro‘yxat polling’ida o‘qilmaydi;
+experiment/study tanlash SQL filtriga tushadi. Pagination count/page bitta read
+snapshotdan olinadi. Migratsiya, reindex va kattalik cheklovlari:
+[result-index.md](result-index.md).
+
 ## Real testlar va qulf
 
 Mininet cleanup global; alohida real testlar yoki serverlarni bir vaqtda ko‘tarmang.

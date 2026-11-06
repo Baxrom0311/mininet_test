@@ -16,9 +16,17 @@ main bo‘lishi kerak. Agent PR ochmagan, merge yoki environment publish qilmaga
 | 7 | `feat/p4-bmv2` | `feat/run-queue` | `d276af0` |
 | 8 | `ci/real-mininet` | `feat/p4-bmv2` | `59c5580` |
 | 9 | `docs/architecture` | `ci/real-mininet` | `08bbbe4` |
-| 10 | `feat/experiment-statistics` | `docs/architecture` | replication/CI/replay branchi |
+| 10 | `feat/experiment-statistics` | `docs/architecture` | `521fb5b` |
+| 11 | `perf/run-result-index` | `feat/experiment-statistics` | indexed history/pagination branchi |
 
 ## Tekshirilgan imkoniyatlar
+
+- `perf/run-result-index`: yangi 10 test, jami 43 backend regressiyasi. Asl demo/report
+  smoke suite va haqiqiy ns-3 IPv4/IPv6 replication/replay ham o‘tdi.
+  100 × 10 000 nuqtali 64.9 MB sun’iy history’da warm
+  ro‘yxat median 503.2 ms’dan 1.67 ms’ga tushdi; o‘zgarmagan full JSON o‘qishlar
+  100’dan 0’ga tushdi. [result-index.md](result-index.md) cold import narxi,
+  migration backup/downgrade va O(fayllar soni) stat cheklovini tushuntiradi.
 
 - `feat/experiment-statistics`: 33 unit/integration test o‘tdi (oldingi 27 + 6 yangi
   experiment testi). Haqiqiy ns-3 replication/replay testi IPv4 va IPv6 uchun jami

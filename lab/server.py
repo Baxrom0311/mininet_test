@@ -307,8 +307,7 @@ def create_app(driver_name="demo", token=None):
     def _experiment(project, experiment_id):
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", experiment_id):
             raise ValueError("invalid experiment_id")
-        rs = [runs.get(project, r["run_id"]) for r in runs.list(project)
-              if r.get("experiment_id") == experiment_id]
+        rs = [runs.get(project, r["run_id"]) for r in runs.list(project, experiment_id=experiment_id)]
         rs.sort(key=lambda r: r["replication_index"])
         if not rs:
             raise HTTPException(404, "experiment not found")
@@ -384,8 +383,16 @@ def create_app(driver_name="demo", token=None):
         return _html(survivability_report(survivability(body)), "survivability.html")
 
     @app.get("/api/runs/{project}")
-    def run_list(project: str):
-        return {"runs": runs.list(project)}
+    def run_list(project: str, limit: int | None = None, offset: int = 0, status: str | None = None,
+                 engine: str | None = None, study_id: str | None = None, experiment_id: str | None = None):
+        filters = {"status": status, "engine": engine, "study_id": study_id, "experiment_id": experiment_id}
+        if limit is None and offset == 0 and all(v is None for v in filters.values()):
+            return {"runs": runs.list(project)}
+        return runs.page(project, 100 if limit is None else limit, offset, **filters)
+
+    @app.post("/api/runs/{project}/reindex")
+    def run_reindex(project: str):
+        return runs.reindex(project)
 
     @app.get("/api/runs/{project}/{run_id}")
     def run_get(project: str, run_id: str):
@@ -436,8 +443,8 @@ def create_app(driver_name="demo", token=None):
     @app.get("/api/studies/{project}/{study_id}/report.html")
     def study_report_html(project: str, study_id: str):
         from lab.report import study_report
-        rs = [runs.get(project, r["run_id"]) for r in runs.list(project)
-              if r.get("study_id") == study_id and r.get("status") not in ("running", None)]
+        rs = [runs.get(project, r["run_id"]) for r in runs.list(project, study_id=study_id)
+              if r.get("status") not in ("running", None)]
         if not rs:
             raise HTTPException(404, "tadqiqot natijalari topilmadi")
         return _html(study_report(rs), f"{study_id}.html")

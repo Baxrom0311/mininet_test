@@ -42,7 +42,13 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
     ustiga qurildi. 33 unit/integration test, eski report/failures suite va haqiqiy
     ns-3 IPv4/IPv6 uchun 6 jarayonli replication/replay sinovi o‘tdi.
     Qo‘llanma: `docs/experiments.md`. Bu real Mininet o‘lchovlarini almashtirmaydi.
-11. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
+11. `perf/run-result-index` — persistent metadata/file-signature indeksi, bounded
+    pagination va filtrlar, legacy schema migration/backup, selected experiment
+    report reads va pending label persistence. `feat/experiment-statistics` ustida.
+    10 yangi test bilan backend to‘plami 43 test; 64.9 MB sun’iy history’da warm
+    list 503.2 ms → 1.67 ms, 0 full JSON reads. `docs/result-index.md`ga qarang.
+    Haqiqiy ns-3 IPv4/IPv6 replication/replay va asl demo/report suite ham o‘tdi.
+12. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
     Agent mavjud UI’dagi tasdiqlangan sync xatosidan tashqari dizaynni o‘zgartirmaydi.
 
 Asl audit `233054b`da bajarilgan. Checkout endi PR #3 bilan kelgan `7c6e317` ustida;
