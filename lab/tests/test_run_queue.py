@@ -75,6 +75,8 @@ class QueueTests(unittest.TestCase):
     def test_cancel_silent_ns3_child_is_prompt_and_reaped(self):
         real_popen, spawned, children = subprocess.Popen, threading.Event(), []
         def start(*args, **kwargs):
+            if "lab.engines.ns3_runner" not in args[0]:
+                return real_popen(*args, **kwargs)
             process = real_popen([sys.executable, "-c", "import time; time.sleep(30)"],
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             children.append(process); spawned.set()

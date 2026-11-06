@@ -37,7 +37,12 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
    `docs/review-guide.md` branch/commit tartibi va acceptance holatini jamlaydi.
    Final branch: 27 yangi test, 18 IPv6/IS-IS testi, asl demo va qolgan 11 smoke
    suite o‘tdi. Real privileged sinovlar va yangi kalibratsiya o‘lchovlari bloklangan.
-10. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
+10. `feat/experiment-statistics` — independent replications, Student t 95% CI,
+    per-run input/runtime manifest va qayta bajarish eksporti. `docs/architecture`
+    ustiga qurildi. 33 unit/integration test, eski report/failures suite va haqiqiy
+    ns-3 IPv4/IPv6 uchun 6 jarayonli replication/replay sinovi o‘tdi.
+    Qo‘llanma: `docs/experiments.md`. Bu real Mininet o‘lchovlarini almashtirmaydi.
+11. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
     Agent mavjud UI’dagi tasdiqlangan sync xatosidan tashqari dizaynni o‘zgartirmaydi.
 
 Asl audit `233054b`da bajarilgan. Checkout endi PR #3 bilan kelgan `7c6e317` ustida;

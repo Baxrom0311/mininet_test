@@ -1,0 +1,109 @@
+"""Independent seeded replications; Student t intervals over per-run summaries."""
+
+import copy
+import math
+import statistics
+
+from lab.reproducibility import comparison_key, digest, verify
+
+# Two-sided 95% Student t quantiles, df=1..24. Replications are bounded at 25.
+T95 = (12.706204736, 4.302652730, 3.182446305, 2.776445105, 2.570581836,
+       2.446911851, 2.364624252, 2.306004135, 2.262157163, 2.228138852,
+       2.200985160, 2.178812830, 2.160368656, 2.144786688, 2.131449546,
+       2.119905299, 2.109815578, 2.100922040, 2.093024054, 2.085963447,
+       2.079613845, 2.073873068, 2.068657610, 2.063898562)
+METRICS = ("avg_thr_bps", "avg_delay_ms", "avg_jitter_ms", "loss_pct", "avg_rtt_ms")
+
+
+def variants(project, scenario_name, repetitions, seed):
+    if type(repetitions) is not int or not 2 <= repetitions <= 25:
+        raise ValueError("repetitions: integer 2..25")
+    if type(seed) is not int or not 1 <= seed <= 2147483647 - repetitions + 1:
+        raise ValueError("seed range must fit 1..2147483647")
+    out = []
+    for i in range(repetitions):
+        p = copy.deepcopy(project)
+        sc = p["scenarios"][scenario_name]
+        # ns-3 recommends a fixed seed with distinct run substreams.
+        sc["seed"] = seed
+        sc["rng_run"] = i + 1
+        if sc.get("failures"):
+            sc["failures"]["seed"] = seed + i
+        out.append(p)
+    return out
+
+
+def interval(values, eligible=True):
+    if len(values) > 25:
+        raise ValueError("at most 25 independent samples")
+    if any(type(v) not in (int, float) or not math.isfinite(v) for v in values):
+        raise ValueError("finite numeric samples required")
+    n = len(values)
+    mean = statistics.mean(values) if n else None
+    sd = statistics.stdev(values) if n >= 2 else None
+    half = T95[n - 2] * sd / math.sqrt(n) if n >= 2 and eligible else None
+    computed = [v for v in (mean, sd, half) if v is not None]
+    if half is not None:
+        computed.extend((mean - half, mean + half))
+    if any(not math.isfinite(v) for v in computed):
+        raise ValueError("sample magnitudes exceed finite statistics")
+    return {"n": n, "mean": mean, "sample_stddev": sd,
+            "ci95": [mean - half, mean + half] if half is not None else None}
+
+
+def summarize(runs):
+    if not runs:
+        raise ValueError("experiment runs not found")
+    counts = {r.get("replication_count") for r in runs}
+    ids = {r.get("experiment_id") for r in runs}
+    if len(counts) != 1 or len(ids) != 1 or None in ids:
+        raise ValueError("one experiment is required")
+    expected = next(iter(counts))
+    if type(expected) is not int or not 2 <= expected <= 25 or len(runs) > expected:
+        raise ValueError("invalid replication count")
+    seeds = [(r.get("seed"), r.get("rng_run")) for r in runs]
+    indices = [r.get("replication_index") for r in runs]
+    if (any(type(s) is not int or type(n) is not int or not 1 <= s <= 2147483647 or n < 1 for s, n in seeds)
+            or len(set(seeds)) != len(seeds)
+            or any(type(i) is not int or not 0 <= i < expected for i in indices)
+            or len(set(indices)) != len(indices)):
+        raise ValueError("replication seeds and indices must be distinct")
+    done = [r for r in runs if r.get("status") == "done"]
+    keys, runtime_keys = set(), set()
+    for r in done:
+        record = r.get("reproducibility") or {}
+        if not verify(record):
+            raise ValueError("completed run lacks verified reproducibility inputs")
+        sc = record["project"]["scenarios"][record["scenario_name"]]
+        key = comparison_key(record["project"], sc, r.get("engine"))
+        if (key != record.get("comparison_key") or sc.get("seed") != r.get("seed")
+                or sc.get("rng_run") != r.get("rng_run")):
+            raise ValueError("run input/seed mismatch")
+        if sc.get("failures") and sc["failures"].get("seed") != r["seed"] + r["replication_index"]:
+            raise ValueError("failure seed does not match replication")
+        keys.add(key)
+        # Different code, package versions or engine switches cannot share an interval.
+        runtime_keys.add(digest(record["runtime"]))
+    if len(keys) > 1 or len(runtime_keys) > 1:
+        raise ValueError("replications must use the same topology, scenario, engine and runtime")
+    complete = len(done) == expected and len(runs) == expected
+    rows = []
+    flow_ids = sorted({fid for r in done for fid, f in r.get("flows", {}).items() if not f.get("hidden")})
+    for fid in flow_ids:
+        for metric in METRICS:
+            values = [r.get("flows", {}).get(fid, {}).get("summary", {}).get(metric) for r in done]
+            valid = [v for v in values if type(v) in (int, float) and math.isfinite(v)]
+            if not valid:
+                continue
+            rows.append({"flow": fid, "metric": metric, "missing": expected - len(valid),
+                         **interval(valid, eligible=complete and len(valid) == expected)})
+    statuses = {}
+    for r in runs:
+        status = r.get("status", "unknown")
+        statuses[status] = statuses.get(status, 0) + 1
+    return {"experiment_id": next(iter(ids)), "expected": expected, "observed": len(runs),
+            "complete": complete, "statuses": statuses, "confidence": .95, "method": "Student t, per-run summary",
+            "metrics": rows,
+            "notes": ["Intervals require independent replications and an approximately normal sample mean.",
+                      "Identical deterministic results give zero width; this does not measure model accuracy.",
+                      "Incomplete, failed or missing-metric replications suppress the corresponding interval."]}
