@@ -9,11 +9,11 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 
 from lab.engines import manager
 from lab.engines.result_index import ResultIndex
 from lab.engines.run_store import RunStore, TERMINAL
+from lab.engines.run_submission import PreparedRun, submit
 
 
 class RunCancelled(Exception):
@@ -22,25 +22,10 @@ class RunCancelled(Exception):
 
 class QueuedRunManager(manager.RunManager):
     def start_experiment(self, project, scenario_name, engine, repetitions=10, seed=1):
-        from lab.experiments import variants
-        if engine not in ("analytic", "ns3"):
-            raise ValueError("independent replications require analytic or ns3")
-        project, _, _ = self._prepare(project, scenario_name, engine)
-        projects = variants(project, scenario_name, repetitions, seed)
-        # Stochastic expansion may exceed model limits for one particular seed.
-        # Reject every invalid variant before submitting the first run.
-        for p in projects:
-            self._prepare(p, scenario_name, engine)
-        experiment_id = manager.new_run_id()
-        with self.queue_lock:
-            if self.closed or len(self.futures) + len(projects) > 256:
-                raise ValueError("run queue closed or full (256 pending/running)")
-            ids = []
-            for i, p in enumerate(projects):
-                extra = {"experiment_id": experiment_id, "replication_index": i,
-                         "replication_count": repetitions, "seed": seed, "rng_run": i + 1}
-                ids.append(self.start(p, scenario_name, engine, extra=extra)["run_id"])
-        return {"experiment_id": experiment_id, "run_ids": ids, "repetitions": repetitions}
+        from lab.campaigns import prepare_experiment
+        condition, jobs = prepare_experiment(self, project, scenario_name, engine, repetitions, seed)
+        submit(self, jobs)
+        return {"experiment_id": condition["experiment_id"], "run_ids": condition["run_ids"], "repetitions": repetitions}
 
     def __init__(self, bus, driver, workers=None, database=None):
         super().__init__(bus, driver)
@@ -51,24 +36,18 @@ class QueuedRunManager(manager.RunManager):
         self.result_index = ResultIndex(self.store, manager.RESULTS_DIR)
         self.executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="netlab-run")
         self.futures, self.tokens = {}, {}
+        self.payloads = {}
         self.queue_lock = threading.RLock()
         self.closed = False
         self.workers = workers
         self.local = threading.local()
         self.real_lock = threading.Lock()
+        from lab.campaigns import CampaignManager
+        self.campaigns = CampaignManager(self)
 
     def _enqueue(self, rid, pname, project, name, sc, engine, extra=None):
-        with self.queue_lock:
-            if self.closed or len(self.futures) >= 256:
-                with self._lock:
-                    self.active.pop(rid, None)
-                raise ValueError("run queue closed or full (256 pending/running)")
-            token = self.tokens[rid] = threading.Event()
-            self.store.save({"run_id": rid, "project": pname, "scenario_name": name, "engine": engine,
-                             "duration": sc.get("duration"), "created": time.time(), "status": "queued", **(extra or {})})
-            future = self.executor.submit(self._execute, rid, pname, project, name, sc, engine, extra)
-            self.futures[rid] = future
-            return future
+        job = PreparedRun(rid, pname, project, name, sc, engine, extra)
+        return submit(self, [job])[rid]
 
     def _launch_worker(self, *args):
         self._enqueue(*args)
@@ -82,6 +61,11 @@ class QueuedRunManager(manager.RunManager):
             self._enqueue(*args, **kwargs).result()
         except CancelledError:
             pass
+
+    def _execute_prepared(self, rid):
+        with self.queue_lock:
+            job = self.payloads.pop(rid)
+        return self._execute(*job.args())
 
     def _execute(self, rid, pname, project, name, sc, engine, extra):
         self.local.run_id = rid
@@ -100,10 +84,25 @@ class QueuedRunManager(manager.RunManager):
                         super()._worker(rid, pname, project, name, sc, engine, extra)
                 else:
                     super()._worker(rid, pname, project, name, sc, engine, extra)
+        except Exception as exc:
+            # Failures before the base worker's result/finally block must not leave a live-looking job.
+            # A completed JSON is authoritative; never replace committed measurements with a callback/index error.
+            if not (self.result_index.root / pname / (rid + ".json")).exists():
+                try:
+                    data = self.store.get(pname, rid)
+                    if data["status"] not in TERMINAL:
+                        data.update(status="error", error=f"{type(exc).__name__}: {exc}")
+                        self.store.save(data)
+                except Exception:
+                    pass  # Keep the original exception when storage is unavailable.
+            raise
         finally:
+            with self._lock:
+                self.active.pop(rid, None)
             with self.queue_lock:
                 self.futures.pop(rid, None)
                 self.tokens.pop(rid, None)
+                self.payloads.pop(rid, None)
             self.local.run_id = None
 
     def _pub(self, rid, **kw):
@@ -176,14 +175,17 @@ class QueuedRunManager(manager.RunManager):
                 return data
             token, future = self.tokens.get(rid), self.futures.get(rid)
             if not token or not future:
-                raise ValueError("run belongs to another live worker")
+                raise ValueError("run has no cancellable local worker")
             token.set()
             if future.cancel():
-                self._save(project, {**data, "status": "cancelled", "flows": {}})
-                with self._lock:
-                    self.active.pop(rid, None)
-                self.tokens.pop(rid, None)
-                self.futures.pop(rid, None)
+                try:
+                    self._save(project, {**data, "status": "cancelled", "flows": {}})
+                finally:
+                    with self._lock:
+                        self.active.pop(rid, None)
+                    self.tokens.pop(rid, None)
+                    self.futures.pop(rid, None)
+                    self.payloads.pop(rid, None)
             else:
                 data["status"] = "cancelling"
                 self.store.save(data)

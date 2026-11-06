@@ -15,7 +15,7 @@ PENDING = {"queued", "running", "cancelling"}
 METADATA_KEYS = ("run_id", "project", "scenario_name", "engine", "engine_label", "status", "created", "duration",
                  "wall_s", "progress", "error", "label", "study_id", "study_param", "study_value", "study_index",
                  "study_param2", "study_value2", "study_index2", "experiment_id", "replication_index",
-                 "replication_count", "seed", "rng_run")
+                 "replication_count", "seed", "rng_run", "campaign_id", "campaign_variant")
 
 
 class RunStore:
@@ -112,6 +112,16 @@ class RunStore:
         if not row:
             raise FileNotFoundError(run_id)
         return json.loads(row[0])
+
+    def get_many(self, project, ids):
+        if not ids:
+            return {}
+        if len(ids) > 256:
+            raise ValueError("at most 256 run identities")
+        placeholders = ",".join("?" for _ in ids)
+        with self.connect() as db:
+            return {rid: json.loads(raw) for rid, raw in db.execute(
+                f"SELECT id,metadata FROM runs WHERE project=? AND id IN ({placeholders})", [project, *ids])}
 
     @staticmethod
     def _where(project, filters):

@@ -59,7 +59,13 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
     config diff, raw-pair audit, HTML/CSV/ZIP va offline CLI. `feat/analysis-windows`
     ustida. 11 yangi test bilan 63 backend testi o‘tdi; IPv4/IPv6 paired bandwidth
     sinovi 8 haqiqiy ns-3 subprocess bilan o‘tdi. `docs/experiment-comparison.md`.
-14. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
+14. `feat/experiment-campaigns` — original baseline va 1..8 variant uchun paired
+    replication kampaniyasi, preview/status/cancel/restart va nested ZIP/report.
+    Shared transactional submission, eager cancelled-payload release va orphan
+    worker cleanup. `feat/paired-experiment-comparison` ustida; `docs/campaigns.md`.
+    76 backend testi, 8 subprocessli haqiqiy IPv4/IPv6 ns-3 campaign va asl demo/report
+    suite o‘tdi. Storage-write failure’da orphan/foreign-owner farqi ham tekshirildi.
+15. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
     Agent mavjud UI’dagi tasdiqlangan sync xatosidan tashqari dizaynni o‘zgartirmaydi.
 
 Asl audit `233054b`da bajarilgan. Checkout endi PR #3 bilan kelgan `7c6e317` ustida;

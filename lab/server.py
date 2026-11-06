@@ -304,6 +304,49 @@ def create_app(driver_name="demo", token=None):
         return runs.start_experiment(body.get("project") or {}, body.get("scenario"), body.get("engine", "analytic"),
                                      body.get("repetitions", 10), body.get("seed", 1))
 
+    @app.post("/api/campaigns/preview")
+    def campaign_preview(body: dict = Body(...)):
+        return runs.campaigns.preview(body)
+
+    @app.post("/api/campaigns")
+    def campaign_start(body: dict = Body(...)):
+        return runs.campaigns.start(body)
+
+    def _campaign_call(method, project, cid):
+        try:
+            return method(project, cid)
+        except FileNotFoundError:
+            raise HTTPException(404, "campaign not found")
+
+    @app.get("/api/campaigns/{project}")
+    def campaign_list(project: str, limit: int = 100, offset: int = 0):
+        return runs.campaigns.store.list(project, limit, offset)
+
+    @app.get("/api/campaigns/{project}/{cid}")
+    def campaign_get(project: str, cid: str):
+        return _campaign_call(runs.campaigns.status, project, cid)
+
+    @app.post("/api/campaigns/{project}/{cid}/cancel")
+    def campaign_cancel(project: str, cid: str):
+        return _campaign_call(runs.campaigns.cancel, project, cid)
+
+    @app.get("/api/campaigns/{project}/{cid}/report.json")
+    def campaign_json(project: str, cid: str):
+        return _campaign_call(runs.campaigns.analysis, project, cid)[1]
+
+    @app.get("/api/campaigns/{project}/{cid}/report.html")
+    def campaign_html(project: str, cid: str):
+        from lab.campaign_report import campaign_report
+        report = _campaign_call(runs.campaigns.analysis, project, cid)[1]
+        return _html(campaign_report(report), f"{cid}.html")
+
+    @app.get("/api/campaigns/{project}/{cid}/export.zip")
+    def campaign_zip(project: str, cid: str):
+        from lab.campaign_report import campaign_bundle
+        plan, report, cohorts = _campaign_call(runs.campaigns.analysis, project, cid)
+        return Response(campaign_bundle(plan, report, cohorts), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{cid}.zip"'})
+
     def _experiment_runs(project, experiment_id):
         if not isinstance(experiment_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", experiment_id):
             raise ValueError("invalid experiment_id")
