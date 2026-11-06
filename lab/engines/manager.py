@@ -327,15 +327,18 @@ class RunManager:
 
     @staticmethod
     def study_parallelism(engine):
-        """Tadqiqotda bir vaqtda nechta ishga tushirish: faqat ns-3 (alohida jarayon; analitik —
-        GIL tufayli foydasiz, Mininet — bitta jonli tarmoq). NETLAB_NS3_PARALLEL bilan; standart —
-        yadrolar soni / 2 (1..4)."""
+        """Legacy runner capacity at study start; the API queue also adapts during execution."""
         if engine != "ns3":
             return 1
         env = os.environ.get("NETLAB_NS3_PARALLEL", "").strip()
-        if env.isdigit():
-            return max(1, int(env))
-        return max(1, min(4, (os.cpu_count() or 2) // 2))
+        from lab.engines.resources import MIB, ResourceMonitor, cpu_capacity, memory_reserve, positive_integer
+        if env:
+            return positive_integer(env, "NETLAB_NS3_PARALLEL")
+        resources = ResourceMonitor().read()
+        memory = resources.memory_available_bytes
+        if memory is None:
+            return 1
+        return max(1, min(64, cpu_capacity(resources), (memory - memory_reserve(resources)) // (2048 * MIB)))
 
     def _worker(self, run_id, pname, project, sc_name, sc, engine, extra=None):
         prog = lambda f: self._pub(run_id, progress=round(f, 3))  # noqa: E731
@@ -370,6 +373,8 @@ class RunManager:
             res = failmodel.postprocess(res, sc_user, sc_fail, project)   # mavjudlik (availability)
         except Exception as e:  # noqa: BLE001
             res = {"engine": engine, "status": "error", "error": f"{type(e).__name__}: {e}", "flows": {}}
+            if getattr(e, "__notes__", None):
+                res["error_notes"] = list(e.__notes__)
             log(f"XATO: {e}")
         finally:
             if emulation_locked:

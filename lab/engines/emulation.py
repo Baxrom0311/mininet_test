@@ -10,15 +10,16 @@ Jarayonlar `mnexec -a <pid>` bilan (node.cmd emas) — Mininet shell'ini bloklam
 """
 
 import re
-import subprocess
-import threading
 import time
 import os
 import sys
 
 MCAST_TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcast_tool.py")
+_SERVER_STARTUP_S = 2.0
+_OUTPUT_DRAIN_S = 2.0
 
 from lab.model import ifname
+from lab.engines.emulation_workers import EmulationWorkers
 
 _IPERF_LINE = re.compile(r"\[\s*\d+\]\s+([\d.]+)-([\d.]+)\s+sec\s+[\d.]+\s+\w?Bytes\s+([\d.]+)\s+([KMG]?)bits/sec(.*)$")
 _UDP_TAIL = re.compile(r"([\d.]+)\s+ms\s+(\d+)/(\d+)")
@@ -62,21 +63,20 @@ def _fix_userspace_drops(project, link_series, sw_pk, sw_prev):
 
 
 def run(driver, sc, progress=lambda f: None, log=lambda m: None):
-    procs, stop_ev = [], threading.Event()
+    workers = EmulationWorkers()
     try:
-        return _run(driver, sc, progress, log, procs, stop_ev)
-    finally:
-        stop_ev.set()
-        for proc in procs:
-            if proc.poll() is None:
-                proc.terminate()
-            try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                proc.kill(); proc.wait()
+        result = _run(driver, sc, progress, log, workers)
+    except BaseException as error:
+        try:
+            workers.close()
+        except Exception as cleanup_error:
+            error.add_note(str(cleanup_error))
+        raise
+    workers.finish()
+    return result
 
 
-def _run(driver, sc, progress, log, procs, stop_ev):
+def _run(driver, sc, progress, log, workers):
     from lab.drivers.mininet_driver import QdiscSampler, _read_net_dev   # lazy
     if not driver.running or driver.name != "real":
         raise RuntimeError("Mininet dvigateli uchun real driverda tarmoq ishlab turishi kerak")
@@ -85,9 +85,9 @@ def _run(driver, sc, progress, log, procs, stop_ev):
         pid = {n: driver.net.get(n).pid for n in project["devices"]}
     duration = float(sc.get("duration", 30))
     t_wall = time.time()
-    threads = []
+    stop_ev = workers.stop
     raw = {}           # app_id -> {"thr": {sec: bps}, "rtt": {sec: [ms]}, "loss": {sec: pct}, "jit": {sec: ms}}
-    T0 = time.time() + 2.0    # serverlar ishga tushishi uchun 2s
+    T0 = time.time() + _SERVER_STARTUP_S
 
     from lab.services import resolve_dhcp
     rproj = resolve_dhcp(project)[0]     # DHCP lizinglari (dnsmasq rezervatsiyalari bilan bir xil)
@@ -99,31 +99,13 @@ def _run(driver, sc, progress, log, procs, stop_ev):
         return None
 
     def spawn(dev, argv):
-        p = subprocess.Popen(["mnexec", "-a", str(pid[dev])] + argv, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True, bufsize=1)
-        procs.append(p)
-        return p
+        return workers.spawn(["mnexec", "-a", str(pid[dev])] + argv)
 
     def reader(p, fn, on_eof=None):
-        def go():
-            for line in p.stdout:
-                try:
-                    fn(line.rstrip())
-                except Exception:  # noqa: BLE001
-                    pass
-            if on_eof:
-                try:
-                    p.wait(timeout=5)
-                except Exception:  # noqa: BLE001
-                    pass
-                on_eof()
-        t = threading.Thread(target=go, daemon=True); t.start(); threads.append(t)
+        return workers.reader(p, fn, on_eof)
 
-    def at(t_rel, fn):
-        def go():
-            if not stop_ev.wait(max(T0 + t_rel - time.time(), 0)):
-                fn()
-        t = threading.Thread(target=go, daemon=True); t.start(); threads.append(t)
+    def at(t_rel, fn, label=None):
+        return workers.schedule(max(T0 + t_rel - time.time(), 0), fn, label or f"launch t={t_rel:g}")
 
     apps = []
     port_users, shared_ports, port_count = {}, {}, {}
@@ -255,17 +237,14 @@ def _run(driver, sc, progress, log, procs, stop_ev):
             continue
 
         def fire(e=e):
-            try:
-                if e["action"] in ("link_down", "link_up"):
-                    driver.update_link(e["link"], up=(e["action"] == "link_up"))
-                else:
-                    merged = {**(project["links"][e["link"]].get("params") or {}), **(e.get("params") or {})}
-                    driver.update_link(e["link"], params=merged)
-                applied.append({"t": round(time.time() - T0, 2), **e})
-                log(f"t={time.time() - T0:.1f}s: {e['action']} {e['link']}")
-            except Exception as ex:  # noqa: BLE001
-                log(f"hodisa xatosi: {ex}")
-        at(float(e.get("t", 0)), fire)
+            if e["action"] in ("link_down", "link_up"):
+                driver.update_link(e["link"], up=(e["action"] == "link_up"))
+            else:
+                merged = {**(project["links"][e["link"]].get("params") or {}), **(e.get("params") or {})}
+                driver.update_link(e["link"], params=merged)
+            applied.append({**e, "actual_t": round(time.time() - T0, 3)})
+            log(f"t={time.time() - T0:.1f}s: {e['action']} {e['link']}")
+        at(float(e.get("t", 0)), fire, f"event t={e.get('t', 0)} {e['action']} {e.get('link')}")
 
     # kabel yuklamasi
     link_series = {lid: [] for lid in project["links"]}
@@ -286,11 +265,12 @@ def _run(driver, sc, progress, log, procs, stop_ev):
         k += 1
         if stop_ev.wait(max(T0 + k - time.time(), 0)):
             break
+        workers.check()
         if movers:     # Wi-Fi stansiya harakati: TCLink tezligi radio modelidan qayta hisoblanadi
             try:
                 driver.wifi_refresh(positions_at(project, sc, float(k)))
             except Exception as ex:  # noqa: BLE001
-                log(f"harakat xatosi: {ex}")
+                raise RuntimeError(f"emulation movement failed t={k}: {ex}") from ex
         cache = {}
         sw_pk = {}
         qs = QdiscSampler()
@@ -321,13 +301,8 @@ def _run(driver, sc, progress, log, procs, stop_ev):
             node_series[n].append(snmp_s.point(k, n, read_proc_snmp(pid[n]), rts))
         progress(k / duration)
 
-    time.sleep(2.0)    # oxirgi iperf3 intervallari
-    stop_ev.set()
-    for p in procs:
-        try:
-            p.terminate()
-        except Exception:  # noqa: BLE001
-            pass
+    stop_ev.wait(_OUTPUT_DRAIN_S)    # oxirgi iperf3 intervallari
+    workers.finish()    # freeze output after readers and callbacks have finished
 
     flows = {}
     for a in apps:

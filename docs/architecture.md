@@ -42,6 +42,8 @@ MOS, fayl/sahifa vaqti va availability hisoblanadi. Asl ssenariy natijada saqlan
 | Mininet | Haqiqiy namespaces/OVS/FRR/iperf/ping | Root, kernel imkoniyati va host resurslariga bog‘liq |
 
 ns-3’da RIP uchun RIPv2 bor; OSPF/IS-IS model yo‘llari statik routingga aylanadi.
+`ospf.py` IPv4 startup network/area/passive tanlashini va per-area hop SPF’ni
+hisoblaydi; policy keshi bitta `Net` snapshotida qoladi. [OSPF siyosati](ospf-policy.md).
 IPv6 — bir ssenariy uchun alohida family: `ip6`/`gateway6` tanlanadi. Address-family
 farqlari `addressing.py` va `engines/ns3_addressing.py`da ushlanadi. DHCPv6/NAT66/
 IPv6 BGP/multicast bu bosqichga kirmaydi. `ns3_fast` taxminiy rejimining tradeoff’lari
@@ -67,6 +69,11 @@ oqim/link/node series. UUID bir soniyada va turli loyihalarda ID to‘qnashuvini
 oldini oladi. Qayta startda dead-owner pending run’lar interrupted bo‘ladi;
 ular o‘z-o‘zidan takroran ishga tushmaydi. Bitta results katalogida bitta server
 ishlating. PID reuse hali recovery cheklovidir.
+
+Standart worker rejimi `auto`: CPU affinity/cgroup v2 quota, CPU yuki va bo‘sh RAM
+bo‘yicha navbatdan yangi ishlarni boshlash chegarasi har soniyada yangilanadi.
+`GET /api/resources` joriy chegaralar va sensor natijalarini ko‘rsatadi.
+Sozlamalar va cheklovlar: [adaptive-workers.md](adaptive-workers.md).
 
 Cancel queued run’ni darhol yakunlaydi; active analytic run progress callback’da
 to‘xtaydi. Silent ns-3 child ham cancel qilinadi va reaped bo‘ladi. Emulyatsiya
@@ -105,6 +112,12 @@ status qimmat series’ni o‘qimaydi, report esa exact planned run ID’laridan
 Queued payloadlar alohida registry’da: cancel bo‘lgach katta loyiha executor
 work-item’da ushlanmaydi. [campaigns.md](campaigns.md).
 
+Campaign analysis bitta request ichida `_ComparisonInput` orqali cohort summary,
+runtime/flow guard va normalized design’ni qayta ishlatadi. Context manager/global
+keshda qolmaydi; keyingi request faylni yangidan o‘qiydi. Compact JSON takroriy
+summary o‘rniga shu dokumentdagi cohort reference’ni beradi; default full format
+saqlangan. [campaign-analysis-performance.md](campaign-analysis-performance.md).
+
 ## Real testlar va qulf
 
 Mininet cleanup global; alohida real testlar yoki serverlarni bir vaqtda ko‘tarmang.
@@ -112,13 +125,15 @@ Mininet cleanup global; alohida real testlar yoki serverlarni bir vaqtda ko‘ta
 
 ```bash
 sudo flock /tmp/netlab-real.lock lab/.venv/bin/python -m lab.netlab --driver real
-sudo timeout 600 flock /tmp/netlab-real.lock lab/.venv/bin/python -m lab.tests.real_integration l2 ospf fw
+sudo timeout 600 lab/.venv/bin/python -m lab.tests.real_integration l2 ospf fw
 ```
 
-`real_isis`, `real_p4` va `benchmarks.real_scale` qulfni ichida oladi: ularga yana
-tashqi flock qo‘ymang. Ushbu convention’ni chetlab ishga tushirilgan server/testdan
-qulf himoya qilmaydi. Real benchmark, P4 va calibration holati tegishli validation
-hujjatlarida ko‘rsatilgan; ushbu cloud’dagi blocked sinovlarni passed deb talqin qilmang.
+Barcha `lab.tests.real_*` CLI’lari va ikkala real benchmark qulfni `lab.real_lock`
+orqali ichida oladi. Oddiy tashqi `flock` bilan o‘rash ham ishlaydi: kernel tasdiqlagan
+merosiy exclusive descriptor qayta ishlatiladi, tashqi qulf muddatidan oldin
+ochilmaydi. Band qulfda test exit 1 bilan tarmoqqa tegmasdan to‘xtaydi.
+[Real testlarni ishga tushirish](real-testing.md). Qulfga amal qilmaydigan boshqa
+server/testlar undan himoyalanmaydi. Real dalillar [saqlangan hisobotda](validation/real-env-2026-11-06.md).
 
 ## Auth va UI sinxronligi
 

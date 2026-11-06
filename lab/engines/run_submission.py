@@ -1,6 +1,7 @@
 """One admission path for normal runs, replications and bounded campaigns."""
 
 from dataclasses import dataclass
+from functools import partial
 import threading
 import time
 
@@ -53,8 +54,9 @@ def submit(queue, jobs, campaign=None):
                     queue.tokens[job.run_id] = threading.Event()
                     queue.payloads[job.run_id] = job
             for job in jobs:
-                future = queue.executor.submit(queue._execute_prepared, job.run_id)
+                future = queue.executor.submit(queue._execute_prepared, job.run_id, resource_engine=job.engine)
                 futures[job.run_id] = queue.futures[job.run_id] = future
+                future.add_done_callback(partial(queue._dispatch_done, job.project_name, job.run_id))
             if campaign is not None:
                 campaign["submission"] = "submitted"
                 with queue.store.connect() as db:

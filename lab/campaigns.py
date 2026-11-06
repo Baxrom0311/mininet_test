@@ -8,8 +8,8 @@ from lab.engines.campaign_store import CampaignStore, safe_id
 from lab.engines.manager import new_run_id
 from lab.engines.run_store import PENDING, TERMINAL
 from lab.engines.run_submission import PreparedRun, submit
-from lab.experiments import summarize, variants
-from lab.experiment_comparison import compare, design_diff
+from lab.experiments import variants
+from lab.experiment_comparison import _ComparisonInput, _compare_prepared, design_diff
 from lab.reproducibility import capture, comparison_inputs
 
 MAX_CAMPAIGN_RUNS = 100
@@ -176,7 +176,7 @@ class CampaignManager:
     def analysis(self, project, cid):
         _, status, known = self._snapshot(project, cid)
         plan, _ = self._read(project, cid, full=True)
-        cohorts, experiments, errors = {}, [], {}
+        cohorts, experiments, errors, prepared = {}, [], {}, {}
         options = {k: plan["window"][k] for k in ("start_s", "end_s")} if plan["window"] else {}
         for c in plan["conditions"]:
             records = []
@@ -188,7 +188,9 @@ class CampaignManager:
                                                               ("experiment_id", c["experiment_id"]))):
                             raise ValueError("campaign membership changed while reading result")
                         records.append(record)
-                summary = summarize(records, **options)
+                context = _ComparisonInput(records, **options)
+                prepared[c["key"]] = context
+                summary = context.summary
             except (ValueError, KeyError, TypeError, FileNotFoundError) as exc:
                 summary, errors[c["key"]] = None, f"{type(exc).__name__}: {exc}"
             cohorts[c["key"]] = records
@@ -198,7 +200,7 @@ class CampaignManager:
             result, error = None, errors.get("baseline") or errors.get(c["key"])
             if not error:
                 try:
-                    result = compare(cohorts["baseline"], cohorts[c["key"]], **options)
+                    result = _compare_prepared(prepared["baseline"], prepared[c["key"]])
                 except (ValueError, KeyError, TypeError) as exc:
                     error = f"{type(exc).__name__}: {exc}"
             comparisons.append({"variant": c["key"], "result": result, "error": error})

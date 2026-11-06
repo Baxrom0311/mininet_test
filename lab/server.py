@@ -122,6 +122,10 @@ def create_app(driver_name="demo", token=None):
         return {**driver.info(), "device_types": DEVICE_TYPES, "frr_daemons": FRR_DAEMONS, "wifi": wifi_model,
                 "app_models": app_models, "project_version": PROJECT_VERSION, "status": driver.status()}
 
+    @app.get("/api/resources")
+    def resources():
+        return runs.resource_status()
+
     @app.get("/api/templates")
     def templates():
         return _read_templates()
@@ -331,8 +335,12 @@ def create_app(driver_name="demo", token=None):
         return _campaign_call(runs.campaigns.cancel, project, cid)
 
     @app.get("/api/campaigns/{project}/{cid}/report.json")
-    def campaign_json(project: str, cid: str):
-        return _campaign_call(runs.campaigns.analysis, project, cid)[1]
+    def campaign_json(project: str, cid: str, compact: bool = False):
+        report = _campaign_call(runs.campaigns.analysis, project, cid)[1]
+        if compact:
+            from lab.campaign_report import compact_report
+            report = compact_report(report)
+        return report
 
     @app.get("/api/campaigns/{project}/{cid}/report.html")
     def campaign_html(project: str, cid: str):

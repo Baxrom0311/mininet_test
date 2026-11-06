@@ -1,0 +1,371 @@
+{
+ "schema_version": 1,
+ "status": "passed",
+ "platform": "Linux-6.18.44-fc-v242-x86_64-with-glibc2.39",
+ "cpu_count": 4,
+ "missing": [],
+ "runs": [
+  {
+   "routers": 10,
+   "devices": 30,
+   "links": 32,
+   "status": "passed",
+   "startup_s": 9.896,
+   "ready_s": 17.918,
+   "full_neighbors": {
+    "r0": 3,
+    "r1": 2,
+    "r2": 2,
+    "r3": 3,
+    "r4": 2,
+    "r5": 3,
+    "r6": 2,
+    "r7": 2,
+    "r8": 3,
+    "r9": 2
+   },
+   "expected_full_neighbors": {
+    "r0": 3,
+    "r1": 2,
+    "r2": 2,
+    "r3": 3,
+    "r4": 2,
+    "r5": 3,
+    "r6": 2,
+    "r7": 2,
+    "r8": 3,
+    "r9": 2
+   },
+   "traffic": {
+    "flows": {
+     "f0": {
+      "type": "tcp",
+      "src": "h0x0",
+      "dst": "h5x0",
+      "summary": {
+       "avg_thr_bps": 90855556,
+       "avg_delay_ms": 4.817,
+       "avg_jitter_ms": null,
+       "loss_pct": null,
+       "avg_rtt_ms": 9.635
+      }
+     },
+     "f1": {
+      "type": "udp",
+      "src": "h7x0",
+      "dst": "h8x0",
+      "summary": {
+       "avg_thr_bps": 4731111,
+       "avg_delay_ms": 1.719,
+       "avg_jitter_ms": 0.658,
+       "loss_pct": 0.0,
+       "avg_rtt_ms": 3.438
+      }
+     },
+     "f2": {
+      "type": "tcp",
+      "src": "h4x0",
+      "dst": "h1x0",
+      "summary": {
+       "avg_thr_bps": 89766667,
+       "avg_delay_ms": 3.739,
+       "avg_jitter_ms": null,
+       "loss_pct": null,
+       "avg_rtt_ms": 7.478
+      }
+     },
+     "f3": {
+      "type": "udp",
+      "src": "h1x0",
+      "dst": "h4x0",
+      "summary": {
+       "avg_thr_bps": 5000000,
+       "avg_delay_ms": 3.812,
+       "avg_jitter_ms": 0.535,
+       "loss_pct": 0.0,
+       "avg_rtt_ms": 7.624
+      }
+     }
+    }
+   },
+   "link_failure_probe_s": 0.002,
+   "failed_link": "l1",
+   "resources": {
+    "peak_rss_bytes": 590987264,
+    "peak_fds": 994,
+    "peak_threads": 176,
+    "peak_processes": 83,
+    "peak_shared_ovs_rss_bytes": 97738752,
+    "cpu_seconds": 23.41,
+    "samples": 68,
+    "sample_interval_s": 0.5,
+    "scope": "benchmark + namespace processes; shared OVS RSS reported separately; sampled, not exact HWM"
+   },
+   "wall_s": 35.14
+  },
+  {
+   "routers": 20,
+   "devices": 60,
+   "links": 64,
+   "status": "passed",
+   "startup_s": 17.607,
+   "ready_s": 25.634,
+   "full_neighbors": {
+    "r0": 3,
+    "r1": 2,
+    "r2": 2,
+    "r3": 3,
+    "r4": 2,
+    "r5": 2,
+    "r6": 3,
+    "r7": 2,
+    "r8": 2,
+    "r9": 3,
+    "r10": 3,
+    "r11": 2,
+    "r12": 2,
+    "r13": 3,
+    "r14": 2,
+    "r15": 2,
+    "r16": 3,
+    "r17": 2,
+    "r18": 2,
+    "r19": 3
+   },
+   "expected_full_neighbors": {
+    "r0": 3,
+    "r1": 2,
+    "r2": 2,
+    "r3": 3,
+    "r4": 2,
+    "r5": 2,
+    "r6": 3,
+    "r7": 2,
+    "r8": 2,
+    "r9": 3,
+    "r10": 3,
+    "r11": 2,
+    "r12": 2,
+    "r13": 3,
+    "r14": 2,
+    "r15": 2,
+    "r16": 3,
+    "r17": 2,
+    "r18": 2,
+    "r19": 3
+   },
+   "traffic": {
+    "flows": {
+     "f0": {
+      "type": "tcp",
+      "src": "h0x0",
+      "dst": "h5x0",
+      "summary": {
+       "avg_thr_bps": 85466667,
+       "avg_delay_ms": 5.593,
+       "avg_jitter_ms": null,
+       "loss_pct": null,
+       "avg_rtt_ms": 11.186
+      }
+     },
+     "f1": {
+      "type": "udp",
+      "src": "h7x0",
+      "dst": "h18x0",
+      "summary": {
+       "avg_thr_bps": 5238889,
+       "avg_delay_ms": 2.567,
+       "avg_jitter_ms": 0.906,
+       "loss_pct": 0.0,
+       "avg_rtt_ms": 5.133
+      }
+     },
+     "f2": {
+      "type": "tcp",
+      "src": "h14x0",
+      "dst": "h11x0",
+      "summary": {
+       "avg_thr_bps": 88011111,
+       "avg_delay_ms": 4.949,
+       "avg_jitter_ms": null,
+       "loss_pct": null,
+       "avg_rtt_ms": 9.897
+      }
+     },
+     "f3": {
+      "type": "udp",
+      "src": "h1x0",
+      "dst": "h4x0",
+      "summary": {
+       "avg_thr_bps": 4861111,
+       "avg_delay_ms": 2.587,
+       "avg_jitter_ms": 0.968,
+       "loss_pct": 0.0,
+       "avg_rtt_ms": 5.174
+      }
+     }
+    }
+   },
+   "link_failure_probe_s": 0.003,
+   "failed_link": "l1",
+   "resources": {
+    "peak_rss_bytes": 1109164032,
+    "peak_fds": 1870,
+    "peak_threads": 316,
+    "peak_processes": 153,
+    "peak_shared_ovs_rss_bytes": 98553856,
+    "cpu_seconds": 25.01,
+    "samples": 86,
+    "sample_interval_s": 0.5,
+    "scope": "benchmark + namespace processes; shared OVS RSS reported separately; sampled, not exact HWM"
+   },
+   "wall_s": 45.263
+  },
+  {
+   "routers": 30,
+   "devices": 90,
+   "links": 95,
+   "status": "passed",
+   "startup_s": 25.814,
+   "ready_s": 27.332,
+   "full_neighbors": {
+    "r0": 3,
+    "r1": 2,
+    "r2": 2,
+    "r3": 3,
+    "r4": 2,
+    "r5": 2,
+    "r6": 3,
+    "r7": 2,
+    "r8": 2,
+    "r9": 3,
+    "r10": 2,
+    "r11": 2,
+    "r12": 3,
+    "r13": 2,
+    "r14": 2,
+    "r15": 3,
+    "r16": 2,
+    "r17": 2,
+    "r18": 3,
+    "r19": 2,
+    "r20": 2,
+    "r21": 3,
+    "r22": 2,
+    "r23": 2,
+    "r24": 3,
+    "r25": 2,
+    "r26": 2,
+    "r27": 3,
+    "r28": 2,
+    "r29": 2
+   },
+   "expected_full_neighbors": {
+    "r0": 3,
+    "r1": 2,
+    "r2": 2,
+    "r3": 3,
+    "r4": 2,
+    "r5": 2,
+    "r6": 3,
+    "r7": 2,
+    "r8": 2,
+    "r9": 3,
+    "r10": 2,
+    "r11": 2,
+    "r12": 3,
+    "r13": 2,
+    "r14": 2,
+    "r15": 3,
+    "r16": 2,
+    "r17": 2,
+    "r18": 3,
+    "r19": 2,
+    "r20": 2,
+    "r21": 3,
+    "r22": 2,
+    "r23": 2,
+    "r24": 3,
+    "r25": 2,
+    "r26": 2,
+    "r27": 3,
+    "r28": 2,
+    "r29": 2
+   },
+   "traffic": {
+    "flows": {
+     "f0": {
+      "type": "tcp",
+      "src": "h0x0",
+      "dst": "h5x0",
+      "summary": {
+       "avg_thr_bps": 89122222,
+       "avg_delay_ms": 7.173,
+       "avg_jitter_ms": null,
+       "loss_pct": null,
+       "avg_rtt_ms": 14.345
+      }
+     },
+     "f1": {
+      "type": "udp",
+      "src": "h7x0",
+      "dst": "h18x0",
+      "summary": {
+       "avg_thr_bps": 4871111,
+       "avg_delay_ms": 2.27,
+       "avg_jitter_ms": 1.06,
+       "loss_pct": 0.0,
+       "avg_rtt_ms": 4.539
+      }
+     },
+     "f2": {
+      "type": "tcp",
+      "src": "h14x0",
+      "dst": "h1x0",
+      "summary": {
+       "avg_thr_bps": 80511111,
+       "avg_delay_ms": 5.592,
+       "avg_jitter_ms": null,
+       "loss_pct": null,
+       "avg_rtt_ms": 11.184
+      }
+     },
+     "f3": {
+      "type": "udp",
+      "src": "h21x0",
+      "dst": "h14x0",
+      "summary": {
+       "avg_thr_bps": 5067778,
+       "avg_delay_ms": 4.357,
+       "avg_jitter_ms": 1.175,
+       "loss_pct": 0.0,
+       "avg_rtt_ms": 8.714
+      }
+     }
+    }
+   },
+   "link_failure_probe_s": 0.004,
+   "failed_link": "l1",
+   "resources": {
+    "peak_rss_bytes": 1628831744,
+    "peak_fds": 2738,
+    "peak_threads": 456,
+    "peak_processes": 223,
+    "peak_shared_ovs_rss_bytes": 100401152,
+    "cpu_seconds": 26.12,
+    "samples": 95,
+    "sample_interval_s": 0.5,
+    "scope": "benchmark + namespace processes; shared OVS RSS reported separately; sampled, not exact HWM"
+   },
+   "wall_s": 50.794
+  }
+ ],
+ "maximum_capacity_established": false,
+ "limits": {
+  "nofile": [
+   20000,
+   20000
+  ],
+  "affinity_cpus": 4
+ }
+}

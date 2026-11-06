@@ -77,11 +77,17 @@ Daemonlashgan FRR network namespace orqali hisobga olinadi; umumiy OVS RSS alohi
 0.5 s namunalar aniq kernel high-water mark emas. Pcap capture o‘chiq.
 RSS budjeti tugallangan run’ni baholaydi, startup uchun qat’iy xotira limiti emas.
 `--timeout` run’ni cheklaydi, `finally` driver cleanup’ni bajaradi.
+Schema 2 hisobot har tugallangan run’dan so‘ng atomik saqlanadi. Sampler xatosi,
+yetishmayotgan oqim, nonfinite metrika yoki `driver.stop()` exception’i `passed`
+bo‘la olmaydi. Ctrl+C/SIGTERM natija va oldingi o‘lchovlarni saqlab, keyingi
+topologiyalarni boshlamaydi. Tafsilotlar: [scale benchmark](../docs/scale-benchmark.md).
 
 Exit 2 — prerequisite yetishmaydi; exit 1 — test/budjet xatosi. Bitta muvaffaqiyatli
-20-router test hostning maksimal sig‘imini isbotlamaydi. Hozirgi cloud instance’da
-root/Mininet/FRR yo‘q: real resurs raqamlari o‘lchanmagan. Dalillar:
-[`docs/validation/ipv6-scale.md`](../docs/validation/ipv6-scale.md).
+20-router test hostning maksimal sig‘imini isbotlamaydi. Alohida root hostda
+10/20/30 router tekshirilgan: 20/30 router peak RSS 1.11/1.63 GB, kutilgan OSPF
+qo‘shnilari Full. Baza PR #12; keyingi kod uchun yangi real acceptance kerak.
+[Real hisobot va xom artefaktlar](../docs/validation/real-env-2026-11-06.md),
+[model/IPv6 tekshiruvlari](../docs/validation/ipv6-scale.md).
 
 ns-3 Python wheel’ida muhitga xos cheklov bor: virtualenvning to‘liq yo‘lida
 `test` bo‘lsa kutubxona qidiruvi ularni chiqarib yuboradi. Masalan `.venv` yoki
@@ -552,8 +558,10 @@ Tezkor rejimda alohida TCP oqimlari ulushi o'zgaradi (median 8–15%, eng ko'p 9
 yuklama/sig'im tahlili uchun, oqim darajasidagi aniq natija uchun emas.
 
 **Parallel tadqiqotlar**: ns-3 dvigatelida parametrik tadqiqot variantlari bir vaqtda
-ishga tushiriladi (har biri alohida jarayon): `NETLAB_NS3_PARALLEL=N`, standart — yadrolar
-soni / 2 (1..4). Misol: 4 variantli tadqiqot (har biri ~19 s) 2 parallel bilan 39 s.
+ishga tushiriladi (har biri alohida jarayon). API’da standart `NETLAB_RUN_WORKERS=auto`
+CPU/RAM, CPU yuki va konteyner limitlariga moslashadi; `NETLAB_NS3_PARALLEL=N`
+tadqiqotdan navbatga yuboriladigan variantlar sonini cheklaydi.
+Batafsil: [adaptiv workerlar](../docs/adaptive-workers.md).
 Har ns-3 jarayoni katta topologiyada 1–3 GB xotira olishi mumkin (ring 40: ~2.8 GB).
 Analitik (GIL) va Mininet (bitta jonli tarmoq) ketma-ket qoladi.
 
@@ -734,8 +742,8 @@ Ssenariy `ebgp_uzilish`: t=10 s da eBGP kabeli uziladi, t=20 s da tiklanadi.
 Testlar: `python3 -m lab.tests.smoke_bgp` (demo + analitik + ns-3),
 `sudo python3 -m lab.tests.real_bgp` (real FRR).
 
-Cheklovlar: modelda IGP qo'shnisining barcha interfeys subnetlari o'rganiladi (OSPF `network`
-bayonotlari tahlil qilinmaydi); BGP atributlari (local-pref, MED, community), route reflector,
+IPv4 OSPF `network` va `passive-interface` qatorlari endi tanlash va qo‘shnichilikni
+cheklaydi: [OSPF startup siyosati](../docs/ospf-policy.md). BGP atributlari (local-pref, MED, community), route reflector,
 multipath va policy (route-map) modellashtirilmaydi — real FRR'da startup orqali yozish mumkin.
 
 ### STP / RSTP (switch halqalari)
@@ -761,7 +769,7 @@ real driverda `ovs-appctl stp/show` (yoki `rstp/show`) va model bashorati yonma-
 
 | Dvigatel | Qanday | Konvergensiya (`stp_lab`, faol kabel uzilganda) |
 |---|---|---|
-| Mininet (OVS) | `stp_enable` / `rstp_enable`, `stp-priority`, `stp-system-id` = device_mac(id, 0), `stp-path-cost` | STP ~23 s, RSTP < 1 s (o'lchangan) |
+| Mininet (OVS) | `stp_enable` / `rstp_enable`, `stp-priority`, `stp-system-id` = device_mac(id, 0), `stp-path-cost` | STP median 29.7 s, RSTP median 0.002 s (3 takror; [real hisobot](../docs/validation/real-env-2026-11-06.md)) |
 | Analitik | blocking → forwarding o'tish `hold`: 802.1D 2×forward_delay = 30 s (bilvosita nosozlik +max_age 20 s), RSTP 1 s; `stp_convergence_s` — qo'lda | 30 s / 1 s |
 | ns-3 | BridgeNetDevice'da STP yo'q: model daraxti bo'yicha blocking segment ma'lumot uchun yopiladi (ErrorModel), hodisada qayta hisoblanadi; MAC yozuvlari 2 s (TCN FDB tozalashi o'rniga) | 30 s / 1 s |
 

@@ -1,8 +1,11 @@
 # Durable run queue
 
-The API server uses `QueuedRunManager`. `NETLAB_RUN_WORKERS` selects 1..16 workers
-(default 2), shared by normal runs and study variants. At most 256 runs may wait
-or execute in this manager. Mininet execution is additionally serialized; existing
+The API server uses `QueuedRunManager`. The default `NETLAB_RUN_WORKERS=auto`
+adapts admission to effective CPU capacity, CPU load and available RAM, shared by
+normal runs, study variants, experiments and campaigns. A numeric value selects
+1..64 fixed workers. See [adaptive-workers.md](adaptive-workers.md) for resource
+reserves, cgroup v2 limits, manual overrides and `/api/resources` diagnostics.
+At most 256 runs may wait or execute in this manager. Mininet execution is additionally serialized; existing
 real-driver checks can reject concurrent real submissions. Pending work is not a
 promise that a large emulation fits available memory.
 

@@ -55,6 +55,12 @@ class PacketCampaigns(unittest.TestCase):
                     self.assertGreater(row["delta_mean"], 200000)
                     self.assertGreater(row["ci95"][0], 0)
                     self.assertEqual(len(report["campaign"]["runs"]), 4)
+                    response = client.get(base + "/report.json?compact=true")
+                    self.assertEqual(response.status_code, 200, response.text)
+                    compact = response.json()
+                    self.assertEqual(compact["representation"], "cohort_references")
+                    self.assertEqual(compact["comparisons"][0]["result"]["metrics"], comparison["result"]["metrics"])
+                    self.assertEqual(compact["comparisons"][0]["result"]["baseline"]["summary_ref"], "/experiments/0/summary")
 
 
 if __name__ == "__main__":

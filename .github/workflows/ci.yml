@@ -104,9 +104,13 @@ jobs:
         run: pip install --quiet -r lab/requirements.txt httpx ns3 pandas
       - name: Syntax check lab/
         run: python -m py_compile lab/*.py lab/drivers/*.py lab/engines/*.py lab/templates/sdn/*.py lab/tests/*.py
+      - name: OSPF startup policy regression
+        run: python -m unittest lab.tests.test_ospf_policy lab.tests.smoke_ospf_policy -v
       # Real driver must import without Mininet present (all mininet imports are lazy).
       - name: Import real driver without Mininet
         run: python -c "import lab.drivers.mininet_driver"
+      - name: Calibration collector regression (no root required)
+        run: python -m unittest lab.tests.test_calibration_collector -v
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -116,7 +120,8 @@ jobs:
         working-directory: lab/ui
         run: npm ci --no-audit --no-fund && npm run build
       - name: Built UI must be committed (lab/web-react up to date)
-        run: git diff --stat --exit-code -- lab/web-react || (echo "lab/web-react eskirgan: cd lab/ui && npm run build" && exit 1)
+        run: |
+          git diff --stat --exit-code -- lab/web-react || (echo "lab/web-react eskirgan: cd lab/ui && npm run build" && exit 1)
       - name: NetLab smoke test (demo driver, analytic + ns-3 scenario runs, token)
         run: python lab/tests/smoke_demo.py
       - name: NetLab smoke tests (BGP, STP, Firewall)
@@ -133,9 +138,20 @@ jobs:
           python -m lab.tests.smoke_report
           python -m lab.tests.smoke_survivability_n2
       - name: IPv6 model and ns-3 packet regression
-        run: python -m unittest lab.tests.smoke_ipv6 lab.tests.smoke_isis lab.tests.smoke_experiments lab.tests.smoke_experiment_comparison lab.tests.smoke_campaigns -v
+        run: python -m unittest lab.tests.smoke_ipv6 lab.tests.smoke_isis lab.tests.smoke_ospf lab.tests.smoke_experiments lab.tests.smoke_experiment_comparison lab.tests.smoke_campaigns -v
+      - name: Adaptive CPU and RAM dispatch regression
+        run: python -m unittest lab.tests.test_adaptive_workers -v
       - name: Runtime safety and dataset labeling regression
-        run: python -m unittest lab.tests.test_runtime_safety ml.test_labeling lab.tests.test_calibration lab.tests.test_traffic lab.tests.test_run_queue lab.tests.test_experiments lab.tests.test_result_index lab.tests.test_analysis_windows lab.tests.test_experiment_comparison lab.tests.test_campaigns -v
+        run: python -m unittest lab.tests.test_runtime_safety ml.test_labeling lab.tests.test_calibration lab.tests.test_ospf_convergence lab.tests.test_traffic lab.tests.test_run_queue lab.tests.test_experiments lab.tests.test_result_index lab.tests.test_analysis_windows lab.tests.test_experiment_comparison lab.tests.test_campaigns lab.tests.test_campaign_analysis -v
+
+      - name: Real emulation worker lifecycle regression (no root required)
+        run: python -m unittest lab.tests.test_emulation_workers -v
+      - name: Real network lock regression (no root or Mininet required)
+        run: python -m unittest lab.tests.test_real_lock -v
+      - name: Scale benchmark evidence regression (no root or Mininet required)
+        run: python -m unittest lab.tests.test_scale_benchmark -v
+      - name: Calibration evidence and CLI regression
+        run: python -m unittest lab.tests.test_calibration_evidence -v
 
   docker-build:
     runs-on: ubuntu-latest

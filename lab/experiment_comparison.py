@@ -94,8 +94,62 @@ def _metric(run, analysis, fid, metric):
     return data.get("value"), data.get("complete", False), window
 
 
+class _ComparisonInput:
+    """Read-only request-owned records; never retained on a manager or shared between requests."""
+
+    def __init__(self, runs, *, start_s=None, end_s=None):
+        self.runs = runs
+        self.summary = summarize(runs, start_s=start_s, end_s=end_s)
+        self.windows = {a["run_id"]: a for a in self.summary.get("run_windows", [])}
+        self._memo = {}
+
+    def _cached(self, key, compute):
+        if key not in self._memo:
+            try:
+                self._memo[key] = (compute(), None)
+            except (ValueError, KeyError, TypeError) as exc:
+                # Cache the failure without retaining a traceback and its record/series frames.
+                self._memo[key] = (None, (type(exc), exc.args))
+        value, error = self._memo[key]
+        if error:
+            cls, args = error
+            raise cls(*args)
+        return value
+
+    def conditions(self):
+        return self._cached("conditions", lambda: {digest(_conditions(r)) for r in self.runs if r["status"] == "done"})
+
+    def identities(self):
+        def build():
+            identities = {}
+            for run in self.runs:
+                if run["status"] != "done":
+                    continue
+                for fid, flow in run.get("flows", {}).items():
+                    if flow.get("hidden"):
+                        continue
+                    identity = _flow_identity(run, flow)
+                    if fid in identities and identities[fid] != identity:
+                        raise ValueError(f"flow {fid}: type, endpoints and active time must match")
+                    identities[fid] = identity
+            return identities
+        return self._cached("identities", build)
+
+    def design(self):
+        def build():
+            run = next((r for r in self.runs if r["status"] == "done"), None)
+            return comparison_inputs(run["reproducibility"]["project"], _scenario(run), run["engine"]) if run else None
+        return self._cached("design", build)
+
+
 def compare(baseline, candidate, *, start_s=None, end_s=None):
-    left, right = summarize(baseline, start_s=start_s, end_s=end_s), summarize(candidate, start_s=start_s, end_s=end_s)
+    return _compare_prepared(_ComparisonInput(baseline, start_s=start_s, end_s=end_s),
+                             _ComparisonInput(candidate, start_s=start_s, end_s=end_s))
+
+
+def _compare_prepared(baseline_input, candidate_input):
+    baseline, candidate = baseline_input.runs, candidate_input.runs
+    left, right = baseline_input.summary, candidate_input.summary
     if left["experiment_id"] == right["experiment_id"]:
         raise ValueError("choose two distinct experiments")
     if left["expected"] != right["expected"]:
@@ -107,15 +161,11 @@ def compare(baseline, candidate, *, start_s=None, end_s=None):
         raise ValueError("paired experiments require the same fixed seed")
     if len({r["engine"] for r in runs}) != 1 or runs[0]["engine"] not in ("analytic", "ns3"):
         raise ValueError("paired experiments require the same analytic/ns3 engine")
-    finished = [r for r in runs if r["status"] == "done"]
-    if len({digest(_conditions(r)) for r in finished}) > 1:
+    if len(baseline_input.conditions() | candidate_input.conditions()) > 1:
         raise ValueError("engine, project, IP family, duration, sampling and runtime must match")
     identities = {}
-    for run in finished:
-        for fid, flow in run.get("flows", {}).items():
-            if flow.get("hidden"):
-                continue
-            identity = _flow_identity(run, flow)
+    for prepared in (baseline_input, candidate_input):
+        for fid, identity in prepared.identities().items():
             if fid in identities and identities[fid] != identity:
                 raise ValueError(f"flow {fid}: type, endpoints and active time must match")
             identities[fid] = identity
@@ -126,7 +176,7 @@ def compare(baseline, candidate, *, start_s=None, end_s=None):
         raise ValueError("paired experiments require matching seed/substream schedules")
     paired = sorted(lmap.keys() & rmap.keys())
     complete = left["complete"] and right["complete"] and lmap.keys() == rmap.keys()
-    windows = ({a["run_id"]: a for a in left.get("run_windows", [])}, {a["run_id"]: a for a in right.get("run_windows", [])})
+    windows = (baseline_input.windows, candidate_input.windows)
     overview, done_pairs = [], []
     for seed, rng_run in paired:
         a, b = lmap[seed, rng_run], rmap[seed, rng_run]
@@ -172,12 +222,10 @@ def compare(baseline, candidate, *, start_s=None, end_s=None):
                      "ci_excludes_zero": (ci[0] > 0 or ci[1] < 0) if ci else None,
                      "delta_unit": "bps" if metric == "avg_thr_bps" else "percentage_points" if metric == "loss_pct" else "ms",
                      "preferred_direction": "higher" if metric == "avg_thr_bps" else "lower"})
-    a = next((r for r in baseline if r["status"] == "done"), None)
-    b = next((r for r in candidate if r["status"] == "done"), None)
+    a, b = baseline_input.design(), candidate_input.design()
     changes = {"available": False, "changes": [], "truncated": False}
-    if a and b:
-        changes = design_diff(comparison_inputs(a["reproducibility"]["project"], _scenario(a), a["engine"]),
-                              comparison_inputs(b["reproducibility"]["project"], _scenario(b), b["engine"]))
+    if a is not None and b is not None:
+        changes = design_diff(a, b)
     return {"schema": 1, "method": "paired Student t, candidate minus baseline", "confidence": .95,
             "baseline": left, "candidate": right, "expected_pairs": expected, "observed_pairs": len(paired),
             "completed_pairs": len(done_pairs), "complete": complete, "window": left.get("window"),

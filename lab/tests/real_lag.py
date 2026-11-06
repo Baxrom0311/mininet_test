@@ -1,6 +1,6 @@
 """Real Mininet testi: link aggregation (OVS bond + LACP) — root kerak.
 
-    flock /tmp/netlab-real.lock sudo python3 -u -m lab.tests.real_lag
+    sudo python3 -u -m lab.tests.real_lag
 """
 
 import os
@@ -8,6 +8,7 @@ import re
 import sys
 import time
 
+from lab.real_lock import serial_real_test
 from lab.tests.real_integration import FAILS, EventBus, MininetDriver, check, load, ping, wait_ping
 
 
@@ -98,6 +99,7 @@ def t_lag(drv, caps):
 TESTS = {"lag": t_lag}
 
 
+@serial_real_test
 def main(argv):
     if os.geteuid() != 0:
         print("root kerak")
