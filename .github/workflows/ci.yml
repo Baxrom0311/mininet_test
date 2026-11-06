@@ -107,6 +107,8 @@ jobs:
       # Real driver must import without Mininet present (all mininet imports are lazy).
       - name: Import real driver without Mininet
         run: python -c "import lab.drivers.mininet_driver"
+      - name: Calibration collector regression (no root required)
+        run: python -m unittest lab.tests.test_calibration_collector -v
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
