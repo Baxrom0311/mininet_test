@@ -843,7 +843,8 @@ def main(inp_path, out_path):
 
     # qadamli ijro: har 1s (va har hodisa vaqtida) to'xtab, FlowMonitor o'lchanadi
     step = float(sc.get("sample", 1.0))
-    marks = sorted({round(k * step, 6) for k in range(1, int(math.ceil(duration / step)) + 1)}
+    sampling_marks = {k * step for k in range(1, int(math.ceil(duration / step - 1e-8)))} | {duration}
+    marks = sorted(sampling_marks
                    | {round(float(e["t"]), 6) for e in events if 0 < float(e.get("t", 0)) < duration}
                    | ({round(float(e["t"]) + dd, 6) for e in events for dd in (1.0, 30.0, 50.0)
                        if 0 < float(e.get("t", 0)) + dd < duration} if stp_on else set()))
@@ -1008,6 +1009,7 @@ def main(inp_path, out_path):
         marks = sorted(set(marks) | {round(tt, 6) for tt, _k, _r in vrrp_tl if 0 < tt < duration})
         vrrp_tick(0.0)
 
+    sample_intervals = []
     for mark in marks:
         while ev_i < len(events) and float(events[ev_i].get("t", 0)) <= now + 1e-9:
             e = events[ev_i]; ev_i += 1
@@ -1025,10 +1027,12 @@ def main(inp_path, out_path):
         ns.Simulator.Stop(ns.Seconds(mark - now))
         ns.Simulator.Run()
         now = mark
-        if abs(mark / step - round(mark / step)) > 1e-6:
+        if mark not in sampling_marks:
             continue   # oraliq nuqta (hodisa/harakat) — namuna olinmaydi
         dt = now - last_sample
+        sample_start = last_sample
         last_sample = now
+        sample_intervals.append((sample_start, now))
         # roaming: bir xil SSID'li (ESS) AP'lar orasida ns-3 o'zi qayta ulanadi — BSSID'ni kuzatamiz
         for sta, (smac, _lid, ap0) in sta_macs.items():
             cur_ap = None
@@ -1050,7 +1054,8 @@ def main(inp_path, out_path):
                 prev[app["id"]] = cur
                 d_ = [c - q for c, q in zip(cur, p0)]
                 series[app["id"]].append({
-                    "t": round(now, 3), "thr_bps": round(d_[0] * 8 / max(dt, 1e-9)),
+                    "t": round(now, 3), "t_start": sample_start, "t_end": now,
+                    "thr_bps": round(d_[0] * 8 / max(dt, 1e-9)),
                     "delay_ms": round(d_[2] / d_[1] * 1000, 3) if d_[1] > 0 else None,
                     "jitter_ms": round(d_[3] / d_[1] * 1000, 3) if d_[1] > 0 else None,
                     "loss_pct": round(max(d_[4] - d_[1], 0) / d_[4] * 100, 2) if d_[4] > 0 else None})
@@ -1062,7 +1067,8 @@ def main(inp_path, out_path):
             (tx, rx, rxb, dl, jt), (rtx, rrx, _rb, rdl, _rj) = cur
             (tx0, rx0, rxb0, dl0, jt0), (rtx0, rrx0, _rb0, rdl0, _rj0) = p0
             drx, dtx = rx - rx0, tx - tx0
-            pt = {"t": round(now, 3), "thr_bps": round((rxb - rxb0) * 8 / max(dt, 1e-9)),
+            pt = {"t": round(now, 3), "t_start": sample_start, "t_end": now,
+                  "thr_bps": round((rxb - rxb0) * 8 / max(dt, 1e-9)),
                   "delay_ms": round((dl - dl0) / drx * 1000, 3) if drx > 0 else None,
                   "jitter_ms": round((jt - jt0) / (drx - 1) * 1000, 3) if drx > 1 else None,
                   "loss_pct": round(max(dtx - drx, 0) / dtx * 100, 2) if dtx > 0 else None}
@@ -1111,8 +1117,9 @@ def main(inp_path, out_path):
             why_, st_, sp_ = fw_block[app["id"]]
             flows[app["id"]].update(
                 start=st_, stop=sp_, blocked=why_,
-                series=[{"t": float(t), "thr_bps": 0, "delay_ms": None, "jitter_ms": None, "loss_pct": 100.0}
-                        for t in range(int(st_) + 1, int(sp_) + 1)],
+                series=[{"t": round(b, 3), "t_start": a, "t_end": b, "thr_bps": 0,
+                         "delay_ms": None, "jitter_ms": None, "loss_pct": 100.0}
+                        for a, b in sample_intervals if st_ <= a < sp_],
                 summary={"avg_thr_bps": 0, "avg_delay_ms": None, "avg_jitter_ms": None, "loss_pct": 100.0,
                          "blocked": why_})
         if "sink_key" in app:

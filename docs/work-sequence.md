@@ -48,7 +48,14 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
     10 yangi test bilan backend to‘plami 43 test; 64.9 MB sun’iy history’da warm
     list 503.2 ms → 1.67 ms, 0 full JSON reads. `docs/result-index.md`ga qarang.
     Haqiqiy ns-3 IPv4/IPv6 replication/replay va asl demo/report suite ham o‘tdi.
-12. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
+12. `feat/analysis-windows` — warm-up/cutoff bo‘yicha archived result tahlili,
+    duration-weighted full-bin statistika va coverage diagnostikasi, HTML/CSV/ZIP.
+    ns-3 fractional stop/sampling tuzatishi va app interval propagation.
+    `perf/run-result-index` ustida; 9 yangi test bilan backend to‘plami 52 test.
+    Qo‘llanma: `docs/analysis-windows.md`.
+    52 backend va 19 IPv6/IS-IS/replication testi o‘tdi; haqiqiy ns-3’da fractional
+    sample/tail va replay tekshirildi. Asl demo/report suite ham o‘tdi.
+13. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
     Agent mavjud UI’dagi tasdiqlangan sync xatosidan tashqari dizaynni o‘zgartirmaydi.
 
 Asl audit `233054b`da bajarilgan. Checkout endi PR #3 bilan kelgan `7c6e317` ustida;

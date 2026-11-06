@@ -144,6 +144,16 @@ def _done_time(fl, nbytes):
     return None
 
 
+def _interval_fields(points):
+    """Keep exact interval bounds when all aggregated constituents agree."""
+    bounds = {(p.get("t_start"), p.get("t_end")) for p in points}
+    if len(bounds) == 1:
+        start, end = next(iter(bounds))
+        if start is not None and end is not None:
+            return {"t_start": start, "t_end": end}
+    return {}
+
+
 def postprocess(res, sc):
     """Natijaga ilova metrikalarini qo'shadi: flows[<ilova>] (type voip/http/ftp) + `apps` xulosasi."""
     if not has_models(sc) or not res or not res.get("flows"):
@@ -173,7 +183,8 @@ def postprocess(res, sc):
                 for role, p in pts.items():
                     r_d[role], mos_d[role] = mos_from(p.get("delay_ms"), p.get("jitter_ms"), p.get("loss_pct"), codec)
                 vals = [m for m in mos_d.values() if m is not None]
-                series.append({"t": tt, "thr_bps": sum((p.get("thr_bps") or 0) for p in pts.values()),
+                series.append({"t": tt, **_interval_fields(pts.values()),
+                               "thr_bps": sum((p.get("thr_bps") or 0) for p in pts.values()),
                                "delay_ms": max((p.get("delay_ms") or 0) for p in pts.values()) if any(p.get("delay_ms") is not None for p in pts.values()) else None,
                                "jitter_ms": max((p.get("jitter_ms") or 0) for p in pts.values()),
                                "loss_pct": max((p.get("loss_pct") or 0) for p in pts.values()),
@@ -202,7 +213,8 @@ def postprocess(res, sc):
                 pts = by_t[tt]
                 dl = [p["delay_ms"] for p in pts if p.get("delay_ms") is not None]
                 ls = [p["loss_pct"] for p in pts if p.get("loss_pct") is not None]
-                series.append({"t": tt, "thr_bps": round(sum(p.get("thr_bps") or 0 for p in pts) / len(pts)),
+                series.append({"t": tt, **_interval_fields(pts),
+                               "thr_bps": round(sum(p.get("thr_bps") or 0 for p in pts) / len(pts)),
                                "delay_ms": max(dl) if dl else None, "loss_pct": round(sum(ls) / len(ls), 2) if ls else None,
                                "receivers_ok": sum(1 for p in pts if (p.get("loss_pct") if p.get("loss_pct") is not None else 100) < 50)})
             from lab.model import parse_rate
@@ -223,11 +235,12 @@ def postprocess(res, sc):
                 st = float(f.get("start", 0))
                 items.append({"id": k, "start": st, "done_t": round(dt, 3) if dt is not None else None,
                               "time_s": round(dt - st, 3) if dt is not None else None})
-            agg = {}
+            agg, interval_points = {}, {}
             for f in parts.values():
                 for p in f.get("series") or []:
                     agg[p["t"]] = agg.get(p["t"], 0) + (p.get("thr_bps") or 0)
-            series = [{"t": tt, "thr_bps": v} for tt, v in sorted(agg.items())]
+                    interval_points.setdefault(p["t"], []).append(p)
+            series = [{"t": tt, **_interval_fields(interval_points[tt]), "thr_bps": v} for tt, v in sorted(agg.items())]
             done = [x["time_s"] for x in items if x["time_s"] is not None]
             if t == "http":
                 for x in items:

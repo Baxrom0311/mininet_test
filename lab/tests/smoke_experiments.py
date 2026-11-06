@@ -20,9 +20,9 @@ class PacketReplications(unittest.TestCase):
         project = generate("ring", routers=3, hosts=1, flows=1, ipv6=True)
         project["scenarios"] = {}
         for version in (4, 6):
-            project["scenarios"][f"v{version}"] = {"duration": 3, "ip_version": version, "apps": [
+            project["scenarios"][f"v{version}"] = {"duration": 3.5, "sample": .4, "ip_version": version, "apps": [
                 {"id": "video", "type": "udp", "src": "h0x0", "dst": "h2x0", "rate": "300kbps",
-                 "start": .5, "stop": 3}], "events": []}
+                 "start": .5, "stop": 3.5}], "events": []}
         with tempfile.TemporaryDirectory() as td, patch("lab.engines.manager.RESULTS_DIR", td), \
                 TestClient(create_app("demo")) as client:
             for version in (4, 6):
@@ -47,9 +47,20 @@ class PacketReplications(unittest.TestCase):
                     self.assertEqual([r["scenario"]["rng_run"] for r in runs], [1, 2])
                     for run in runs:
                         self.assertGreater(run["flows"]["video"]["summary"]["avg_thr_bps"], 200000)
+                        points = run["flows"]["video"]["series"]
+                        self.assertEqual(len(points), 9)
+                        self.assertTrue(all(0 <= p["t_start"] < p["t_end"] <= 3.5 for p in points))
+                        self.assertEqual(points[-1]["t_end"], 3.5)
+                        self.assertAlmostEqual(points[-1]["t_end"] - points[-1]["t_start"], .3)
                     response = client.get(f"/api/experiments/{project['name']}/{batch['experiment_id']}")
                     self.assertEqual(response.status_code, 200, response.text)
                     self.assertTrue(response.json()["complete"])
+                    response = client.get(f"/api/experiments/{project['name']}/{batch['experiment_id']}?start_s=.8&end_s=3.5")
+                    self.assertEqual(response.status_code, 200, response.text)
+                    window = response.json()["run_windows"][0]["flows"]["video"]
+                    self.assertEqual(window["expected_bins"], 7)
+                    self.assertAlmostEqual(window["expected_s"], 2.7)
+                    self.assertTrue(window["metrics"]["avg_thr_bps"]["complete"])
                     first = runs[0]
                     request = {"project": first["reproducibility"]["project"], "scenario": f"v{version}", "engine": "ns3"}
                     replay = wait(client.post("/api/runs", json=request).json()["run_id"])
