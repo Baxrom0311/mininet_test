@@ -370,6 +370,8 @@ class RunManager:
             res = failmodel.postprocess(res, sc_user, sc_fail, project)   # mavjudlik (availability)
         except Exception as e:  # noqa: BLE001
             res = {"engine": engine, "status": "error", "error": f"{type(e).__name__}: {e}", "flows": {}}
+            if getattr(e, "__notes__", None):
+                res["error_notes"] = list(e.__notes__)
             log(f"XATO: {e}")
         finally:
             if emulation_locked:
