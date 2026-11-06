@@ -140,6 +140,8 @@ jobs:
 
       - name: Real network lock regression (no root or Mininet required)
         run: python -m unittest lab.tests.test_real_lock -v
+      - name: Calibration evidence and CLI regression
+        run: python -m unittest lab.tests.test_calibration_evidence -v
 
   docker-build:
     runs-on: ubuntu-latest

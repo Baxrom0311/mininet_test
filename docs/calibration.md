@@ -10,7 +10,7 @@ STP uchun avvalgi emulyatsiya binlaridan olingan taxmin tuzatilgan.
 |---|---|---|---|
 | STP direct link, forwarding | 2 × forward_delay = 30 s | median 29.7 s | 3 |
 | VRRP master down | RFC MDI (~3.6 s, priority/advertga bog‘liq) | median 3.52 s | 3 |
-| OSPF route update | SPF darhol, 0 s | median 1.74 s | 2 |
+| OSPF route update | standart 0 s, ixtiyoriy `ospf_convergence_s` | median 1.74 s | 2 |
 | RIP (update 10) route recovery | 5 s | median 7.97 s | 3 |
 | RSTP direct link, forwarding | 1 s | median 0.002 s | 3 |
 | BGP session recovery | 2 s | median 1.23 s | 3 |
@@ -43,8 +43,11 @@ python3 -m lab.calibration /tmp/measurements.csv --format markdown --output /tmp
 ```
 
 Qabul chegarasi: `abs(model-real) <= abs_tolerance + rel_tolerance * abs(real)`.
+E/G uchun `--min-samples 10` va takroriy `--require-metric` ishlating:
+[namuna soni, dublikatlar va exit kodlari](calibration-evidence.md).
 Exit 0 — barcha tekshirilgan kuzatuvlar chegarada; 1 — tafovut bor; 2 — tasdiqlangan
-real kuzatuv yo‘q. NaN/Inf/manfiy raqamlar rad etiladi. Standartlar o‘zgarmaydi.
+real kuzatuv yo‘q; 3 — so‘ralgan namuna soni yoki metric yetishmaydi.
+NaN/Inf/manfiy raqamlar rad etiladi. Standartlar o‘zgarmaydi.
 
 Faqat mos metric uchun ko‘rib chiqiladigan ssenariy override taklif qilinadi:
 STP `port_forwarding_s`, VRRP `master_down_s`, RIP `route_recovery_s`, BGP
