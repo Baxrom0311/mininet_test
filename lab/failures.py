@@ -169,8 +169,38 @@ def _flow_up(p, ftype):
 
 
 def flow_availability(fl):
-    """(mavjudlik %, uzilishlar [(start, end, s)], kuzatilgan soniyalar) — soniyalik seriyadan."""
+    """Return availability, observed outage intervals and observed active seconds."""
     st, sp = float(fl.get("start", 0)), float(fl.get("stop", 0))
+    points = fl.get("series") or []
+    if any("t_start" in p or "t_end" in p for p in points):
+        if not math.isfinite(st) or not math.isfinite(sp) or not 0 <= st <= sp:
+            raise ValueError("invalid availability flow active time")
+        intervals = []
+        for point in points:
+            start, end = point.get("t_start"), point.get("t_end")
+            if (type(start) not in (int, float) or type(end) not in (int, float)
+                    or not math.isfinite(start) or not math.isfinite(end) or not 0 <= start < end):
+                raise ValueError("invalid availability sample interval")
+            intervals.append((start, end, point))
+        intervals.sort(key=lambda item: item[0])
+        if any(a[1] > b[0] + 1e-9 for a, b in zip(intervals, intervals[1:])):
+            raise ValueError("duplicate or overlapping availability sample intervals")
+        observed, up, outages = [], [], []
+        for start, end, point in intervals:
+            start, end = max(start, st), min(end, sp)
+            if start >= end:
+                continue
+            observed.append(end - start)
+            if _flow_up(point, fl.get("type")):
+                up.append(end - start)
+            elif outages and abs(outages[-1]["end"] - start) < 1e-9:
+                outages[-1]["end"] = end
+                outages[-1]["duration_s"] = round(end - outages[-1]["start"], 3)
+            else:
+                outages.append({"start": start, "end": end, "duration_s": round(end - start, 3)})
+        total = math.fsum(observed)
+        return (round(100 * math.fsum(up) / total, 3), outages, total) if total else (None, [], 0)
+    # Timestamp-only archives preserve their historical one-second interpretation.
     pts = [p for p in fl.get("series") or [] if st + 1 <= p["t"] <= sp + 1e-9]
     if not pts:
         return None, [], 0
@@ -234,7 +264,7 @@ def postprocess(res, sc_user, sc_exp=None, project=None):
         "min_flow_availability": min(vals) if vals else None,
         "theoretical": theoretical(project, sc_user) if project else {},
         "failure_events": len(gen),
-        "note": "mavjudlik — oqim faol soniyalaridan trafik o'tgan soniyalar ulushi (1 s aniqlik); "
+        "note": "mavjudlik — kuzatilgan faol vaqtdan trafik o'tgan vaqt ulushi; aniq oraliqlar vaqt bilan vaznlanadi, eski seriyalar 1 s; "
                 "http — yuklangan sahifalar, ftp — fayl yakunlandi",
     }
     return res

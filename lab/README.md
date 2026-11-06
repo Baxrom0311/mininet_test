@@ -243,20 +243,24 @@ NetLab'da ham xuddi shunday:
 | **ns-3** | Diskret-hodisali simulyatsiya (OPNET bilan bir xil tamoyil): paket darajasida, virtual vaqtda, deterministik (seed) | Ilmiy natija, takrorlanuvchan tajriba, real vaqtdan tez |
 | **Mininet** | Haqiqiy emulyatsiya: iperf3/ping haqiqiy Linux TCP/UDP, FRR, OVS, P4, SDN orqali o'tadi | Protokol va konfiguratsiyani "haqiqatda" tekshirish |
 
+Analitik hisob `sample` bilan 1 soniyadan kichik qadamlarni ham oladi; yangi
+natijadagi `sample_s` haqiqiy qadamni bildiradi. Limitlar va kvantlash:
+[analytic-sampling.md](../docs/analytic-sampling.md).
+
 **Kabel statistikasi** (OPNET'dagi *queue size* / *dropped packets*): har natijada
-`links.<kabel>` — soniyalik nuqtalar, uchala dvigatelda bir xil maydonlar bilan:
+`links.<kabel>` — namuna oralig‘i bo‘yicha nuqtalar (Mininet’da 1 s):
 
 | Maydon | Ma'nosi | Analitik | ns-3 | Mininet |
 |---|---|---|---|---|
 | `ab_bps` / `ba_bps` | yo'nalish bo'yicha yuklama | oqim modeli | qurilma TX navbati | `/proc/net/dev` |
 | `util` | max(ab, ba) / bw | ✓ | ✓ | ✓ |
 | `queue_ab` / `queue_ba` | jo'natuvchi tomondagi navbat (paket) | M/M/1 (1500 B) | pfifo qdisc + qurilma navbati | `tc -s qdisc` root qlen |
-| `drops_ab` / `drops_ba` | shu soniyada navbat to'lib tashlangan paketlar | ortiqcha UDP / 1000 B | qdisc + qurilma drops | `tc` drops (userspace OVS'da switch kirdi-chiqdi bo'yicha tuzatilgan) |
+| `drops_ab` / `drops_ba` | shu intervalda navbat to'lib tashlangan paketlar | ortiqcha UDP / 1000 B, kasrli taxmin | qdisc + qurilma drops | `tc` drops (userspace OVS'da switch kirdi-chiqdi bo'yicha tuzatilgan) |
 
 **Qurilma statistikasi va konvergensiya** (OPNET *node statistics*, *convergence
 duration*) — analitik va Mininet dvigatellarida:
 
-- `nodes.<qurilma>` — har L3 qurilma (host/server/router) uchun soniyalik nuqtalar:
+- `nodes.<qurilma>` — har L3 qurilma (host/server/router) uchun namuna nuqtalari:
   `routes` (jadvaldagi marshrutlar soni), `fwd_pps` (tranzit paketlar), `rx_pps`/`tx_pps`,
   `noroute` (marshrut topilmay tashlangan), `discards` (IP/navbat tashlanishlari).
   Mininet'da `/proc/<pid>/net/{route,snmp,netstat}` dan o'qiladi (subprocess'siz).

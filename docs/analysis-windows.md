@@ -25,7 +25,10 @@ summary asosidagi statistika saqlanadi.
 
 `t` bin oxirini bildiradi. Yangi analytic/ns-3 flow nuqtalarida aniq `t_start`,
 `t_end` bor; VoIP/multicast/HTTP/FTP agregatsiyasi mos chegaralarni saqlaydi.
-Analytic qadam 1 s, ns-3 qadam `scenario.sample` (default 1 s). Run oxiridagi
+Yangi analytic natijada qadam `sample_s` orqali saqlanadi va `scenario.sample`ga
+mos (default 1 s). Eski analytic natijada `sample_s` yo‘q bo‘lsa qadam hamon 1 s;
+uning inputidagi sample qayta talqin qilinmaydi. ns-3 qadam `scenario.sample`.
+Run oxiridagi
 qisqa bin haqiqiy davomiyligi bilan hisoblanadi. Flow active vaqti bilan so‘ralgan
 oyna kesishmasiga **butunlay kirgan** binlar tanlanadi. Boundary binlar taxminiy
 bo‘linmaydi. Masalan `[1,2]`, `[2,3]`, `[3,3.5]` uchun `[1,3.5]` tanlovi og‘irliklari
@@ -67,7 +70,8 @@ Timing grid float toleransi 1e-8; simulatorning o‘z resolution’i ham amal qi
 Firewall bloklangan sintetik flow ham shu interval jadvalini ishlatadi.
 scenario.sample son va 0.001..3600 s; duration/sample <= 100000. Bu faqat sample
 limitidir, barcha topology/flow kombinatsiyalari RAM’ga sig‘ishi kafolati emas.
-Analytic sample parametridan qat’i nazar 1 s qadam ishlatadi.
+Yangi analytic hisob ham `scenario.sample`dan foydalanadi. Kvantlash va
+moslik qoidalari: [analytic-sampling.md](analytic-sampling.md).
 
 ## Eksport va tekshiruv
 
