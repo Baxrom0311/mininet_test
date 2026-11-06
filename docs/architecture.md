@@ -87,6 +87,11 @@ experiment/study tanlash SQL filtriga tushadi. Pagination count/page bitta read
 snapshotdan olinadi. Migratsiya, reindex va kattalik cheklovlari:
 [result-index.md](result-index.md).
 
+`analysis_windows.py` tayyor analytic/ns-3 series’lardan to‘liq tanlangan binlarni
+duration bilan og‘irlab hisoblaydi. Yangi flow nuqtalarida aniq interval chegaralari
+saqlanadi; experiment CI har running window mean’i ustida hisoblanadi. Default
+summary semantikasi saqlangan. [analysis-windows.md](analysis-windows.md).
+
 ## Real testlar va qulf
 
 Mininet cleanup global; alohida real testlar yoki serverlarni bir vaqtda ko‘tarmang.

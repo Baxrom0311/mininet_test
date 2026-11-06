@@ -17,9 +17,16 @@ main bo‘lishi kerak. Agent PR ochmagan, merge yoki environment publish qilmaga
 | 8 | `ci/real-mininet` | `feat/p4-bmv2` | `59c5580` |
 | 9 | `docs/architecture` | `ci/real-mininet` | `08bbbe4` |
 | 10 | `feat/experiment-statistics` | `docs/architecture` | `521fb5b` |
-| 11 | `perf/run-result-index` | `feat/experiment-statistics` | indexed history/pagination branchi |
+| 11 | `perf/run-result-index` | `feat/experiment-statistics` | `9b16071` |
+| 12 | `feat/analysis-windows` | `perf/run-result-index` | warm-up/window analysis branchi |
 
 ## Tekshirilgan imkoniyatlar
+
+- `feat/analysis-windows`: 9 yangi test bilan 52 backend regressiyasi. Warm-up,
+  fractional bin, missing coverage, app interval propagation, legacy ambiguity,
+  CI eligibility va API/export/immutability tekshiruvlari. 19 model/ns-3 testi,
+  shu jumladan IPv4/IPv6 fractional tail va replay, hamda asl demo/report suite o‘tdi.
+  [analysis-windows.md](analysis-windows.md) estimator ma’nosini tushuntiradi.
 
 - `perf/run-result-index`: yangi 10 test, jami 43 backend regressiyasi. Asl demo/report
   smoke suite va haqiqiy ns-3 IPv4/IPv6 replication/replay ham o‘tdi.

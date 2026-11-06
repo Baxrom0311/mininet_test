@@ -51,7 +51,7 @@ def interval(values, eligible=True):
             "ci95": [mean - half, mean + half] if half is not None else None}
 
 
-def summarize(runs):
+def summarize(runs, *, start_s=None, end_s=None):
     if not runs:
         raise ValueError("experiment runs not found")
     counts = {r.get("replication_count") for r in runs}
@@ -87,23 +87,57 @@ def summarize(runs):
     if len(keys) > 1 or len(runtime_keys) > 1:
         raise ValueError("replications must use the same topology, scenario, engine and runtime")
     complete = len(done) == expected and len(runs) == expected
+    windowed = start_s is not None or end_s is not None
+    analyses, window = {}, None
+    if windowed:
+        from lab.analysis_windows import analyze, specification
+        window = specification(runs[0].get("duration", (runs[0].get("scenario") or {}).get("duration")), start_s, end_s)
+        analyses = {r["run_id"]: analyze(r, start_s, end_s) for r in done}
     rows = []
     flow_ids = sorted({fid for r in done for fid, f in r.get("flows", {}).items() if not f.get("hidden")})
     for fid in flow_ids:
+        selected_windows = set()
+        if windowed:
+            for analysis in analyses.values():
+                flow = analysis["flows"].get(fid)
+                if flow:
+                    selected_windows.add((flow["selected_start_s"], flow["selected_end_s"], flow["expected_bins"]))
         for metric in METRICS:
-            values = [r.get("flows", {}).get(fid, {}).get("summary", {}).get(metric) for r in done]
+            coverage = []
+            if windowed:
+                from lab.analysis_windows import METRICS as fields
+                if not any(metric in r.get("flows", {}).get(fid, {}).get("summary", {}) or
+                           any(fields[metric] in p for p in r.get("flows", {}).get(fid, {}).get("series", [])) for r in done):
+                    continue
+                coverage = [analyses[r["run_id"]]["flows"].get(fid, {}).get("metrics", {}).get(metric, {}) for r in done]
+                values = [c.get("value") for c in coverage]
+            else:
+                values = [r.get("flows", {}).get(fid, {}).get("summary", {}).get(metric) for r in done]
             valid = [v for v in values if type(v) in (int, float) and math.isfinite(v)]
-            if not valid:
+            if not valid and not windowed:
                 continue
-            rows.append({"flow": fid, "metric": metric, "missing": expected - len(valid),
-                         **interval(valid, eligible=complete and len(valid) == expected)})
+            eligible = complete and len(valid) == expected
+            extra = {}
+            if windowed:
+                extra["incomplete"] = sum(not c.get("complete", False) for c in coverage)
+                extra["window_mismatch"] = len(selected_windows) > 1
+                eligible = eligible and extra["incomplete"] == 0 and not extra["window_mismatch"]
+            rows.append({"flow": fid, "metric": metric, "missing": expected - len(valid), **extra,
+                         **interval(valid, eligible=eligible)})
     statuses = {}
     for r in runs:
         status = r.get("status", "unknown")
         statuses[status] = statuses.get(status, 0) + 1
-    return {"experiment_id": next(iter(ids)), "expected": expected, "observed": len(runs),
+    result = {"experiment_id": next(iter(ids)), "expected": expected, "observed": len(runs),
             "complete": complete, "statuses": statuses, "confidence": .95, "method": "Student t, per-run summary",
             "metrics": rows,
             "notes": ["Intervals require independent replications and an approximately normal sample mean.",
                       "Identical deterministic results give zero width; this does not measure model accuracy.",
                       "Incomplete, failed or missing-metric replications suppress the corresponding interval."]}
+    if windowed:
+        result.update(window=window, run_windows=list(analyses.values()),
+                      method="Student t, per-run duration-weighted full-bin means")
+        result["notes"] += ["Only full bins within each flow's active time are selected; boundary bins are trimmed, never split.",
+                            "Delay, jitter, RTT and loss are time-weighted bin means, not packet-weighted estimates.",
+                            "Missing/invalid bins or differing per-flow windows suppress the interval; available means remain descriptive."]
+    return result

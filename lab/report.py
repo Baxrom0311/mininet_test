@@ -628,11 +628,22 @@ def csv_bundle(runs):
 def experiment_report(summary):
     body = kv([("Expected", summary["expected"]), ("Observed", summary["observed"]),
                ("Complete", summary["complete"]), ("Confidence", "95%")])
-    body += "<h2>Per-run summary statistics</h2>"
-    body += table(["Flow", "Metric", "n", "Missing", "Mean", "Sample SD", "95% CI"],
-                  [[r["flow"], r["metric"], r["n"], r["missing"], r["mean"], r["sample_stddev"],
+    if summary.get("window"):
+        w = summary["window"]
+        body += kv([("Analysis start, s", w["start_s"]), ("Analysis end, s", w["end_s"]),
+                    ("Weighting", w["weighting"]), ("Selection", w["selection"])])
+    body += "<h2>Per-run statistics</h2>"
+    body += table(["Flow", "Metric", "n", "Missing", "Incomplete coverage", "Window mismatch", "Mean", "Sample SD", "95% CI"],
+                  [[r["flow"], r["metric"], r["n"], r["missing"], r.get("incomplete", 0), r.get("window_mismatch", False),
+                    r["mean"], r["sample_stddev"],
                     " … ".join(_num(v, 6) for v in r["ci95"]) if r["ci95"] is not None else "—"]
-                   for r in summary["metrics"]], num=(2, 3, 4, 5))
+                   for r in summary["metrics"]], num=(2, 3, 4, 6, 7))
+    if summary.get("run_windows"):
+        body += "<h2>Window coverage</h2>"
+        body += table(["Run", "Flow", "Selected start, s", "Selected end, s", "Observed / expected bins", "Trimmed, s", "Legacy grid", "Error"],
+                      [[a["run_id"], fid, f["selected_start_s"], f["selected_end_s"],
+                        f"{f['observed_bins']} / {f['expected_bins']}", f["trimmed_s"], f["legacy_intervals"], f["error"]]
+                       for a in summary["run_windows"] for fid, f in a["flows"].items()], num=(2, 3, 5))
     body += "<h2>Method</h2><p>" + e(summary["method"]) + "</p><ul>"
     body += "".join("<li>" + e(note) + "</li>" for note in summary["notes"]) + "</ul>"
     body += "<p>" + e(json.dumps(summary["statuses"], sort_keys=True)) + "</p>"
@@ -644,6 +655,20 @@ def experiment_bundle(runs, summary):
     with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED) as z:
         z.writestr("experiment.json", json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False))
         z.writestr("report.html", experiment_report(summary))
+        w = summary.get("window") or {}
+        z.writestr("experiment_statistics.csv", _csv([
+            [r["flow"], r["metric"], r["n"], r["missing"], r.get("incomplete", 0), r.get("window_mismatch", False),
+             r["mean"], r["sample_stddev"],
+             *(r["ci95"] or [None, None]), w.get("start_s"), w.get("end_s")]
+            for r in summary["metrics"]], ["flow", "metric", "n", "missing", "incomplete_coverage", "window_mismatch", "mean", "sample_stddev",
+                                          "ci95_low", "ci95_high", "start_s", "end_s"]))
+        if summary.get("run_windows"):
+            z.writestr("window_coverage.csv", _csv([
+                [a["run_id"], fid, metric, m["value"], m["covered_s"], f["expected_s"], m["samples"], f["expected_bins"],
+                 m["complete"], f["selected_start_s"], f["selected_end_s"], f["trimmed_s"], f["legacy_intervals"], f["error"]]
+                for a in summary["run_windows"] for fid, f in a["flows"].items() for metric, m in f["metrics"].items()],
+                ["run_id", "flow", "metric", "value", "covered_s", "expected_s", "samples", "expected_bins", "complete",
+                 "selected_start_s", "selected_end_s", "trimmed_s", "legacy_intervals", "error"]))
     return buf.getvalue()
 
 

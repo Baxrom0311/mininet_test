@@ -398,6 +398,11 @@ def validate_scenario(project, sc):
         dur = 0
     if not (1 <= dur <= 3600):
         errors.append("davomiylik 1..3600 s")
+    sample = sc.get("sample", 1)
+    if type(sample) not in (int, float) or not 0.001 <= sample <= 3600:
+        errors.append("sample: number 0.001..3600 s")
+    elif dur / sample > 100000:
+        errors.append("sample: at most 100000 intervals per scenario")
     devs = project.get("devices") or {}
     ids = set()
     for i, a in enumerate(sc.get("apps") or []):

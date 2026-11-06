@@ -50,8 +50,10 @@ og‘ish va ikki tomonlama 95% Student t intervali beriladi:
 `mean ± t(df=n−1, 0.975) × sample_stddev / sqrt(n)`.
 
 Bitta running summary qiymati bitta namuna hisoblanadi. Vaqt qatoridagi binlar
-mustaqil takror sifatida sanalmaydi; bu hisobot warm-up filtrlashni qo‘shmaydi,
-dvigatelning mavjud summary semantikasini saqlaydi. `n < 2` bo‘lsa interval yo‘q.
+mustaqil takror sifatida sanalmaydi; parametrsiz hisobot warm-up filtrlashni qo‘shmaydi,
+dvigatelning mavjud summary semantikasini saqlaydi. Ixtiyoriy `start_s`/`end_s`
+query parametrlari alohida vaqt bilan og‘irlangan estimatorni tanlaydi:
+[analysis-windows.md](analysis-windows.md). `n < 2` bo‘lsa interval yo‘q.
 Tajribaning biror runi pending/error/cancelled/interrupted/deleted bo‘lsa, barcha
 intervallar yashiriladi. Muayyan metrika yetishmasa yoki non-finite bo‘lsa, o‘sha
 metrikaning intervali berilmaydi. Mavjud yakunlangan runlarning descriptiv mean/SD

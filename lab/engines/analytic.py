@@ -513,7 +513,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             a = f["app"]
             if not f.get("active"):
                 continue
-            pt = {"t": t1, "thr_bps": 0, "delay_ms": None, "jitter_ms": None, "loss_pct": 100.0}
+            pt = {"t": t1, "t_start": t0, "t_end": t1, "thr_bps": 0,
+                  "delay_ms": None, "jitter_ms": None, "loss_pct": 100.0}
             if f["ok"]:
                 bits = int(a.get("size", 1000 if a["type"] != "ping" else 64)) * 8 if a["type"] != "tcp" else 12000
                 d_fwd, q_sum = 0.0, 0.0

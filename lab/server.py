@@ -304,7 +304,7 @@ def create_app(driver_name="demo", token=None):
         return runs.start_experiment(body.get("project") or {}, body.get("scenario"), body.get("engine", "analytic"),
                                      body.get("repetitions", 10), body.get("seed", 1))
 
-    def _experiment(project, experiment_id):
+    def _experiment(project, experiment_id, start_s=None, end_s=None):
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", experiment_id):
             raise ValueError("invalid experiment_id")
         rs = [runs.get(project, r["run_id"]) for r in runs.list(project, experiment_id=experiment_id)]
@@ -312,21 +312,21 @@ def create_app(driver_name="demo", token=None):
         if not rs:
             raise HTTPException(404, "experiment not found")
         from lab.experiments import summarize
-        return rs, summarize(rs)
+        return rs, summarize(rs, start_s=start_s, end_s=end_s)
 
     @app.get("/api/experiments/{project}/{experiment_id}")
-    def experiment_get(project: str, experiment_id: str):
-        return _experiment(project, experiment_id)[1]
+    def experiment_get(project: str, experiment_id: str, start_s: float | None = None, end_s: float | None = None):
+        return _experiment(project, experiment_id, start_s, end_s)[1]
 
     @app.get("/api/experiments/{project}/{experiment_id}/report.html")
-    def experiment_html(project: str, experiment_id: str):
+    def experiment_html(project: str, experiment_id: str, start_s: float | None = None, end_s: float | None = None):
         from lab.report import experiment_report
-        return _html(experiment_report(_experiment(project, experiment_id)[1]), f"{experiment_id}.html")
+        return _html(experiment_report(_experiment(project, experiment_id, start_s, end_s)[1]), f"{experiment_id}.html")
 
     @app.get("/api/experiments/{project}/{experiment_id}/export.zip")
-    def experiment_zip(project: str, experiment_id: str):
+    def experiment_zip(project: str, experiment_id: str, start_s: float | None = None, end_s: float | None = None):
         from lab.report import experiment_bundle
-        rs, summary = _experiment(project, experiment_id)
+        rs, summary = _experiment(project, experiment_id, start_s, end_s)
         return Response(experiment_bundle(rs, summary), media_type="application/zip",
                         headers={"Content-Disposition": f'attachment; filename="{experiment_id}.zip"'})
 
@@ -424,6 +424,11 @@ def create_app(driver_name="demo", token=None):
     def run_report_html(project: str, run_id: str):
         from lab.report import run_report
         return _html(run_report(_run_or_404(project, run_id)), f"{run_id}.html")
+
+    @app.get("/api/runs/{project}/{run_id}/window")
+    def run_window(project: str, run_id: str, start_s: float | None = None, end_s: float | None = None):
+        from lab.analysis_windows import analyze
+        return analyze(_run_or_404(project, run_id), start_s, end_s)
 
     @app.get("/api/runs/{project}/{run_id}/export.zip")
     def run_export_zip(project: str, run_id: str):
