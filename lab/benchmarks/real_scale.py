@@ -11,100 +11,46 @@ of the host's maximum supported topology. Capture is off to avoid pcap I/O noise
 import argparse
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import platform
 import signal
-import threading
+import tempfile
 import time
+import uuid
 
 from lab.real_lock import serial_real_test
+from lab.benchmarks.scale_resources import Sampler, process_usage  # public compatibility imports
 from lab.topogen import generate
 
 
-def process_usage(pids):
-    """Read aggregate RSS, CPU ticks, FDs and threads for an explicit PID set."""
-    rss = fds = threads = 0
-    ticks = {}
-    page = os.sysconf("SC_PAGE_SIZE")
-    for pid in pids:
-        try:
-            # comm may contain spaces/parentheses; fields start after the last ')'.
-            fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
-            ticks[(pid, fields[19])] = int(fields[11]) + int(fields[12])
-            rss += int(Path(f"/proc/{pid}/statm").read_text().split()[1]) * page
-            threads += int(fields[17])
-            fds += len(list(Path(f"/proc/{pid}/fd").iterdir()))
-        except (OSError, ValueError, IndexError):
-            continue  # process exited between reads
-    return {"rss_bytes": rss, "fds": fds, "threads": threads, "processes": len(ticks)}, ticks
+def _error(error):
+    return f"{type(error).__name__}: {error}"
 
 
-class Sampler:
-    """Include daemonized FRR by its network namespace, not just its parent PID.
+def _save(path, report):
+    """Replace a complete JSON checkpoint; an interrupted write preserves its predecessor."""
+    content = json.dumps(report, indent=2, allow_nan=False) + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix="." + path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as output:
+            output.write(content)
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
 
-    OVS is shared with the host and excluded from these process totals. Its
-    separate RSS is reported so it cannot silently disappear from accounting.
-    """
-    def __init__(self, driver, interval=0.5):
-        self.driver, self.interval = driver, interval
-        self.samples, self.last_ticks = [], {}
-        self.cpu_seconds = 0.0
-        self.stop = threading.Event()
-        self.thread = threading.Thread(target=self._loop, daemon=True)
 
-    def _pids(self):
-        namespaces = set()
-        net = self.driver.net
-        if net:
-            for node in list(net.hosts):
-                if getattr(node, "inNamespace", False):
-                    try:
-                        namespaces.add(os.stat(f"/proc/{node.pid}/ns/net").st_ino)
-                    except OSError:
-                        pass
-        owned, ovs = {os.getpid()}, set()
-        for p in Path("/proc").iterdir():
-            if not p.name.isdigit():
-                continue
-            try:
-                if os.stat(p / "ns/net").st_ino in namespaces:
-                    owned.add(int(p.name))
-                if (p / "comm").read_text().strip() in ("ovs-vswitchd", "ovsdb-server"):
-                    ovs.add(int(p.name))
-            except OSError:
-                pass
-        return owned, ovs
-
-    def sample(self):
-        owned, ovs = self._pids()
-        usage, ticks = process_usage(owned)
-        self.cpu_seconds += sum(max(t - self.last_ticks.get(key, 0 if self.samples else t), 0)
-                                for key, t in ticks.items()) / os.sysconf("SC_CLK_TCK")
-        self.last_ticks = ticks
-        ovs_usage, _ = process_usage(ovs)
-        self.samples.append({"monotonic": time.monotonic(), **usage,
-                             "cpu_seconds": self.cpu_seconds, "shared_ovs_rss_bytes": ovs_usage["rss_bytes"]})
-
-    def _loop(self):
-        while not self.stop.is_set():
-            self.sample()
-            self.stop.wait(self.interval)
-
-    def __enter__(self):
-        self.thread.start()
-        return self
-
-    def __exit__(self, *args):
-        self.stop.set()
-        self.thread.join()
-
-    def summary(self):
-        keys = ("rss_bytes", "fds", "threads", "processes", "shared_ovs_rss_bytes")
-        return {"peak_" + k: max((s[k] for s in self.samples), default=0) for k in keys} | {
-            "cpu_seconds": round(self.cpu_seconds, 3), "samples": len(self.samples),
-            "sample_interval_s": self.interval,
-            "scope": "benchmark + namespace processes; shared OVS RSS reported separately; sampled, not exact HWM"}
+def _validate_traffic(traffic, apps):
+    flows = traffic.get("flows", {})
+    if set(flows) != {app["id"] for app in apps} or not flows:
+        raise RuntimeError("traffic report does not contain every configured flow")
+    for flow in flows.values():
+        rate = flow.get("summary", {}).get("avg_thr_bps")
+        if type(rate) not in (int, float) or not math.isfinite(rate) or rate <= 0:
+            raise RuntimeError("traffic did not reach all configured destinations with finite positive throughput")
+    json.dumps(traffic, allow_nan=False)  # Validate other metrics before retaining them in a checkpoint.
 
 
 def prerequisites():
@@ -138,9 +84,13 @@ def measure(routers, args):
     started = time.monotonic()
     with Sampler(driver) as sampler:
         try:
+            sampler.check()
             signal.alarm(args.timeout)
+            startup_started = time.monotonic()
             driver.start(p)
-            result["startup_s"] = round(time.monotonic() - started, 3)
+            result["startup_s"] = round(time.monotonic() - startup_started, 3)
+            sampler.sample()  # Ensure short runs include a sample while the network is alive.
+            sampler.check()
             hosts = [n for n, d in p["devices"].items() if d["type"] == "host"]
             if len(hosts) < 2:
                 raise ValueError("at least two hosts are required")
@@ -163,29 +113,42 @@ def measure(routers, args):
             result["expected_full_neighbors"] = expected
             if any(neighbors[n] < expected[n] for n in neighbors):
                 raise RuntimeError("not every configured router-router adjacency is Full")
-            result["traffic"] = emulation.run(driver, sc)
-            summaries = [f["summary"] for f in result["traffic"]["flows"].values()]
-            if not summaries or any(s["avg_thr_bps"] <= 0 for s in summaries):
-                raise RuntimeError("traffic did not reach all configured destinations")
+            traffic = emulation.run(driver, sc)
+            _validate_traffic(traffic, sc["apps"])
+            result["traffic"] = traffic
             core_link = next(lid for lid, l in p["links"].items()
                              if all(p["devices"][l[e]["dev"]]["type"] == "router" for e in ("a", "b")))
-            driver.update_link(core_link, up=False)
             failure_time = time.monotonic()
+            driver.update_link(core_link, up=False)
             while " 0% packet loss" not in driver.net.get(hosts[0]).cmd(f"ping -c 1 -W 1 {target}"):
                 if time.monotonic() - failure_time > args.settle:
                     raise RuntimeError("OSPF alternate-path recovery timed out")
                 time.sleep(0.5)
             result["link_failure_probe_s"] = round(time.monotonic() - failure_time, 3)
+            result["link_failure_probe_method"] = "before_link_command_v2"
             result["failed_link"] = core_link
             driver.update_link(core_link, up=True)
             result["status"] = "passed"
         except Exception as e:
-            result["error"] = f"{type(e).__name__}: {e}"
+            result["error"] = _error(e)
+        except (KeyboardInterrupt, SystemExit) as e:
+            result.update(status="interrupted", error=_error(e))
         finally:
             signal.alarm(0)
-            driver.stop()
+            sampler.sample()
+            try:
+                driver.stop()
+            except (Exception, KeyboardInterrupt, SystemExit) as e:
+                result["cleanup_error"] = _error(e)
+                result.setdefault("error", "cleanup failed: " + _error(e))
+                result["status"] = "interrupted" if isinstance(e, (KeyboardInterrupt, SystemExit)) or result["status"] == "interrupted" else "error"
     result["resources"] = sampler.summary()
-    if result["resources"]["peak_rss_bytes"] > args.rss_budget_mb * 1024 ** 2:
+    if not result["resources"]["valid"]:
+        result["resource_error"] = "resource evidence incomplete; inspect resources.sampling_errors"
+        if result["status"] == "passed":
+            result.update(status="error", error=result["resource_error"])
+    result["rss_budget_exceeded"] = result["resources"]["peak_rss_bytes"] > args.rss_budget_mb * 1024 ** 2
+    if result["rss_budget_exceeded"] and result["status"] == "passed":
         result.update(status="budget_exceeded", error="sampled process RSS exceeds configured budget")
     result["wall_s"] = round(time.monotonic() - started, 3)
     return result
@@ -203,13 +166,15 @@ def main(argv=None):
     ap.add_argument("--rss-budget-mb", type=int, default=2048)
     ap.add_argument("--output", type=Path, required=True)
     a = ap.parse_args(argv)
-    if (any(n < 3 or n > 200 for n in a.routers) or not 1 <= a.hosts <= 20 or a.flows < 1
+    if (len(set(a.routers)) != len(a.routers) or any(n < 3 or n > 200 for n in a.routers) or not 1 <= a.hosts <= 20 or a.flows < 1
             or a.duration < 3 or a.settle < 1 or a.timeout < 1 or a.rss_budget_mb < 1):
-        ap.error("routers 3..200; hosts 1..20; flows >= 1; duration >= 3")
+        ap.error("unique routers 3..200; hosts 1..20; flows >= 1; duration >= 3; settle/timeout/budget >= 1")
     missing = prerequisites()
-    report = {"schema_version": 1, "status": "blocked" if missing else "running",
+    report = {"schema_version": 2, "run_id": uuid.uuid4().hex, "status": "blocked" if missing else "running",
               "platform": platform.platform(), "cpu_count": os.cpu_count(),
-              "missing": missing, "runs": [], "maximum_capacity_established": False}
+              "missing": missing, "runs": [], "maximum_capacity_established": False,
+              "planned_routers": a.routers, "active_routers": None, "stopped_early": False,
+              "settings": {k: v for k, v in vars(a).items() if k != "output"}}
     import resource
     report["limits"] = {"nofile": list(resource.getrlimit(resource.RLIMIT_NOFILE)),
                         "affinity_cpus": len(os.sched_getaffinity(0))}
@@ -217,19 +182,43 @@ def main(argv=None):
         path = Path("/sys/fs/cgroup") / name
         if path.is_file():
             report["limits"][name] = path.read_text().strip()
+    _save(a.output, report)
     if not missing:
         def timeout(_sig, _frame):
             raise TimeoutError("benchmark timeout")
-        signal.signal(signal.SIGALRM, timeout)
-        for n in a.routers:
-            report["runs"].append(measure(n, a))
-            if report["runs"][-1]["status"] != "passed":
-                break
-        report["status"] = "passed" if all(r["status"] == "passed" for r in report["runs"]) else "failed"
-    a.output.parent.mkdir(parents=True, exist_ok=True)
-    a.output.write_text(json.dumps(report, indent=2) + "\n")
+        def interrupted(signum, _frame):
+            raise KeyboardInterrupt(f"signal {signum}")
+        previous_handler = signal.signal(signal.SIGALRM, timeout)
+        previous_term = signal.signal(signal.SIGTERM, interrupted)
+        try:
+            for n in a.routers:
+                report["active_routers"] = n
+                _save(a.output, report)
+                try:
+                    result = measure(n, a)
+                except Exception as error:
+                    result = {"routers": n, "status": "error", "error": _error(error)}
+                except (KeyboardInterrupt, SystemExit) as error:
+                    result = {"routers": n, "status": "interrupted", "error": _error(error)}
+                report["runs"].append(result)
+                report["active_routers"] = None
+                if result["status"] != "passed":
+                    report["stopped_early"] = True
+                    report["status"] = "interrupted" if result["status"] == "interrupted" else "failed"
+                _save(a.output, report)
+                if report["stopped_early"]:
+                    break
+            if not report["stopped_early"]:
+                report["status"] = "passed"
+        except (KeyboardInterrupt, SystemExit) as error:
+            report.update(status="interrupted", stopped_early=True, error=_error(error))
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, previous_handler)
+            signal.signal(signal.SIGTERM, previous_term)
+    _save(a.output, report)
     print(json.dumps({"status": report["status"], "missing": missing, "output": str(a.output)}))
-    return 2 if missing else int(report["status"] != "passed")
+    return 2 if missing else 130 if report["status"] == "interrupted" else int(report["status"] != "passed")
 
 
 if __name__ == "__main__":
