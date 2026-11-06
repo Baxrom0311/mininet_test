@@ -1,6 +1,6 @@
 """STP/RSTP real Mininet testi (OVS) — root + Mininet kerak.
 
-    sudo flock /tmp/netlab-real.lock python3 -m lab.tests.real_stp
+    sudo python3 -m lab.tests.real_stp
 
 Uchburchak (stp_lab): model bashorat qilgan port (s3:2) OVS'da ham blocking bo'lishi,
 ping ishlashi, faol kabel uzilganda trafik blocking port orqali tiklanishi va
@@ -13,6 +13,7 @@ import re
 import sys
 import time
 
+from lab.real_lock import serial_real_test
 from lab.tests.real_integration import FAILS, check, load, wait_ping
 from lab.drivers.base import EventBus
 from lab.drivers.mininet_driver import MininetDriver
@@ -88,6 +89,7 @@ def t_stp(drv, caps):
         check(results["rstp"][0] <= 6, f"RSTP konvergensiya {results['rstp'][0]} s (<= 6 s kutilgan)")
 
 
+@serial_real_test
 def main():
     if os.geteuid() != 0:
         print("root kerak")

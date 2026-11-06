@@ -79,9 +79,11 @@ RSS budjeti tugallangan run’ni baholaydi, startup uchun qat’iy xotira limiti
 `--timeout` run’ni cheklaydi, `finally` driver cleanup’ni bajaradi.
 
 Exit 2 — prerequisite yetishmaydi; exit 1 — test/budjet xatosi. Bitta muvaffaqiyatli
-20-router test hostning maksimal sig‘imini isbotlamaydi. Hozirgi cloud instance’da
-root/Mininet/FRR yo‘q: real resurs raqamlari o‘lchanmagan. Dalillar:
-[`docs/validation/ipv6-scale.md`](../docs/validation/ipv6-scale.md).
+20-router test hostning maksimal sig‘imini isbotlamaydi. Alohida root hostda
+10/20/30 router tekshirilgan: 20/30 router peak RSS 1.11/1.63 GB, kutilgan OSPF
+qo‘shnilari Full. Baza PR #12; keyingi kod uchun yangi real acceptance kerak.
+[Real hisobot va xom artefaktlar](../docs/validation/real-env-2026-11-06.md),
+[model/IPv6 tekshiruvlari](../docs/validation/ipv6-scale.md).
 
 ns-3 Python wheel’ida muhitga xos cheklov bor: virtualenvning to‘liq yo‘lida
 `test` bo‘lsa kutubxona qidiruvi ularni chiqarib yuboradi. Masalan `.venv` yoki
@@ -761,7 +763,7 @@ real driverda `ovs-appctl stp/show` (yoki `rstp/show`) va model bashorati yonma-
 
 | Dvigatel | Qanday | Konvergensiya (`stp_lab`, faol kabel uzilganda) |
 |---|---|---|
-| Mininet (OVS) | `stp_enable` / `rstp_enable`, `stp-priority`, `stp-system-id` = device_mac(id, 0), `stp-path-cost` | STP ~23 s, RSTP < 1 s (o'lchangan) |
+| Mininet (OVS) | `stp_enable` / `rstp_enable`, `stp-priority`, `stp-system-id` = device_mac(id, 0), `stp-path-cost` | STP median 29.7 s, RSTP median 0.002 s (3 takror; [real hisobot](../docs/validation/real-env-2026-11-06.md)) |
 | Analitik | blocking → forwarding o'tish `hold`: 802.1D 2×forward_delay = 30 s (bilvosita nosozlik +max_age 20 s), RSTP 1 s; `stp_convergence_s` — qo'lda | 30 s / 1 s |
 | ns-3 | BridgeNetDevice'da STP yo'q: model daraxti bo'yicha blocking segment ma'lumot uchun yopiladi (ErrorModel), hodisada qayta hisoblanadi; MAC yozuvlari 2 s (TCN FDB tozalashi o'rniga) | 30 s / 1 s |
 

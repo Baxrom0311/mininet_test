@@ -1,5 +1,12 @@
 # IPv6 va real scale tekshiruvi
 
+Joriy real natijalar: [2026-11-06 hisobot](real-env-2026-11-06.md),
+[10/20/30 router xom JSON](real-scale-2026-11-06.json).
+20/30 routerda peak process RSS 1.11/1.63 GB, barcha kutilgan OSPF qo‘shnilari
+Full. Umumiy OVS RSS alohida; maksimal sig‘im aniqlanmagan.
+Real hisobot bazasi `648fbd8` (PR #12), quyidagi model sinovlari esa oldingi
+branch tarixidir. Kernel IPv6 real sinovi hali bajarilmagan.
+
 Branch bazasi: `origin/main` — `7c6e317` (PR #3 merge). Oldingi `233054b`
 checkoutdagi o‘zgarishlar shu bazaga moslashtirildi; STP, multicast, firewall,
 VRRP, LAG, failures, survivability va ns-3 tezlik kodlari saqlandi.
@@ -22,12 +29,12 @@ VRRP, LAG, failures, survivability va ns-3 tezlik kodlari saqlandi.
 - `Ipv6Interface::SetDown()` manzillarni tozalaydi: link tiklanganda ULA manzilni
   qayta qo‘shish packet recovery testi bilan tasdiqlandi.
 
-## Real sinov bloklangan
+## Real sinovning holati
 
-`python -m lab.benchmarks.real_scale --routers 20 --output /tmp/netlab-scale-blocked.json`
-exit **2** va `status: blocked` qaytardi. Yetishmaganlar: root, Python Mininet,
-mnexec, ovs-vsctl, vtysh, iperf3, ping, FRR zebra va ospfd. Docker socketiga kirish
-ham mavjud emas. Bu yerda FRR startup/CPU/RSS yoki maksimal sig‘im raqami yo‘q.
+Asl cloud probe root/Mininet/FRR mavjud bo‘lmagani sabab o‘lchov bajara olmagan.
+Keyinchalik alohida root hostda 10/20/30 router o‘lchovlari bajarilgan va yuqoridagi
+artefaktlarda saqlangan. Avvalgi cloud prerequisite tekshiruvi shu real natijani
+bekor qilmaydi; model/ns-3 natijasi ham real FRR o‘lchovi o‘rniga ishlatilmaydi.
 
 Real hostda README buyruqlarini bajaring va hosil bo‘lgan JSON’ni ko‘rib chiqing.
 Sampled process RSS, shared OVS RSS va cgroup cheklovlarini alohida talqin qiling;

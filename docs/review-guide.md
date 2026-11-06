@@ -87,7 +87,7 @@ boshlangan; uning PR bazasi `main`. PR va merge’ni foydalanuvchi bajaradi.
 | Real 20+ router FRR CPU/RSS/startup | 10/20/30 router natijalari PR #15 orqali saqlangan | Maksimal sig‘im hali aniqlanmagan; [real hisobot](validation/real-env-2026-11-06.md) |
 | Real IS-IS adjacency/recovery | Real FRR xatolari tuzatilgan, passed natija PR #15 orqali saqlangan | Joriy cloud’da qayta o‘lchanmagan; o‘sha real hisobotga qarang |
 | Kalibratsiya konstantalarini moslash | Compare vositasi tayyor, defaults o‘zgarmagan | Bir xil metric/unit/topologiyadagi takroriy real o‘lchovlar |
-| P4 template compile va BMv2 forwarding | Strict gate tayyor, local blocked | p4c, BMv2, Mininet/root bilan haqiqiy passed natija |
+| P4 template compile va BMv2 forwarding | Gate tayyor; real hostda p4c/BMv2 yo‘q | p4c, BMv2, Mininet/root bilan haqiqiy passed natija |
 | Real Mininet GitHub CI | Workflow YAML tekshirilgan | Merge’dan keyingi haqiqiy GitHub job natijasi |
 | UI yangi protocol/statistics editorlari | Yuborilgan taqsimot bo‘yicha foydalanuvchida | UI implementation va browser acceptance |
 

@@ -18,6 +18,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
+from lab.real_lock import serial_real_test
 from lab.drivers.base import EventBus  # noqa: E402
 from lab.drivers.mininet_driver import MininetDriver  # noqa: E402
 
@@ -411,6 +412,7 @@ def _register_feature_tests():
     return sys.modules.get("lab.tests.real_integration")
 
 
+@serial_real_test
 def main(argv):
     if os.geteuid() != 0:
         print("root kerak: sudo python3 -m lab.tests.real_integration")

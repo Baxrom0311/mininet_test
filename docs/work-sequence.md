@@ -7,12 +7,14 @@ Keyingi ishlar yangilangan `main`dan alohida branchlarda boshlanadi.
 
 1. `feat/netlab-ipv6-scale-review` — `300f7e4`, `67ba546`: IPv6 model/ns-3, katta real FRR
    benchmark vositasi, address-family kodini ajratish. Push qilindi. Real FRR
-   o‘lchovi root/Mininet/FRR yo‘qligi sabab bloklangan; model va ns-3 testlari o‘tdi.
+   model va ns-3 testlari o‘tdi. Keyingi root host sinovida 10/20/30 router natijalari
+   yuqoridagi real hisobotga qo‘shildi.
 2. `fix/review-runtime-safety` — audit topilmalari: origin/auth, run identity,
    xato exit kodi, Studio lifecycle, ML artefakt/label, DATA_DIR va UI sync.
    `1563fd6`: 14 regressiya testi, demo suite va React typecheck/build o‘tdi; push qilindi.
 3. `feat/isis` — model/FRR konfiguratsiyasi, namuna va smoke/real testlar.
-   6 test (shu jumladan IPv4/IPv6 ns-3) o‘tdi; real test root/isisd sabab blocked.
+   6 test (shu jumladan IPv4/IPv6 ns-3) o‘tdi; keyingi real FRR sinovida config/timer
+   xatolari tuzatilib, passed natija yuqoridagi real hisobotga yozildi.
 4. `feat/calibration` — real o‘lchov importi va model/real jadvali; yangi real
    sonlarni root muhitsiz taxmin qilib kiritmaslik.
    CSV compare/median/tolerance va qo‘llab-quvvatlangan timer takliflari tayyor;
@@ -26,8 +28,8 @@ Keyingi ishlar yangilangan `main`dan alohida branchlarda boshlanadi.
    Birgalikdagi 27 test va queued API orqali haqiqiy ns-3 STP suite ham o‘tdi.
 7. `feat/p4-bmv2` — mavjud P4 real testini qat’iy prerequisite/skip holati bilan
    tayyorlash. O‘rnatish va real validation root/BMv2/p4c yo‘qligiga bog‘liq.
-   Strict compile/runtime gate qo‘shildi. Hozirgi instance’da ikkala tekshiruv
-   ham blocked; tizim apt repozitoriyalari o‘zgartirilmadi.
+   Strict compile/runtime gate qo‘shildi. Real hostda ham p4c/BMv2 yo‘qligi qayd
+   etilgan; muvaffaqiyatli forwarding dalili hali yo‘q. Tizim apt manbalari o‘zgartirilmadi.
 8. `ci/real-mininet` — alohida qo‘lda/tungi real job; CI ishlagan deb faqat GitHub
    natijasi mavjud bo‘lsa aytish.
    Ubuntu 24.04 workflow qo‘shildi: nightly/manual L2/OSPF/firewall/IS-IS,
@@ -37,7 +39,8 @@ Keyingi ishlar yangilangan `main`dan alohida branchlarda boshlanadi.
    `docs/architecture.md` yozildi; source’dagi route’lar bilan tekshirildi.
    `docs/review-guide.md` branch/commit tartibi va acceptance holatini jamlaydi.
    Final branch: 27 yangi test, 18 IPv6/IS-IS testi, asl demo va qolgan 11 smoke
-   suite o‘tdi. Real privileged sinovlar va yangi kalibratsiya o‘lchovlari bloklangan.
+   suite o‘tdi. Keyinchalik real suite, IS-IS, scale va kalibratsiya natijalari
+   yuqoridagi real hisobot bilan to‘ldirildi.
 10. `feat/experiment-statistics` — independent replications, Student t 95% CI,
     per-run input/runtime manifest va qayta bajarish eksporti. `docs/architecture`
     ustiga qurildi. 33 unit/integration test, eski report/failures suite va haqiqiy

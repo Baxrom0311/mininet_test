@@ -1,12 +1,13 @@
 """Multicast (IGMP + PIM-SM, FRR pimd) — real Mininet integratsiya testi (root kerak).
 
-    sudo flock /tmp/netlab-real.lock python3 -m lab.tests.real_mcast
+    sudo python3 -m lab.tests.real_mcast
 """
 
 import os
 import sys
 import time
 
+from lab.real_lock import serial_real_test
 from lab.drivers.base import EventBus
 from lab.drivers.mininet_driver import MininetDriver
 from lab.tests.real_integration import FAILS, check, load, wait_ping  # noqa: F401
@@ -70,6 +71,7 @@ def t_mcast(drv, caps):
     print("    pc3 t=13..17:", [(p["t"], round(p["thr_bps"] / 1e6, 2)) for p in res["flows"]["tv.pc3"]["series"] if 13 <= p["t"] <= 17])
 
 
+@serial_real_test
 def main():
     if os.geteuid() != 0:
         print("root kerak")
