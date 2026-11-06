@@ -1,11 +1,12 @@
 """Real: generatsiya qilingan halqa (6 router, FRR OSPF) — hostlar o'zaro yetadi, kabel uzilsa muqobil yo'l.
 
-    sudo flock /tmp/netlab-real.lock python3 -m lab.tests.real_topogen
+    sudo python3 -m lab.tests.real_topogen
 """
 
 import ipaddress
 import sys
 
+from lab.real_lock import serial_real_test
 from lab.tests.real_integration import FAILS, EventBus, MininetDriver, check, wait_ping
 from lab.topogen import generate
 
@@ -28,10 +29,12 @@ def t_topogen(drv, caps):
     check(dt is not None, f"l1 (r0-r1) uzildi -> {a} -> {hs[1]} halqaning boshqa tomonidan ({dt and round(dt, 1)} s)")
 
 
-if __name__ == "__main__":
+@serial_real_test
+def main():
     import os
     if os.geteuid() != 0:
-        sys.exit("root kerak")
+        print("root kerak")
+        return 2
     drv = MininetDriver(EventBus())
     caps = drv.capabilities()
     try:
@@ -39,4 +42,8 @@ if __name__ == "__main__":
     finally:
         drv.stop()
     print("\nNATIJA:", "OK" if not FAILS else f"{len(FAILS)} xato: {FAILS}")
-    sys.exit(1 if FAILS else 0)
+    return 1 if FAILS else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,12 +1,13 @@
 """BGP (ikki AS, eBGP + iBGP) — real Mininet + FRR integratsiya testi (root kerak).
 
-    sudo flock /tmp/netlab-real.lock python3 -m lab.tests.real_bgp
+    sudo python3 -m lab.tests.real_bgp
 """
 
 import os
 import sys
 import time
 
+from lab.real_lock import serial_real_test
 from lab.drivers.base import EventBus
 from lab.drivers.mininet_driver import MininetDriver
 from lab.tests.real_integration import FAILS, check, load, ping, wait_ping  # noqa: F401
@@ -65,6 +66,7 @@ def t_bgp(drv, caps):
         check(cv.get("link_up") is not None, f"link_up -> BGP konvergensiyasi o'lchandi: {cv.get('link_up')} s")
 
 
+@serial_real_test
 def main():
     if os.geteuid() != 0:
         print("root kerak")

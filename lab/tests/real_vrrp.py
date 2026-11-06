@@ -1,6 +1,6 @@
 """VRRP (r1/r2 virtual gateway) — real Mininet + FRR vrrpd integratsiya testi (root kerak).
 
-    sudo flock /tmp/netlab-real.lock python3 -m lab.tests.real_vrrp
+    sudo python3 -m lab.tests.real_vrrp
 """
 
 import os
@@ -9,6 +9,7 @@ import shutil
 import sys
 import time
 
+from lab.real_lock import serial_real_test
 from lab.drivers.base import EventBus
 from lab.drivers.mininet_driver import MininetDriver
 from lab.tests.real_integration import FAILS, check, load, ping, wait_ping  # noqa: F401
@@ -80,6 +81,7 @@ def t_vrrp(drv, caps):
         check(cv.get("link_down") is not None, f"link_down konvergensiya o'lchandi: {cv.get('link_down')} s")
 
 
+@serial_real_test
 def main():
     if os.geteuid() != 0:
         print("root kerak")

@@ -1,6 +1,6 @@
 """Nosozlik/tiklanish (MTBF/MTTR) — real Mininet emulyatsiyasi (root kerak).
 
-    flock /tmp/netlab-real.lock sudo python3 -m lab.tests.real_failures
+    sudo python3 -m lab.tests.real_failures
 """
 
 import os
@@ -9,6 +9,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
+from lab.real_lock import serial_real_test
 from lab.tests.real_integration import check, host, link  # noqa: E402
 
 
@@ -64,13 +65,14 @@ def t_failures(drv, caps):
           f"qurilma s1 nosozligi: l1+l2 uzildi (6-10 s), ping {res2['availability']['flows']['p']['availability_pct']}%")
 
 
-if __name__ == "__main__":
+@serial_real_test
+def main():
     from lab.drivers.base import EventBus
     from lab.drivers.mininet_driver import MininetDriver
     from lab.tests import real_integration as RI
     if os.geteuid() != 0:
         print("root kerak")
-        sys.exit(2)
+        return 2
     drv = MininetDriver(EventBus())
     caps = drv.capabilities()
     print("== failures", flush=True)
@@ -83,4 +85,8 @@ if __name__ == "__main__":
     finally:
         drv.stop()
     print("\nNATIJA:", "OK" if not RI.FAILS else f"{len(RI.FAILS)} xato: {RI.FAILS}")
-    sys.exit(1 if RI.FAILS else 0)
+    return 1 if RI.FAILS else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
