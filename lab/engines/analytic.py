@@ -28,6 +28,7 @@ from lab.wifi import estimate as wifi_estimate
 from lab.wifi import link_estimate as wifi_link_estimate
 from lab.mcast import branch as mc_branch, flood_keys as mc_flood_keys
 from lab.engines.nodestats import L3_NS, RouteTracker, convergence, route_key
+from lab.engines.ospf_convergence import OspfConvergence
 from lab.firewall import _why as fw_why
 from lab.firewall import check_path as fw_check_path
 from lab.firewall import check_roundtrip as fw_roundtrip
@@ -88,6 +89,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     bgp_set = {n for n, d in proj["devices"].items() if bgp_cfg(d)}
     bgp_conv = float(sc["bgp_convergence_s"]) if sc.get("bgp_convergence_s") not in (None, "") else 2.0
     bgp_stale = None
+    ospf = OspfConvergence(sc)
     movers = has_moves(sc)
     handover = {}   # stansiya -> aloqa uzilgan vaqt (roaming kutilmoqda)
     # cheklangan TCP uzatishlar (FTP fayl / HTTP sahifa): qolgan bayt, tugash vaqti, ulanish+slow start
@@ -126,6 +128,9 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         while ev_i < len(events) and float(events[ev_i].get("t", 0)) <= t0 + 1e-9:
             e = events[ev_i]; ev_i += 1
             l = proj["links"].get(e.get("link"))
+            if l and e["action"] in ("link_down", "link_up") and (
+                    (l.get("up") is not False) != (e["action"] == "link_up")):
+                ospf.before_change(proj, t0)
             if l and e["action"] == "link_down" and rip_set and rip_conv > 0:
                 stale = (copy.deepcopy(proj), t0 + rip_conv)
                 log(f"RIP: {rip_conv:.0f}s konvergensiya (eski yo'llar)")
@@ -230,7 +235,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         sig = (json.dumps(proj["links"], sort_keys=True, default=str),
                json.dumps(proj["devices"], sort_keys=True, default=str),
                json.dumps({k_: v_ for k_, v_ in proj.items() if k_.startswith("_")}, sort_keys=True, default=str),
-               id(stale[0]) if st_on else None, tuple(id(o) for o, _s in bgp_ov))
+               id(stale[0]) if st_on else None, tuple(id(o) for o, _s in bgp_ov),
+               ospf.deadline if ospf.pending(t0) else None)
         if net_cache[0] is not None and net_cache[0][0] == sig:
             n = net_cache[0][1]
         elif st_on:
@@ -240,6 +246,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             n = _StaleNet(proj, None, set(), bgp_ov)
         else:
             n = Net(proj)
+        if net_cache[0] is None or net_cache[0][0] != sig:
+            n = ospf.apply(n, t0)
         net_cache[0] = (sig, n)
         cap = {}
         wifi_of = {}    # lid -> (ap, stansiya foydali sig'imi bit/s)
@@ -602,6 +610,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             "notes": ["oqim darajasidagi taxmin: UDP qat'iy, TCP max-min adolat + Mathis, navbat M/M/1",
                       "dinamik routing: demo modeli (dinamik daemonli routerlar o'zaro barcha subnetlarni biladi)",
                       "RIP: kabel uzilgandan keyin update/2 (rip_timers, standart 30 s -> 15 s) yoki rip_convergence_s davomida eski yo'llar",
+                      ospf.note(),
                       "Wi-Fi: SNR→MCS (ns-3 ga kalibrlangan), efir vaqti bo'yicha adolat (A-MPDU), TCP ACK efiri ~9%",
                       "Wi-Fi: bir kanalda va bir-birini eshitadigan AP'lar umumiy efirni bo'lishadi; harakat — oraliq o'rtasidagi pozitsiya",
                       "Wi-Fi roaming: ESS (SSID+diapazon+kanal) ichida, joriy AP uzilgach 1s uzilish bilan eng kuchli AP'ga"]}

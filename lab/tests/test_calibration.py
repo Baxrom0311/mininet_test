@@ -23,6 +23,14 @@ class CalibrationTests(unittest.TestCase):
         report = compare([self.sample(protocol="vrrp", metric="traffic_gap_s", model=4, real=8)])
         self.assertEqual(report["suggested_scenario_overrides"], {})
 
+    def test_ospf_route_update_suggests_opt_in_hold_only(self):
+        report = compare([self.sample(protocol="ospf", metric="route_update_s", model=0, real=1.7)])
+        self.assertEqual(report["suggested_scenario_overrides"], {"ospf_convergence_s": 1.7})
+        self.assertFalse(report["defaults_changed"])
+        for metric, unit in (("traffic_gap_s", "s"), ("route_update_s", "ms")):
+            report = compare([self.sample(protocol="ospf", metric=metric, unit=unit)])
+            self.assertEqual(report["suggested_scenario_overrides"], {})
+
     def test_unverified_data_cannot_retune_model(self):
         report = compare([self.sample(verified="false")])
         self.assertEqual(report["status"], "unverified")

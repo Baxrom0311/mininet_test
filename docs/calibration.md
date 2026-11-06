@@ -3,6 +3,7 @@
 Real root hostda olingan tekshiruvlar va xom CSV/JSON
 [2026-11-06 hisobotida](validation/real-env-2026-11-06.md) saqlangan. Quyidagi
 qiymatlar o‘sha hisobotdan; bu cloud draftida yangi FRR o‘lchovi bajarilmagan.
+
 STP uchun avvalgi emulyatsiya binlaridan olingan taxmin tuzatilgan.
 
 | Hodisa | `main` modeli | Saqlangan real hisobot | Takror |
@@ -19,6 +20,7 @@ O‘lchov bazasi `648fbd8` (PR #12); artefaktlar PR #15 bilan qo‘shilgan.
 Bu PR #13 va keyingi kodning real acceptance natijasi emas. OSPF/RIP uchun
 kamida 10 takrorli qayta o‘lchov rejalangan. RSTP/BGP standartlari uchta namuna
 asosida avtomatik almashtirilmaydi; joriy toleransda ular hisobotda o‘tgan.
+
 
 VRRP master saylovi bilan end-to-end trafik uzilishini aralashtirmang: qaytish
 OSPF yo‘li, neighbor resolution va probe interval ham uzilishga qo‘shiladi.
@@ -46,6 +48,8 @@ real kuzatuv yo‘q. NaN/Inf/manfiy raqamlar rad etiladi. Standartlar o‘zgarma
 
 Faqat mos metric uchun ko‘rib chiqiladigan ssenariy override taklif qilinadi:
 STP `port_forwarding_s`, VRRP `master_down_s`, RIP `route_recovery_s`, BGP
-`session_recovery_s`. `traffic_gap_s` yoki OSPF uchun mavjud bo‘lmagan timer
-uydirib qo‘shilmaydi. Taklifni qabul qilishdan oldin modelni ayni topologiya,
+`session_recovery_s`, OSPF `route_update_s` → `ospf_convergence_s`.
+`traffic_gap_s` protokol timeriga aylantirilmaydi. OSPF standart qiymati 0 s;
+[OSPF vaqt modeli](ospf-convergence.md) cheklovlarini o‘qing.
+Taklifni qabul qilishdan oldin modelni ayni topologiya,
 failure turi, probe intervali va trafik bilan qayta sinang.

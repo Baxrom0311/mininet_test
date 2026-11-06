@@ -1,10 +1,9 @@
 # Branchlar va ish ketma-ketligi
 
 Foydalanuvchi PR va merge’ni o‘zi bajaradi. Agent main’ga push qilmaydi va environment
-publish qilmaydi. Quyidagi 1–15 branchlar tarixiy stack bo‘lib `main`ga kirgan
-(oxirgi merge PR #16). Joriy baza `207ba52` (PR #17). Yangi ishlar alohida branchda.
-Real FRR va kalibratsiya dalillari [2026-11-06 hisobotida](validation/real-env-2026-11-06.md)
-saqlangan: PR #12 bazasi, PR #15 artefaktlari; keyingi kodning real sinovi alohida ish.
+publish qilmaydi. Quyidagi 1–15 branch tarixi `main`ga birlashtirilgan
+(oxirgi merge PR #16). 2026-11-06 dagi yangi baza `207ba52` (PR #17, CI YAML fix).
+Keyingi ishlar yangilangan `main`dan alohida branchlarda boshlanadi.
 
 1. `feat/netlab-ipv6-scale-review` — `300f7e4`, `67ba546`: IPv6 model/ns-3, katta real FRR
    benchmark vositasi, address-family kodini ajratish. Push qilindi. Real FRR
@@ -76,11 +75,15 @@ saqlangan: PR #12 bazasi, PR #15 artefaktlari; keyingi kodning real sinovi alohi
     `docs/campaign-analysis-performance.md` va xom benchmark JSON’ga qarang.
     82 backend testi hamda IPv4/IPv6 full/compact metric equivalence sinovi
     8 haqiqiy ns-3 subprocess bilan o‘tdi.
-16. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
+16. `feat/ospf-convergence` — `main` `207ba52` ustida. Analitik/ns-3 uchun
+    ixtiyoriy OSPF/OSPFv3 jadval kechikishi, umumiy vaqt modeli, validatsiya va
+    kalibratsiya taklifi. Standart 0 s saqlanadi; [hujjat](ospf-convergence.md).
+    91 backend testi, 19 model/ns-3 testi, qo‘shimcha fractional-event packet
+    regressiyasi va 8 asl smoke suite o‘tdi. [Natijalar](validation/ospf-convergence-2026-11-06.md).
+17. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
     Agent mavjud UI’dagi tasdiqlangan sync xatosidan tashqari dizaynni o‘zgartirmaydi.
 
-Asl audit `233054b`da bajarilgan; eski yozuvlardagi test sonlari o‘sha branch holatiga
-tegishli. B → D ishlarida real GitHub workflow va keyingi `main` uchun natija yig‘iladi.
-E/G qo‘shimcha OSPF/RIP takrorlarini, H esa yetarli dalil bo‘lsa timer review’ni kutadi.
-F implementatsiyasi `feat/ospf-convergence` (`abc12a3`) branchida; bu docs branchiga
-qo‘shilmagan. UI foydalanuvchida, katta modul refaktorlari real acceptance’dan keyin.
+Asl audit `233054b`da bajarilgan. Real FRR/20–30 router o‘lchovlari keyinchalik
+PR #15 orqali qo‘shilgan: [real hisobot](validation/real-env-2026-11-06.md).
+Yuqoridagi tarixiy local blocked yozuvlari o‘sha paytdagi muhit holatini bildiradi.
+Har yangi branch uchun amalda qayta bajarilgan testlar alohida qayd etiladi.

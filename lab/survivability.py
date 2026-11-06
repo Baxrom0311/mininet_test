@@ -166,6 +166,10 @@ def _convergence_hint(project, down_links, sc):
         cfg = d.get("config") or {}
         dm = set(cfg.get("daemons") or [])
         if d.get("type") == "router":
+            daemon = "ospf6d" if sc.get("ip_version", 4) == 6 else "ospfd"
+            if daemon in dm:
+                from lab.model import ospf_convergence_delay
+                hints["OSPFv3" if daemon == "ospf6d" else "OSPF"] = ospf_convergence_delay(sc)
             if "ripd" in dm and not (dm & {"ospfd", "isisd"}):
                 hints["RIP"] = max(hints.get("RIP", 0), rip_timers(d)["update"] / 2)
             if "bgpd" in dm or cfg.get("bgp"):

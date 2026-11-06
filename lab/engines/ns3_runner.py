@@ -20,7 +20,7 @@ Modellashtirish (ns-3 3.40+):
     + SPF (lab Net.routes — analitik bilan bir xil; OSPF/IS-IS ekvivalenti), RIP -> ns-3 RIPv2
   * jitter ns-3 kanal modelida yo'q — e'tiborsiz qoldiriladi (logda aytiladi)
   * hodisalar (link_down/link_up/link_params) qadamlar orasida qo'llanadi,
-    link_down'dan keyin global routing qayta hisoblanadi (konvergensiya ~0s)
+    OSPF/SPF marshrutlar qayta hisoblanadi (ixtiyoriy ospf_convergence_s kechikishi)
 """
 
 import copy
@@ -257,7 +257,7 @@ def main(inp_path, out_path):
         nodes[name] = ns.CreateObject[ns.Node]()
     # Routing: ripd yoqilgan (va ospfd/isisd yoqilmagan) routerlar — ns-3 RIPv2 (haqiqiy
     # protokol: periodik/triggered update, split horizon, timeout). Qolgan L3 qurilmalar —
-    # static + SPF marshrutlar (install_routes; OSPF/IS-IS ekvivalenti, konvergensiya ~0s).
+    # static + SPF marshrutlar (OSPF uchun ixtiyoriy ospf_convergence_s vaqt modeli).
     def uses_rip(d):
         dm = set((d.get("config") or {}).get("daemons") or [])
         return d["type"] == "router" and "ripd" in dm and not (dm & {"ospfd", "isisd", "ospf6d"})
@@ -536,12 +536,14 @@ def main(inp_path, out_path):
     srh = family.helper
 
     from lab.drivers.demo_driver import Net
+    from lab.engines.ospf_convergence import OspfConvergence
     state = copy.deepcopy(project)      # joriy holat: kabel up/down, pozitsiyalar (routing uchun)
+    ospf = OspfConvergence(sc)
 
     def install_routes():
         """Net.routes (ulangan + statik + gateway + dinamik[hop soni]) -> ns-3 statik marshrutlar.
         RIP routerlarda faqat foydalanuvchi statik marshrutlari (qolganini ns-3 RIP o'rganadi)."""
-        n = Net(state)
+        n = ospf.apply(Net(state), ns.Simulator.Now().GetSeconds())
         for name, d in devs.items():
             if d["type"] not in L3:
                 continue
@@ -553,9 +555,16 @@ def main(inp_path, out_path):
                 k = (name, parse_ifname(ifn)[1])
                 if k not in iface:
                     continue
-                family.add_route(sr, net, via, iface[k][1])
+                # A held route may still point at a failed interface. IPv6 SetDown
+                # clears its addresses; installing that route makes ns-3 abort in
+                # SourceAddressSelection. Leave it unusable until the link is up.
+                ip, index, _ii = iface[k]
+                if not ip.IsUp(index):
+                    continue
+                family.add_route(sr, net, via, index)
 
     emit(log=f"IPv{version} routing jadvallari (SPF, analitik bilan bir xil model)")
+    emit(log=ospf.note())
     install_routes()
     if version == 6 and os.environ.get("NETLAB_NS3_DEBUG"):
         for name, node in nodes.items():
@@ -758,6 +767,8 @@ def main(inp_path, out_path):
                 for em in lo["errs"]:
                     _set_err(em, lo["loss"])
         if up is not None:
+            if (state["links"][lid].get("up") is not False) != bool(up):
+                ospf.before_change(state, ns.Simulator.Now().GetSeconds())
             for em in lo["errs"]:
                 _set_err(em, lo["loss"] if up else 1.0)
             for end in lo["ends"]:
@@ -845,9 +856,13 @@ def main(inp_path, out_path):
     step = float(sc.get("sample", 1.0))
     sampling_marks = {k * step for k in range(1, int(math.ceil(duration / step - 1e-8)))} | {duration}
     marks = sorted(sampling_marks
-                   | {round(float(e["t"]), 6) for e in events if 0 < float(e.get("t", 0)) < duration}
+                   | {float(e["t"]) for e in events if 0 < float(e.get("t", 0)) < duration}
                    | ({round(float(e["t"]) + dd, 6) for e in events for dd in (1.0, 30.0, 50.0)
                        if 0 < float(e.get("t", 0)) + dd < duration} if stp_on else set()))
+    if ospf.delay_s:
+        marks = sorted(set(marks) | {float(e.get("t", 0)) + ospf.delay_s for e in events
+                       if e.get("action") in ("link_down", "link_up")
+                       and 0 < float(e.get("t", 0)) + ospf.delay_s < duration})
     # harakat: pozitsiyalar har 0.5s da yangilanadi (oraliq nuqtalarda namuna olinmaydi)
     from lab.mobility import has_moves, positions_at
     movers = has_moves(sc)
@@ -1019,6 +1034,8 @@ def main(inp_path, out_path):
                          params=e.get("params") if act == "link_params" else None)
             applied.append({"t": now, **e})
             emit(log=f"t={now:.1f}s: {act} {e.get('link') or e.get('device')}")
+        if ospf.due(now):
+            install_routes()
         stp_tick(now)
         vrrp_tick(now)
         lag_tick(now)
@@ -1131,7 +1148,8 @@ def main(inp_path, out_path):
            "nodes": node_series, "route_events": rtrack.events,
            "convergence": convergence(applied, rtrack.events, duration),
            "wall_s": round(time.time() - t_wall, 2),
-           "notes": ["dinamik routing: ripd → ns-3 RIPv2 (haqiqiy konvergensiya); qolganlari — analitik bilan bir xil SPF modeli statik marshrut sifatida (hodisada darhol qayta hisoblanadi)",
+           "notes": ["dinamik routing: ripd → ns-3 RIPv2 (haqiqiy konvergensiya); qolganlari — analitik bilan bir xil SPF modeli statik marshrut sifatida",
+                     ospf.note(),
                      f"TCP: Cubic, MSS {mtu - 52}, bufer 4/6 MB (Linux'ga yaqin)",
                      "Wi-Fi: YansWifi + LogDistance(n=3), IdealWifiManager; joylashuv = kanvas * meters_per_px",
                      "jitter parametri modellashtirilmaydi", "P4/SDN mantiqi: switch L2 bridge, SDN router — L3 router sifatida"]}

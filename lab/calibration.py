@@ -17,6 +17,7 @@ import sys
 OVERRIDES = {("stp", "port_forwarding_s"): "stp_convergence_s",
              ("vrrp", "master_down_s"): "vrrp_convergence_s",
              ("rip", "route_recovery_s"): "rip_convergence_s",
+             ("ospf", "route_update_s"): "ospf_convergence_s",
              ("bgp", "session_recovery_s"): "bgp_convergence_s"}
 
 
