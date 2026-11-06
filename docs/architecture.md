@@ -118,13 +118,15 @@ Mininet cleanup global; alohida real testlar yoki serverlarni bir vaqtda ko‘ta
 
 ```bash
 sudo flock /tmp/netlab-real.lock lab/.venv/bin/python -m lab.netlab --driver real
-sudo timeout 600 flock /tmp/netlab-real.lock lab/.venv/bin/python -m lab.tests.real_integration l2 ospf fw
+sudo timeout 600 lab/.venv/bin/python -m lab.tests.real_integration l2 ospf fw
 ```
 
-`real_isis`, `real_p4` va `benchmarks.real_scale` qulfni ichida oladi: ularga yana
-tashqi flock qo‘ymang. Ushbu convention’ni chetlab ishga tushirilgan server/testdan
-qulf himoya qilmaydi. Real benchmark, P4 va calibration holati tegishli validation
-hujjatlarida ko‘rsatilgan; ushbu cloud’dagi blocked sinovlarni passed deb talqin qilmang.
+Barcha `lab.tests.real_*` CLI’lari va ikkala real benchmark qulfni `lab.real_lock`
+orqali ichida oladi. Oddiy tashqi `flock` bilan o‘rash ham ishlaydi: kernel tasdiqlagan
+merosiy exclusive descriptor qayta ishlatiladi, tashqi qulf muddatidan oldin
+ochilmaydi. Band qulfda test exit 1 bilan tarmoqqa tegmasdan to‘xtaydi.
+[Real testlarni ishga tushirish](real-testing.md). Qulfga amal qilmaydigan boshqa
+server/testlar undan himoyalanmaydi. Real dalillar [saqlangan hisobotda](validation/real-env-2026-11-06.md).
 
 ## Auth va UI sinxronligi
 

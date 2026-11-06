@@ -8,9 +8,11 @@ from pathlib import Path
 import shutil
 import tempfile
 
+from lab.real_lock import serial_real_test
 from lab.drivers.base import EventBus, p4_compile_standalone, p4_pipeline_from_json
 
 
+@serial_real_test
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--compile-only", action="store_true")
@@ -39,22 +41,19 @@ def main(argv=None):
             if missing and report["status"] != "failed":
                 report["status"] = "blocked"
             elif not missing and report["status"] == "passed":
-                import fcntl
                 from lab.drivers.mininet_driver import MininetDriver
                 from lab.tests.real_integration import FAILS, t_p4
                 driver = MininetDriver(EventBus())
                 driver.capture_on = False
-                with open("/tmp/netlab-real.lock", "a") as lock:
-                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    before = len(FAILS)
-                    try:
-                        t_p4(driver, driver.capabilities())
-                        report["runtime"] = "passed" if len(FAILS) == before else "failed"
-                        report["status"] = report["runtime"]
-                    except Exception as e:
-                        report.update(status="failed", runtime="failed", error=f"{type(e).__name__}: {e}")
-                    finally:
-                        driver.stop()
+                before = len(FAILS)
+                try:
+                    t_p4(driver, driver.capabilities())
+                    report["runtime"] = "passed" if len(FAILS) == before else "failed"
+                    report["status"] = report["runtime"]
+                except Exception as e:
+                    report.update(status="failed", runtime="failed", error=f"{type(e).__name__}: {e}")
+                finally:
+                    driver.stop()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report))

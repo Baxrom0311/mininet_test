@@ -1,6 +1,6 @@
 """Firewall/ACL real Mininet testi (root + Mininet + OVS; iptables router namespace'ida).
 
-    flock /tmp/netlab-real.lock sudo python3 -u -m lab.tests.real_fw
+    sudo python3 -u -m lab.tests.real_fw
 """
 
 import copy
@@ -12,6 +12,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
+from lab.real_lock import serial_real_test
 from lab.drivers.base import EventBus  # noqa: E402
 from lab.drivers.mininet_driver import MininetDriver  # noqa: E402
 from lab.tests import real_integration as ri  # noqa: E402
@@ -104,6 +105,7 @@ def t_fw_emu(drv, caps):
 TESTS = {"fw": t_fw, "fw_emu": t_fw_emu}
 
 
+@serial_real_test
 def main(argv):
     if os.geteuid() != 0:
         print("root kerak")

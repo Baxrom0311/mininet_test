@@ -32,7 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/netlab-ci
-          sudo timeout 600 flock /tmp/netlab-real.lock lab/.venv/bin/python -u -m lab.tests.real_integration l2 ospf fw 2>&1 | tee /tmp/netlab-ci/integration.log
+          sudo timeout 600 lab/.venv/bin/python -u -m lab.tests.real_integration l2 ospf fw 2>&1 | tee /tmp/netlab-ci/integration.log
       - name: Real IS-IS neighbors and recovery
         shell: bash
         run: |

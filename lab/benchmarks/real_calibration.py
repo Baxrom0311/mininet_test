@@ -16,7 +16,6 @@ Real tarmoq testlari bilan bir vaqtda ishlamasligi uchun /tmp/netlab-real.lock o
 
 import argparse
 import csv
-import fcntl
 import ipaddress
 import os
 import platform
@@ -27,6 +26,7 @@ import sys
 import threading
 import time
 
+from lab.real_lock import serial_real_test
 from lab.drivers.base import EventBus
 from lab.drivers.mininet_driver import MininetDriver
 from lab.tests.real_integration import load, wait_ping
@@ -230,6 +230,7 @@ MEASURES = {"stp": lambda d: m_stp(d, "stp"), "rstp": lambda d: m_stp(d, "rstp")
             "rip": m_rip, "bgp": m_bgp, "ospf": m_ospf}
 
 
+@serial_real_test
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--reps", type=int, default=3)
@@ -242,30 +243,28 @@ def main(argv=None):
     run = time.strftime("%Y%m%dT%H%M%S")
     host = f"{socket.gethostname()}/{platform.release()}"
     rows = []
-    with open("/tmp/netlab-real.lock", "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        drv = MininetDriver(EventBus())
-        caps = drv.capabilities()
-        for name in a.only:
-            for rep in range(1, a.reps + 1):
-                print(f"== {name} #{rep}", flush=True)
+    drv = MininetDriver(EventBus())
+    caps = drv.capabilities()
+    for name in a.only:
+        for rep in range(1, a.reps + 1):
+            print(f"== {name} #{rep}", flush=True)
+            try:
+                for proto, metric, model, real, abs_t, rel_t in MEASURES[name](drv):
+                    print(f"   {proto} {metric}: model {model:.3f} real {real if real is None else round(real, 3)}", flush=True)
+                    if real is None:
+                        continue           # o'lchanmadi — CSV'ga uydirma qiymat yozilmaydi
+                    rows.append({"protocol": proto, "metric": metric, "unit": "s", "model": round(model, 4),
+                                 "real": round(real, 4), "verified": "true",
+                                 "source": f"host={host} datapath={caps.get('ovs_datapath')} netem={caps.get('netem')} "
+                                           f"run={run} test={name} rep={rep}",
+                                 "abs_tolerance": abs_t, "rel_tolerance": rel_t})
+            except Exception as e:  # noqa: BLE001
+                print(f"   XATO: {e}", flush=True)
+            finally:
                 try:
-                    for proto, metric, model, real, abs_t, rel_t in MEASURES[name](drv):
-                        print(f"   {proto} {metric}: model {model:.3f} real {real if real is None else round(real, 3)}", flush=True)
-                        if real is None:
-                            continue           # o'lchanmadi — CSV'ga uydirma qiymat yozilmaydi
-                        rows.append({"protocol": proto, "metric": metric, "unit": "s", "model": round(model, 4),
-                                     "real": round(real, 4), "verified": "true",
-                                     "source": f"host={host} datapath={caps.get('ovs_datapath')} netem={caps.get('netem')} "
-                                               f"run={run} test={name} rep={rep}",
-                                     "abs_tolerance": abs_t, "rel_tolerance": rel_t})
-                except Exception as e:  # noqa: BLE001
-                    print(f"   XATO: {e}", flush=True)
-                finally:
-                    try:
-                        drv.stop()
-                    except Exception:  # noqa: BLE001
-                        pass
+                    drv.stop()
+                except Exception:  # noqa: BLE001
+                    pass
     with open(a.output, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=FIELDS)
         w.writeheader()
