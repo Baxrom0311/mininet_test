@@ -122,8 +122,15 @@ def frr_config(project, name):
     c = config(dev)
     if not c:
         return ""
-    lines = ["configure terminal", f"router isis {c['tag']}", f" net {c['net']}",
-             f" is-type {c['level']}", " metric-style wide", "exit"]
+    # `vtysh -f` faylni konfiguratsiya rejimida o'qiydi: "configure terminal"/"end" bu yerda
+    # noma'lum buyruq (real FRR 8.4'da tekshirildi) — BGP generatori kabi yozilmaydi.
+    lines = [f"router isis {c['tag']}", f" net {c['net']}",
+             f" is-type {c['level']}", " metric-style wide",
+             # FRR standarti lsp-gen-interval/spf-interval ~30 s: kabel uzilishidan keyin muqobil
+             # yo'l shu vaqtgacha kechikadi (real o'lchov: 29 s). Laboratoriya uchun OSPF'dagi tez
+             # hello kabi 1 s.
+             f" lsp-gen-interval {c.get('lsp_gen_interval', 1)}", f" spf-interval {c.get('spf_interval', 1)}",
+             "exit"]
     for ifn, ic in sorted((dev["config"].get("interfaces") or {}).items()):
         if not ic.get("ip"):
             continue
@@ -137,4 +144,4 @@ def frr_config(project, name):
         else:
             lines.append(" isis network point-to-point")
         lines.append("exit")
-    return "\n".join(lines + ["end", ""])
+    return "\n".join(lines + [""])
