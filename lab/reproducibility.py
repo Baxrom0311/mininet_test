@@ -17,7 +17,7 @@ def digest(value):
     return hashlib.sha256(data.encode()).hexdigest()
 
 
-def comparison_key(project, scenario, engine):
+def comparison_inputs(project, scenario, engine):
     """Replications may differ only in the explicit random seeds/substreams."""
     p, sc = copy.deepcopy(project), copy.deepcopy(scenario)
     p.pop("scenarios", None)
@@ -25,7 +25,11 @@ def comparison_key(project, scenario, engine):
     sc.pop("rng_run", None)
     if isinstance(sc.get("failures"), dict):
         sc["failures"].pop("seed", None)
-    return digest({"project": p, "scenario": sc, "engine": engine})
+    return {"project": p, "scenario": sc, "engine": engine}
+
+
+def comparison_key(project, scenario, engine):
+    return digest(comparison_inputs(project, scenario, engine))
 
 
 def _git(*args):

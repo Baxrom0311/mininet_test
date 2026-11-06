@@ -92,6 +92,11 @@ duration bilan og‘irlab hisoblaydi. Yangi flow nuqtalarida aniq interval chega
 saqlanadi; experiment CI har running window mean’i ustida hisoblanadi. Default
 summary semantikasi saqlangan. [analysis-windows.md](analysis-windows.md).
 
+`experiment_comparison.py` seed/substream juftlaridan candidate−baseline delta va
+paired Student t CI hisoblaydi; runtime/clock/flow identity mosligi tekshiriladi.
+`experiment_comparison_report.py` audit CSV/raw-input ZIP va standalone HTML’ni
+alohida formatlaydi. [experiment-comparison.md](experiment-comparison.md).
+
 ## Real testlar va qulf
 
 Mininet cleanup global; alohida real testlar yoki serverlarni bir vaqtda ko‘tarmang.
