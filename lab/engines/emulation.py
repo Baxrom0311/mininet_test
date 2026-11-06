@@ -62,6 +62,21 @@ def _fix_userspace_drops(project, link_series, sw_pk, sw_prev):
 
 
 def run(driver, sc, progress=lambda f: None, log=lambda m: None):
+    procs, stop_ev = [], threading.Event()
+    try:
+        return _run(driver, sc, progress, log, procs, stop_ev)
+    finally:
+        stop_ev.set()
+        for proc in procs:
+            if proc.poll() is None:
+                proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill(); proc.wait()
+
+
+def _run(driver, sc, progress, log, procs, stop_ev):
     from lab.drivers.mininet_driver import QdiscSampler, _read_net_dev   # lazy
     if not driver.running or driver.name != "real":
         raise RuntimeError("Mininet dvigateli uchun real driverda tarmoq ishlab turishi kerak")
@@ -70,9 +85,8 @@ def run(driver, sc, progress=lambda f: None, log=lambda m: None):
         pid = {n: driver.net.get(n).pid for n in project["devices"]}
     duration = float(sc.get("duration", 30))
     t_wall = time.time()
-    procs, threads = [], []
+    threads = []
     raw = {}           # app_id -> {"thr": {sec: bps}, "rtt": {sec: [ms]}, "loss": {sec: pct}, "jit": {sec: ms}}
-    stop_ev = threading.Event()
     T0 = time.time() + 2.0    # serverlar ishga tushishi uchun 2s
 
     from lab.services import resolve_dhcp

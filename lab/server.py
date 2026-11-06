@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from lab.drivers.base import DriverError, EventBus, p4_compile_standalone, p4_pipeline_from_json
-from lab.engines.manager import RunManager
+from lab.engines.run_queue import QueuedRunManager as RunManager
 from lab.web_security import same_origin
 from lab.model import (APP_TYPES, DEVICE_TYPES, EVENT_ACTIONS, FRR_DAEMONS, PROJECT_VERSION, empty_project,
                        validate_project, validate_scenario)
@@ -69,6 +69,7 @@ def create_app(driver_name="demo", token=None):
 
     @app.on_event("shutdown")
     def _shutdown():
+        runs.close()
         try:
             driver.stop()
         except Exception:  # noqa: BLE001
@@ -284,6 +285,13 @@ def create_app(driver_name="demo", token=None):
     @app.post("/api/runs")
     def run_start(body: dict = Body(...)):
         return runs.start(body.get("project") or {}, body.get("scenario"), body.get("engine", "analytic"))
+
+    @app.post("/api/runs/{project}/{run_id}/cancel")
+    def run_cancel(project: str, run_id: str):
+        try:
+            return runs.cancel(project, run_id)
+        except FileNotFoundError:
+            raise HTTPException(404, "run not found")
 
     @app.post("/api/studies")
     def study_start(body: dict = Body(...)):

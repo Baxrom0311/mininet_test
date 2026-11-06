@@ -20,6 +20,9 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
    Import/API va 5 test tayyor. 1000 oqim, 2 s analitik ssenariy import bilan
    0.079 s oldi (shu instance’da; umumiy barcha topologiyalar uchun kafolat emas).
 6. `feat/run-queue` — SQLite run metadata, chegaralangan ijro, cancel, restart recovery.
+   4 yangi test o‘tdi: ijro chegarasi, queued/running cancel, silent child cleanup,
+   dead-worker recovery. Asl demo/analytic API suite ham o‘tdi.
+   Birgalikdagi 27 test va queued API orqali haqiqiy ns-3 STP suite ham o‘tdi.
 7. `feat/p4-bmv2` — mavjud P4 real testini qat’iy prerequisite/skip holati bilan
    tayyorlash. O‘rnatish va real validation root/BMv2/p4c yo‘qligiga bog‘liq.
 8. `ci/real-mininet` — alohida qo‘lda/tungi real job; CI ishlagan deb faqat GitHub

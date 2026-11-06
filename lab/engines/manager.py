@@ -145,9 +145,14 @@ class RunManager:
                 raise ValueError("Mininet'da bir vaqtda faqat bitta ssenariy ishlaydi")
             self.active[run_id] = {"project": pname, "scenario_name": scenario_name, "engine": engine,
                                    "progress": 0.0, "created": time.time()}
-        threading.Thread(target=self._worker, args=(run_id, pname, project, scenario_name, sc, engine),
-                         daemon=True).start()
+        self._launch_worker(run_id, pname, project, scenario_name, sc, engine)
         return {"run_id": run_id}
+
+    def _launch_worker(self, *args):
+        threading.Thread(target=self._worker, args=args, daemon=True).start()
+
+    def _study_worker(self, *args, **kwargs):
+        return self._worker(*args, **kwargs)
 
     def _pub(self, run_id, **kw):
         a = self.active.get(run_id) or {}
@@ -284,7 +289,7 @@ class RunManager:
             extra = {"study_id": study_id, "study_param": pdesc, "study_value": v, "study_index": i, "label": label}
             if two_d:
                 extra.update(study_param2=pdesc2, study_value2=v2, study_index2=j)
-            self._worker(rid, pname, p2, scenario_name, sc2, engine, extra=extra)
+            self._study_worker(rid, pname, p2, scenario_name, sc2, engine, extra=extra)
 
         def go():
             n = len(variants)
