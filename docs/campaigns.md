@@ -39,7 +39,8 @@ Engine analytic yoki ns3. values 1..8 scalar string/finite number; boolean qabul
 qilinmaydi. repetitions 2..25 (default 3), fixed seed default 1, umumiy run <=100.
 start_s/end_s ixtiyoriy, [analysis-windows.md](analysis-windows.md) qoidalarida.
 Kampaniya normal run/study’lar bilan 256 pending/running limit va NETLAB_RUN_WORKERS
-(default 2) executorni baham ko‘radi. Bu RAM sig‘ishi kafolati emas.
+(default `auto`) executorni baham ko‘radi. CPU/RAM bo‘yicha adaptiv navbat:
+[adaptive-workers.md](adaptive-workers.md). Bu RAM sig‘ishi kafolati emas.
 
 Parametr operatori mavjud study operatori bilan bir xil: link (bw/delay/loss/queue/
 qdisc), app (rate/size/codec/page/think/file), ap (tx_power/channel), router
