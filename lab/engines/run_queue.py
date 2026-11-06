@@ -11,6 +11,8 @@ import tempfile
 import threading
 
 from lab.engines import manager
+from lab.engines.adaptive_executor import AdaptiveExecutor
+from lab.engines.resources import ResourceMonitor, positive_integer
 from lab.engines.result_index import ResultIndex
 from lab.engines.run_store import RunStore, TERMINAL
 from lab.engines.run_submission import PreparedRun, submit
@@ -27,23 +29,66 @@ class QueuedRunManager(manager.RunManager):
         submit(self, jobs)
         return {"experiment_id": condition["experiment_id"], "run_ids": condition["run_ids"], "repetitions": repetitions}
 
-    def __init__(self, bus, driver, workers=None, database=None):
+    def __init__(self, bus, driver, workers=None, database=None, *, resource_monitor=None):
         super().__init__(bus, driver)
-        workers = int(workers or os.environ.get("NETLAB_RUN_WORKERS", "2"))
-        if not 1 <= workers <= 16:
-            raise ValueError("NETLAB_RUN_WORKERS: 1..16")
+        setting = os.environ.get("NETLAB_RUN_WORKERS", "auto") if workers is None else workers
+        self.auto_workers = str(setting).strip().lower() == "auto"
+        workers = positive_integer(os.environ.get("NETLAB_RUN_MAX_WORKERS", "64") if self.auto_workers else setting,
+                                   "NETLAB_RUN_MAX_WORKERS" if self.auto_workers else "NETLAB_RUN_WORKERS")
+        memory_mb = positive_integer(os.environ.get("NETLAB_RUN_MEMORY_MB", "2048"), "NETLAB_RUN_MEMORY_MB", 1048576)
+        self.resource_monitor = resource_monitor or ResourceMonitor()
+        self._resource_lock = threading.Lock()
         self.store = RunStore(database or Path(manager.RESULTS_DIR, "runs.sqlite3"))
         self.result_index = ResultIndex(self.store, manager.RESULTS_DIR)
-        self.executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="netlab-run")
         self.futures, self.tokens = {}, {}
         self.payloads = {}
         self.queue_lock = threading.RLock()
         self.closed = False
         self.workers = workers
+        self.study_parallelism("ns3")  # Reject invalid producer configuration before starting threads.
         self.local = threading.local()
         self.real_lock = threading.Lock()
         from lab.campaigns import CampaignManager
         self.campaigns = CampaignManager(self)
+        self.executor = (AdaptiveExecutor(ceiling=workers, memory_mb=memory_mb, monitor=self.resource_monitor)
+                         if self.auto_workers else ThreadPoolExecutor(max_workers=workers, thread_name_prefix="netlab-run"))
+
+    def study_parallelism(self, engine):
+        if engine != "ns3":
+            return 1
+        setting = os.environ.get("NETLAB_NS3_PARALLEL", "").strip()
+        # These threads submit jobs and wait; the global executor makes resource decisions.
+        return min(self.workers, positive_integer(setting, "NETLAB_NS3_PARALLEL")) if setting else self.workers
+
+    def resource_status(self):
+        if self.auto_workers:
+            return self.executor.status()
+        with self._resource_lock:
+            resources = self.resource_monitor.read().public()
+        with self.queue_lock:
+            return {"mode": "fixed", "ceiling": self.workers, "limit": self.workers,
+                    "active": sum(f.running() for f in self.futures.values()),
+                    "queued": sum(not f.running() and not f.done() for f in self.futures.values()),
+                    "resources": resources}
+
+    def _dispatch_done(self, project, rid, future):
+        if future.cancelled() or future.exception() is None:
+            return
+        with self.queue_lock:
+            if rid not in self.futures:
+                return  # Normal execution has already saved its result and released ownership.
+            try:
+                data = self.store.get(project, rid)
+                if data["status"] not in TERMINAL:
+                    error = future.exception()
+                    data.update(status="error", error=f"{type(error).__name__}: {error}")
+                    self.store.save(data)
+            finally:
+                with self._lock:
+                    self.active.pop(rid, None)
+                self.futures.pop(rid, None)
+                self.tokens.pop(rid, None)
+                self.payloads.pop(rid, None)
 
     def _enqueue(self, rid, pname, project, name, sc, engine, extra=None):
         job = PreparedRun(rid, pname, project, name, sc, engine, extra)
@@ -62,7 +107,7 @@ class QueuedRunManager(manager.RunManager):
         except CancelledError:
             pass
 
-    def _execute_prepared(self, rid):
+    def _execute_prepared(self, rid, resource_engine=None):
         with self.queue_lock:
             job = self.payloads.pop(rid)
         return self._execute(*job.args())

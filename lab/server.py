@@ -122,6 +122,10 @@ def create_app(driver_name="demo", token=None):
         return {**driver.info(), "device_types": DEVICE_TYPES, "frr_daemons": FRR_DAEMONS, "wifi": wifi_model,
                 "app_models": app_models, "project_version": PROJECT_VERSION, "status": driver.status()}
 
+    @app.get("/api/resources")
+    def resources():
+        return runs.resource_status()
+
     @app.get("/api/templates")
     def templates():
         return _read_templates()

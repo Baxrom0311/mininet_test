@@ -70,6 +70,11 @@ oldini oladi. Qayta startda dead-owner pending run’lar interrupted bo‘ladi;
 ular o‘z-o‘zidan takroran ishga tushmaydi. Bitta results katalogida bitta server
 ishlating. PID reuse hali recovery cheklovidir.
 
+Standart worker rejimi `auto`: CPU affinity/cgroup v2 quota, CPU yuki va bo‘sh RAM
+bo‘yicha navbatdan yangi ishlarni boshlash chegarasi har soniyada yangilanadi.
+`GET /api/resources` joriy chegaralar va sensor natijalarini ko‘rsatadi.
+Sozlamalar va cheklovlar: [adaptive-workers.md](adaptive-workers.md).
+
 Cancel queued run’ni darhol yakunlaydi; active analytic run progress callback’da
 to‘xtaydi. Silent ns-3 child ham cancel qilinadi va reaped bo‘ladi. Emulyatsiya
 cleanup’i callback xatosida ham tracked child processlarni yopadi. Batafsil:
