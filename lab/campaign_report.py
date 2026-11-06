@@ -8,6 +8,23 @@ from lab.experiment_comparison_report import comparison_report
 from lab.report import _csv, _num, csv_bundle, e, experiment_bundle, kv, page, table
 
 
+def compact_report(report):
+    """Opt-in JSON representation with exact pointers to the single stored cohort summaries."""
+    positions = {c["variant"]: i for i, c in enumerate(report["experiments"])}
+    comparisons = []
+    for c in report["comparisons"]:
+        result = c["result"]
+        if result is not None:
+            result = dict(result)
+            for side, variant in (("baseline", "baseline"), ("candidate", c["variant"])):
+                if variant not in positions:
+                    raise ValueError("comparison cohort reference missing")
+                result[side] = {k: v for k, v in result[side].items() if k not in ("metrics", "run_windows", "notes")}
+                result[side]["summary_ref"] = f"/experiments/{positions[variant]}/summary"
+        comparisons.append({**c, "result": result})
+    return {**report, "representation": "cohort_references", "comparisons": comparisons}
+
+
 def campaign_report(report):
     campaign = report["campaign"]
     body = kv([("Campaign", campaign["campaign_id"]), ("Status", campaign["status"]), ("Engine", campaign["engine"]),

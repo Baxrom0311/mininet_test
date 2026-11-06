@@ -20,9 +20,15 @@ main bo‘lishi kerak. Agent PR ochmagan, merge yoki environment publish qilmaga
 | 11 | `perf/run-result-index` | `feat/experiment-statistics` | `9b16071` |
 | 12 | `feat/analysis-windows` | `perf/run-result-index` | `470ca17` |
 | 13 | `feat/paired-experiment-comparison` | `feat/analysis-windows` | `2bbdade` |
-| 14 | `feat/experiment-campaigns` | `feat/paired-experiment-comparison` | campaign/submission branchi |
+| 14 | `feat/experiment-campaigns` | `feat/paired-experiment-comparison` | `4b686b1` |
+| 15 | `perf/campaign-analysis` | `feat/experiment-campaigns` | request-local analysis/compact JSON branchi |
 
 ## Tekshirilgan imkoniyatlar
+
+- `perf/campaign-analysis`: 82 backend testi va 8 subprocessli haqiqiy IPv4/IPv6
+  campaign sinovi o‘tdi. Reference va optimized qiymatlar teng; 15 runli fixture’da
+  median 440.13 → 259.65 ms, compact JSON 37.96% kichik.
+  [campaign-analysis-performance.md](campaign-analysis-performance.md).
 
 - `feat/experiment-campaigns`: 13 yangi test bilan 76 backend regressiyasi o‘tdi;
   8 haqiqiy ns-3 subprocessli IPv4/IPv6 campaign va asl demo/report smoke ham o‘tdi.

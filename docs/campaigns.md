@@ -130,6 +130,10 @@ cohort uchun unavailable.txt bor. Plan/condition keys tekshiriladi; buzilgan pat
 arxiv nomiga o‘tmaydi. HTML qiymatlarni escape qiladi, tashqi resurs kerak emas.
 UI dizayni o‘zgarmagan.
 
+Hisobot ichida cohort tahlili faqat bir request davomida qayta ishlatiladi.
+`report.json?compact=true` takroriy summary o‘rniga JSON pointer beradi; default
+format to‘liq qoladi. [campaign-analysis-performance.md](campaign-analysis-performance.md).
+
 ## Tekshiruv
 
 ```bash

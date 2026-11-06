@@ -65,7 +65,13 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
     worker cleanup. `feat/paired-experiment-comparison` ustida; `docs/campaigns.md`.
     76 backend testi, 8 subprocessli haqiqiy IPv4/IPv6 ns-3 campaign va asl demo/report
     suite o‘tdi. Storage-write failure’da orphan/foreign-owner farqi ham tekshirildi.
-15. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
+15. `perf/campaign-analysis` — request-local prepared cohort reuse va ixtiyoriy
+    compact JSON. `feat/experiment-campaigns` ustida. 60 flow/15 run benchmark’da
+    440.13 ms → 259.65 ms; compact JSON 37.96% kichik. 6 yangi test, jami 82.
+    `docs/campaign-analysis-performance.md` va xom benchmark JSON’ga qarang.
+    82 backend testi hamda IPv4/IPv6 full/compact metric equivalence sinovi
+    8 haqiqiy ns-3 subprocess bilan o‘tdi.
+16. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
     Agent mavjud UI’dagi tasdiqlangan sync xatosidan tashqari dizaynni o‘zgartirmaydi.
 
 Asl audit `233054b`da bajarilgan. Checkout endi PR #3 bilan kelgan `7c6e317` ustida;

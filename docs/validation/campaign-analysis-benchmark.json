@@ -1,0 +1,78 @@
+{
+  "kind": "analytic campaign report processing; not emulation or packet throughput",
+  "measured_at": "2026-11-06T10:41:01.482007+00:00",
+  "runtime": {
+    "python": "3.12.14",
+    "system": "Linux",
+    "machine": "x86_64"
+  },
+  "fixture": {
+    "flows": 60,
+    "duration": 60,
+    "variants": 4,
+    "repetitions": 3,
+    "runs": 15,
+    "result_json_bytes": 8841618
+  },
+  "independent_reference": {
+    "median_s": 0.4401303150007152,
+    "samples_s": [
+      0.4401303150007152,
+      0.45989024399750633,
+      0.42784243899950525
+    ],
+    "calls": [
+      {
+        "cohort_summaries": 13,
+        "window_analyses": 39,
+        "runtime_guards": 24
+      },
+      {
+        "cohort_summaries": 13,
+        "window_analyses": 39,
+        "runtime_guards": 24
+      },
+      {
+        "cohort_summaries": 13,
+        "window_analyses": 39,
+        "runtime_guards": 24
+      }
+    ]
+  },
+  "request_local": {
+    "median_s": 0.2596528389985906,
+    "samples_s": [
+      0.2596528389985906,
+      0.2853716209938284,
+      0.23999032100255135
+    ],
+    "calls": [
+      {
+        "cohort_summaries": 5,
+        "window_analyses": 15,
+        "runtime_guards": 15
+      },
+      {
+        "cohort_summaries": 5,
+        "window_analyses": 15,
+        "runtime_guards": 15
+      },
+      {
+        "cohort_summaries": 5,
+        "window_analyses": 15,
+        "runtime_guards": 15
+      }
+    ]
+  },
+  "speedup": 1.695072222965774,
+  "identical_report_values": true,
+  "full_json_bytes": 3094728,
+  "compact_json_bytes": 1920045,
+  "compact_reduction_pct": 37.957552327700526,
+  "notes": [
+    "Generation is excluded; both paths read the same completed files in the same process.",
+    "Reference repeats cohort summaries and public pair comparisons, matching earlier orchestration.",
+    "Only one request reuses preparation; later requests reread/revalidate inputs.",
+    "Sizes are UTF-8 JSON before compression; timings depend on OS cache, CPU and filesystem."
+  ]
+}
