@@ -276,6 +276,11 @@ def create_app(driver_name="demo", token=None):
     def scenario_validate(body: dict = Body(...)):
         return {"errors": validate_scenario(body.get("project") or {}, body.get("scenario") or {})}
 
+    @app.post("/api/traffic/import")
+    def traffic_import(body: dict = Body(...)):
+        from lab.traffic import import_matrix
+        return import_matrix(body.get("project"), body)
+
     @app.post("/api/runs")
     def run_start(body: dict = Body(...)):
         return runs.start(body.get("project") or {}, body.get("scenario"), body.get("engine", "analytic"))

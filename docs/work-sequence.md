@@ -17,6 +17,8 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
    CSV compare/median/tolerance va qo‘llab-quvvatlangan timer takliflari tayyor;
    4 test o‘tdi. Real retuning yangi o‘lchov yo‘qligi sabab bajarilmadi.
 5. `feat/traffic-matrix` — CSV va gravity traffic, API, 1000 oqimli tekshiruv.
+   Import/API va 5 test tayyor. 1000 oqim, 2 s analitik ssenariy import bilan
+   0.079 s oldi (shu instance’da; umumiy barcha topologiyalar uchun kafolat emas).
 6. `feat/run-queue` — SQLite run metadata, chegaralangan ijro, cancel, restart recovery.
 7. `feat/p4-bmv2` — mavjud P4 real testini qat’iy prerequisite/skip holati bilan
    tayyorlash. O‘rnatish va real validation root/BMv2/p4c yo‘qligiga bog‘liq.
