@@ -144,6 +144,8 @@ jobs:
       - name: Runtime safety and dataset labeling regression
         run: python -m unittest lab.tests.test_runtime_safety ml.test_labeling lab.tests.test_calibration lab.tests.test_ospf_convergence lab.tests.test_traffic lab.tests.test_run_queue lab.tests.test_experiments lab.tests.test_result_index lab.tests.test_analysis_windows lab.tests.test_experiment_comparison lab.tests.test_campaigns lab.tests.test_campaign_analysis -v
 
+      - name: Real emulation worker lifecycle regression (no root required)
+        run: python -m unittest lab.tests.test_emulation_workers -v
       - name: Real network lock regression (no root or Mininet required)
         run: python -m unittest lab.tests.test_real_lock -v
       - name: Scale benchmark evidence regression (no root or Mininet required)
