@@ -29,6 +29,9 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
    ham blocked; tizim apt repozitoriyalari o‘zgartirilmadi.
 8. `ci/real-mininet` — alohida qo‘lda/tungi real job; CI ishlagan deb faqat GitHub
    natijasi mavjud bo‘lsa aytish.
+   Ubuntu 24.04 workflow qo‘shildi: nightly/manual L2/OSPF/firewall/IS-IS,
+   manual optional 10/20-router benchmark va saqlanadigan log/JSON artefaktlari.
+   YAML lokal tekshirildi; GitHub’da hali bajarilmagan.
 9. `docs/architecture` — dvigatellar, kesh, expand/postprocess, API va flock qoidalari.
 10. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
     Agent mavjud UI’dagi tasdiqlangan sync xatosidan tashqari dizaynni o‘zgartirmaydi.

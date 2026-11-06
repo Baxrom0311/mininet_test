@@ -1,0 +1,53 @@
+name: Real Mininet integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: Also measure generated 10/20-router FRR topologies
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 22 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-mininet-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  real-network:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+      - name: Install Mininet, OVS, FRR and backend
+        run: sudo bash lab/install_lab.sh --frr
+      - name: Real L2, OSPF and firewall checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/netlab-ci
+          sudo timeout 600 flock /tmp/netlab-real.lock lab/.venv/bin/python -u -m lab.tests.real_integration l2 ospf fw 2>&1 | tee /tmp/netlab-ci/integration.log
+      - name: Real IS-IS neighbors and recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo timeout 180 lab/.venv/bin/python -u -m lab.tests.real_isis --output /tmp/netlab-ci/isis.json 2>&1 | tee /tmp/netlab-ci/isis.log
+      - name: Generated FRR scale measurements
+        if: github.event_name == 'workflow_dispatch' && inputs.scale
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo timeout 600 lab/.venv/bin/python -u -m lab.benchmarks.real_scale --routers 10 20 --duration 10 --output /tmp/netlab-ci/scale.json 2>&1 | tee /tmp/netlab-ci/scale.log
+      - name: Retain measurements and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-mininet-${{ github.run_id }}
+          path: /tmp/netlab-ci/
+          if-no-files-found: warn
