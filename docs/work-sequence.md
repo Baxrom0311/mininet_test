@@ -33,6 +33,10 @@ mos tanlang yoki oldingi PR merge qilingach yangi main ustiga rebase qiling.
    manual optional 10/20-router benchmark va saqlanadigan log/JSON artefaktlari.
    YAML lokal tekshirildi; GitHub’da hali bajarilmagan.
 9. `docs/architecture` — dvigatellar, kesh, expand/postprocess, API va flock qoidalari.
+   `docs/architecture.md` yozildi; source’dagi route’lar bilan tekshirildi.
+   `docs/review-guide.md` branch/commit tartibi va acceptance holatini jamlaydi.
+   Final branch: 27 yangi test, 18 IPv6/IS-IS testi, asl demo va qolgan 11 smoke
+   suite o‘tdi. Real privileged sinovlar va yangi kalibratsiya o‘lchovlari bloklangan.
 10. UI’ning yangi feature maydonlari — yuborilgan reja bo‘yicha foydalanuvchi ishlaydi.
     Agent mavjud UI’dagi tasdiqlangan sync xatosidan tashqari dizaynni o‘zgartirmaydi.
 
