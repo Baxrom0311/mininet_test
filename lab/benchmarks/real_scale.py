@@ -18,6 +18,7 @@ import signal
 import threading
 import time
 
+from lab.real_lock import serial_real_test
 from lab.topogen import generate
 
 
@@ -190,6 +191,7 @@ def measure(routers, args):
     return result
 
 
+@serial_real_test
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--routers", nargs="+", type=int, default=[10, 20, 40])
@@ -216,17 +218,14 @@ def main(argv=None):
         if path.is_file():
             report["limits"][name] = path.read_text().strip()
     if not missing:
-        import fcntl
-        with open("/tmp/netlab-real.lock", "a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            def timeout(_sig, _frame):
-                raise TimeoutError("benchmark timeout")
-            signal.signal(signal.SIGALRM, timeout)
-            for n in a.routers:
-                report["runs"].append(measure(n, a))
-                if report["runs"][-1]["status"] != "passed":
-                    break
-            report["status"] = "passed" if all(r["status"] == "passed" for r in report["runs"]) else "failed"
+        def timeout(_sig, _frame):
+            raise TimeoutError("benchmark timeout")
+        signal.signal(signal.SIGALRM, timeout)
+        for n in a.routers:
+            report["runs"].append(measure(n, a))
+            if report["runs"][-1]["status"] != "passed":
+                break
+        report["status"] = "passed" if all(r["status"] == "passed" for r in report["runs"]) else "failed"
     a.output.parent.mkdir(parents=True, exist_ok=True)
     a.output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({"status": report["status"], "missing": missing, "output": str(a.output)}))
