@@ -1,7 +1,7 @@
 """Analitik (oqim darajasidagi) dvigatel — soniyalar ichida natija beradi.
 
 OPNET'dagi "Flow Analysis" g'oyasiga o'xshash: paketlar emas, oqimlar
-modellashtiriladi. Har 1 soniyalik oraliq uchun:
+modellashtiriladi. Ssenariydagi `sample` oralig'i uchun (standart 1 soniya):
   1. Yo'l: demo driverdagi L2/L3 forwarding (Net.forward) — hodisalar (kabel uzilishi)
      hisobga olingan holda.
   2. UDP (inelastik): taklif qilingan tezlik; kabel sig'imidan oshsa — proporsional
@@ -37,6 +37,20 @@ from lab.firewall import check_roundtrip as fw_roundtrip
 MSS_BITS = 1448 * 8
 
 
+def _sample_step(sc, duration):
+    step = sc.get("sample", 1)
+    if (type(step) not in (int, float) or not .001 <= step <= 3600
+            or not math.isfinite(duration) or duration <= 0 or duration / step > 100000):
+        raise ValueError("sample: finite number 0.001..3600 s, at most 100000 intervals, positive finite duration")
+    return float(step)
+
+
+def _mean(points, field):
+    seconds = math.fsum(point["t_end"] - point["t_start"] for point in points)
+    return math.fsum(point[field] * ((point["t_end"] - point["t_start"]) / seconds)
+                     for point in points) if seconds else None
+
+
 class _StaleNet(Net):
     """Konvergensiya oynasi: RIP routerlar uzilishdan OLDINGI routing jadvalini ishlatadi
     (forwarding esa joriy kabel holati bo'yicha — uzilgan kabelga yuborilgan paket yo'qoladi)."""
@@ -62,6 +76,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     # Keep the immutable reference positions separate from mutable simulation state.
     proj = copy.deepcopy(resolve_dhcp(project)[0])
     duration = float(sc.get("duration", 30))
+    sample = _sample_step(sc, duration)
     apps = []
     for i, a in enumerate(sc.get("apps") or []):
         apps.append({**a, "id": a.get("id") or f"a{i + 1}",
@@ -120,12 +135,13 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     from lab.lag import failover_s as lag_failover_s, groups as lag_groups
     lag_links = {lid for g in lag_groups(proj) for lid in g["links"]}
     lag_failover, lag_hold = lag_failover_s(sc), {}
-    steps = int(math.ceil(duration))
+    steps = int(math.ceil(duration / sample - 1e-9))
     net_cache = [None]
     for k in range(steps):
-        t0, t1 = float(k), float(min(k + 1, duration))
+        t0, t1 = k * sample, min((k + 1) * sample, duration)
+        midpoint = (t0 + t1) / 2
         if vrrp_tl:
-            proj["_vrrp_master"] = _vrrp.masters_at(vrrp_tl, t0 + 0.5)    # qadam o'rtasidagi holat
+            proj["_vrrp_master"] = _vrrp.masters_at(vrrp_tl, midpoint)
         while ev_i < len(events) and float(events[ev_i].get("t", 0)) <= t0 + 1e-9:
             e = events[ev_i]; ev_i += 1
             l = proj["links"].get(e.get("link"))
@@ -147,12 +163,12 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                     l["up"] = True
                 elif e["action"] == "link_params":
                     l["params"] = normalize_link_params({**(l.get("params") or {}), **(e.get("params") or {})})
-            applied.append({"t": t0, **e})
-            log(f"t={t0:.0f}s: {e['action']} {e.get('link') or e.get('device')}")
+            applied.append({"t": t0, **e, "actual_t": t0})
+            log(f"t={t0:g}s: {e['action']} {e.get('link') or e.get('device')}")
         if movers:     # harakat: oraliq o'rtasidagi pozitsiya
-            apply_positions(proj, positions_at(project, sc, (t0 + t1) / 2))
+            apply_positions(proj, positions_at(project, sc, midpoint))
         # roaming (ESS = bir xil SSID + diapazon + kanal): boshida eng kuchli AP; keyin "yopishqoq"
-        # klient — joriy AP bilan aloqa uzilgach 1 qadam (beacon yo'qolishi + skan) uzilish, so'ng
+        # klient — joriy AP bilan aloqa uzilgach 1 soniya (beacon yo'qolishi + skan) uzilish, so'ng
         # eng kuchli AP'ga o'tadi (ns-3 StaWifiMac xatti-harakatiga mos)
         for lid, l in proj["links"].items():
             if (l.get("params") or {}).get("medium") != "wifi":
@@ -186,21 +202,21 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
                 handover.pop(sta, None)
             elif sta not in handover:
                 handover[sta] = t0              # bu qadam — uzilish (beacon'lar yo'qoldi)
-            else:
+            elif t0 + 1e-9 >= handover[sta] + 1:
                 b1 = best_ap()
                 if b1 and b1 != cur_ap:
                     repoint(b1)
                     applied.append({"t": t0, "action": "roam", "device": sta, "from": cur_ap, "to": b1})
-                    log(f"t={t0:.0f}s: roaming {sta}: {cur_ap} -> {b1}")
+                    log(f"t={t0:g}s: roaming {sta}: {cur_ap} -> {b1}")
                     handover.pop(sta, None)
         bgp_ov = ()
-        if bgp_stale and t0 < bgp_stale[1]:
+        if bgp_stale and t0 < bgp_stale[1] - 1e-9:
             bgp_stale[0]["devices"] = proj["devices"]
             bgp_ov = ((bgp_stale[0], bgp_set),)
         if lag_links:
             # bond failover: uzilgan a'zo qadamning ko'p qismida hali "tanlangan" bo'lsa — shu
             # a'zoga hash qilingan oqimlar yo'qoladi; keyin qolgan a'zolarga qayta taqsimlanadi
-            hold_now = sorted(lid for lid, u in lag_hold.items() if t0 + 0.5 < u)
+            hold_now = sorted(lid for lid, u in lag_hold.items() if midpoint < u - 1e-9)
             if hold_now:
                 proj["_lag_hold"] = hold_now
             else:
@@ -232,7 +248,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         # Net (marshrut/L2 keshlari bilan) holat o'zgarmagan qadamlarda qayta ishlatiladi:
         # imzo = kabellar + qurilmalar (pozitsiya/sozlama) + ichki holatlar (_stp_hold, _lag_hold,
         # _vrrp_master) + faol eski-marshrut oynalari (RIP/BGP).
-        st_on = bool(stale and t0 < stale[1])
+        st_on = bool(stale and t0 < stale[1] - 1e-9)
         sig = (json.dumps(proj["links"], sort_keys=True, default=str),
                json.dumps(proj["devices"], sort_keys=True, default=str),
                json.dumps({k_: v_ for k_, v_ in proj.items() if k_.startswith("_")}, sort_keys=True, default=str),
@@ -489,13 +505,14 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             series[a["id"]].append(pt)
         for lid in proj["links"]:
             ab, ba = used[(lid, "ab")], used[(lid, "ba")]
-            pt = {"t": t1, "ab_bps": round(ab), "ba_bps": round(ba),
+            pt = {"t": t1, "t_start": t0, "t_end": t1, "ab_bps": round(ab), "ba_bps": round(ba),
                   "util": round(min(max(ab, ba) / cap[(lid, "ab")], 1.0), 4)}
             for d in ("ab", "ba"):
                 h = (lid, d)
                 q_s = hop_delay(h, 12000)[1] if used[h] > 0 else 0.0
                 pt[f"queue_{d}"] = round(q_s * cap[h] / 12000, 1)          # navbatdagi paketlar (1500 B)
-                pt[f"drops_{d}"] = round(max(load[h] - cap[h], 0) / 8000 * (t1 - t0))   # ortiqcha UDP (1000 B)
+                # Fluid estimates may be fractional packets; integer rounding loses short-bin drops.
+                pt[f"drops_{d}"] = round(max(load[h] - cap[h], 0) / 8000 * (t1 - t0), 6)
             link_series[lid].append(pt)
         # qurilma statistikasi: marshrutlar (joriy/eski RIP jadvali), forwarding pps, egress drops
         cnt = {dv: {"fwd": 0.0, "rx": 0.0, "tx": 0.0} for dv in node_series}
@@ -524,7 +541,7 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
             rtrack.update(t0, dv, rts)
             disc = sum(link_series[lid][-1][f"drops_{d}"] for lid, l in proj["links"].items()
                        for side, d in (("a", "ab"), ("b", "ba")) if l[side]["dev"] == dv)
-            node_series[dv].append({"t": t1, "routes": len(rts), "fwd_pps": round(cnt[dv]["fwd"], 1),
+            node_series[dv].append({"t": t1, "t_start": t0, "t_end": t1, "routes": len(rts), "fwd_pps": round(cnt[dv]["fwd"], 1),
                                     "rx_pps": round(cnt[dv]["rx"], 1), "tx_pps": round(cnt[dv]["tx"], 1),
                                     "noroute": 0, "discards": disc})
         progress((k + 1) / steps)
@@ -533,8 +550,8 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
     for a in apps:
         s = series[a["id"]]
         ok = [p for p in s if p["delay_ms"] is not None]
-        mean = lambda key, pts: round(sum(p[key] for p in pts) / len(pts), 3) if pts else None  # noqa: E731
-        summ = {"avg_thr_bps": round(sum(p["thr_bps"] for p in s) / len(s)) if s else 0,
+        mean = lambda key, pts: round(_mean(pts, key), 3) if pts else None  # noqa: E731
+        summ = {"avg_thr_bps": round(_mean(s, "thr_bps")) if s else 0,
                 "avg_delay_ms": mean("delay_ms", ok), "avg_jitter_ms": mean("jitter_ms", ok),
                 "loss_pct": mean("loss_pct", s)}
         if a["type"] == "ping":
@@ -548,11 +565,12 @@ def run(project, sc, progress=lambda f: None, log=lambda m: None):
         if a["id"] in last_path:
             flows_out[a["id"]].update(path=last_path[a["id"]][0], why=last_path[a["id"]][1])
     return {"engine": "analytic", "engine_label": "Analitik (oqim modeli)",
-            "ip_version": sc.get("ip_version", 4), "duration": duration,
+            "ip_version": sc.get("ip_version", 4), "duration": duration, "sample_s": sample,
             "flows": flows_out, "links": link_series, "events": applied,
             "nodes": node_series, "route_events": rtrack.events,
             "convergence": convergence(applied, rtrack.events, duration), "wall_s": round(time.time() - t_wall, 3),
             "notes": ["oqim darajasidagi taxmin: UDP qat'iy, TCP max-min adolat + Mathis, navbat M/M/1",
+                      f"sample={sample:g} s; kabel hodisalari va ilova chegaralari namuna chegaralariga kvantlanadi; harakat/VRRP holati oraliq o'rtasida baholanadi",
                       "dinamik routing: demo modeli; IPv4 OSPF startup network/passive interfeys siyosatiga amal qiladi",
                       "RIP: kabel uzilgandan keyin update/2 (rip_timers, standart 30 s -> 15 s) yoki rip_convergence_s davomida eski yo'llar",
                       ospf.note(),

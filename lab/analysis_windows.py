@@ -2,6 +2,8 @@
 
 import math
 
+from lab.sampling import sample_interval
+
 METRICS = {"avg_thr_bps": "thr_bps", "avg_delay_ms": "delay_ms", "avg_jitter_ms": "jitter_ms",
            "loss_pct": "loss_pct", "avg_rtt_ms": "rtt_ms"}
 EPS = 1e-8
@@ -66,9 +68,7 @@ def analyze(run, start_s=None, end_s=None):
     duration = run.get("duration", scenario.get("duration"))
     spec = specification(duration, start_s, end_s)
     start, end = spec["start_s"], spec["end_s"]
-    step = scenario.get("sample", 1) if run["engine"] == "ns3" else 1
-    if not finite(step) or not .001 <= step <= 3600 or duration / step > 100000:
-        raise ValueError("unsupported sampling interval")
+    step = sample_interval(run)
     flows = {}
     for fid, flow in (run.get("flows") or {}).items():
         if flow.get("hidden"):

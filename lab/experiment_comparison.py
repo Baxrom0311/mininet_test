@@ -6,6 +6,7 @@ import statistics
 from lab.analysis_windows import finite
 from lab.experiments import interval, summarize
 from lab.reproducibility import comparison_inputs, digest
+from lab.sampling import sample_interval
 
 
 def _scenario(run):
@@ -22,9 +23,14 @@ def _conditions(run):
         raise ValueError("scenario metadata does not match recorded inputs")
     if run.get("duration", sc["duration"]) != sc["duration"]:
         raise ValueError("duration does not match recorded inputs")
+    step = sample_interval({**run, "scenario": sc, "duration": sc["duration"]})
+    if run["engine"] == "analytic" and "sample_s" in run:
+        requested = sc.get("sample", 1)
+        if type(requested) not in (int, float) or step != requested:
+            raise ValueError("analytic sample_s does not match recorded inputs")
     return {"engine": run["engine"], "project": record["project"].get("name"),
             "ip_version": sc.get("ip_version", 4), "duration": float(sc["duration"]),
-            "sample_s": float(sc.get("sample", 1)) if run["engine"] == "ns3" else 1.0,
+            "sample_s": step,
             "runtime": digest(runtime)}
 
 

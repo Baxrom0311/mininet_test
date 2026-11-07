@@ -156,6 +156,8 @@ jobs:
         run: python -m unittest lab.tests.test_real_lock -v
       - name: Scale benchmark evidence regression (no root or Mininet required)
         run: python -m unittest lab.tests.test_scale_benchmark -v
+      - name: Analytical sampling and fractional metric regression
+        run: python -m unittest lab.tests.test_analytic_sampling lab.tests.test_sampling_compatibility lab.tests.test_fractional_postprocess -v
       - name: Calibration evidence and CLI regression
         run: python -m unittest lab.tests.test_calibration_evidence -v
       - name: Durable parameter study admission and report regression

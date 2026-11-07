@@ -165,10 +165,53 @@ def expand(sc):
     return out
 
 
+def _explicit_intervals(points):
+    """Validate exact intervals; absence means legacy timestamp-only samples."""
+    if not any("t_start" in p or "t_end" in p for p in points):
+        return None
+    intervals = []
+    for point in points:
+        start, end = point.get("t_start"), point.get("t_end")
+        if (type(start) not in (int, float) or type(end) not in (int, float)
+                or not math.isfinite(start) or not math.isfinite(end) or not 0 <= start < end):
+            raise ValueError("invalid application sample interval")
+        intervals.append((start, end, point))
+    intervals.sort(key=lambda item: item[0])
+    if any(a[1] > b[0] + 1e-9 for a, b in zip(intervals, intervals[1:])):
+        raise ValueError("duplicate or overlapping application sample intervals")
+    return intervals
+
+
+def _weighted_summary(points, fields):
+    """Duration-weight explicit samples and retain arithmetic legacy summaries."""
+    intervals = _explicit_intervals(points)
+    weighted = [(end - start, point) for start, end, point in intervals] if intervals is not None else [(1., p) for p in points]
+    summary = {}
+    for name, (field, digits, default) in fields.items():
+        present = [(weight, p[field]) for weight, p in weighted if p.get(field) is not None]
+        total = math.fsum(weight for weight, value in present)
+        value = math.fsum(value * (weight / total) for weight, value in present) if total else None
+        summary[name] = (round(value, digits) if digits else round(value)) if value is not None else default
+    return summary
+
+
 def _done_time(fl, nbytes):
-    """Engine done_t bo'lmasa: soniyalik thr_bps yig'indisidan interpolyatsiya."""
+    """Interpolate transfer completion over observed intervals, or legacy timestamp deltas."""
     if fl.get("done_t") is not None:
         return fl["done_t"]
+    intervals = _explicit_intervals(fl.get("series") or [])
+    if intervals is not None:
+        need, cum = nbytes * 8 * .98, 0.
+        for start, end, point in intervals:
+            start, end = max(start, float(fl.get("start", 0))), min(end, float(fl.get("stop", end)))
+            if end <= start:
+                continue
+            rate = point.get("thr_bps") or 0
+            add = rate * (end - start)
+            if add > 0 and cum + add >= need:
+                return start + (need - cum) / rate
+            cum += add
+        return None
     need, cum, prev_t = nbytes * 8 * 0.98, 0.0, float(fl.get("start", 0))
     for p in fl.get("series") or []:
         add = (p.get("thr_bps") or 0) * max(p["t"] - prev_t, 0)
@@ -186,6 +229,8 @@ def _interval_fields(points):
         start, end = next(iter(bounds))
         if start is not None and end is not None:
             return {"t_start": start, "t_end": end}
+    if any(start is not None or end is not None for start, end in bounds):
+        raise ValueError("aggregated application sample intervals do not agree")
     return {}
 
 
@@ -209,8 +254,9 @@ def postprocess(res, sc):
             series = []
             by_t = {}
             for role, f in (("up", up), ("down", dn)):
+                _explicit_intervals((f or {}).get("series") or [])
                 for p in (f or {}).get("series") or []:
-                    by_t.setdefault(p["t"], {})[role] = p
+                    by_t.setdefault(p.get("t_end", p["t"]), {})[role] = p
             for tt in sorted(by_t):
                 pts = by_t[tt]
                 if all(p.get("delay_ms") is None and p.get("loss_pct") is None for p in pts.values()):
@@ -227,11 +273,10 @@ def postprocess(res, sc):
                                "mos": min(vals) if vals else 1.0, "mos_up": mos_d.get("up"), "mos_down": mos_d.get("down"),
                                "r_factor": min(v for v in r_d.values() if v is not None) if any(v is not None for v in r_d.values()) else 0})
             mos = [p["mos"] for p in series]
-            sm = {"codec": CODECS[codec]["label"], "avg_mos": round(sum(mos) / len(mos), 2) if mos else None,
-                  "min_mos": min(mos) if mos else None,
-                  "avg_delay_ms": round(sum(p["delay_ms"] for p in series if p["delay_ms"] is not None) / max(1, sum(1 for p in series if p["delay_ms"] is not None)), 3),
-                  "loss_pct": round(sum(p["loss_pct"] for p in series) / len(series), 2) if series else None,
-                  "avg_thr_bps": round(sum(p["thr_bps"] for p in series) / len(series)) if series else 0}
+            sm = {"codec": CODECS[codec]["label"], "min_mos": min(mos) if mos else None,
+                  **_weighted_summary(series, {"avg_mos": ("mos", 2, None),
+                      "avg_delay_ms": ("delay_ms", 3, 0), "loss_pct": ("loss_pct", 2, None),
+                      "avg_thr_bps": ("thr_bps", 0, 0)})}
             sm["quality"] = ("a'lo" if (sm["avg_mos"] or 0) >= 4.0 else "yaxshi" if (sm["avg_mos"] or 0) >= 3.6
                              else "qoniqarli" if (sm["avg_mos"] or 0) >= 3.1 else "yomon")
             flows[aid] = {**base, "series": series, "summary": sm}
@@ -240,10 +285,14 @@ def postprocess(res, sc):
             for k, f in parts.items():
                 rcv = k.split(".", 1)[1]
                 sm_ = f.get("summary") or {}
+                if _explicit_intervals(f.get("series") or []) is not None:
+                    sm_ = _weighted_summary(f["series"], {"avg_thr_bps": ("thr_bps", 0, 0),
+                        "loss_pct": ("loss_pct", 2, None), "avg_delay_ms": ("delay_ms", 3, None),
+                        "avg_jitter_ms": ("jitter_ms", 3, None)})
                 per[rcv] = {"avg_thr_bps": sm_.get("avg_thr_bps"), "loss_pct": sm_.get("loss_pct"),
                             "avg_delay_ms": sm_.get("avg_delay_ms"), "avg_jitter_ms": sm_.get("avg_jitter_ms")}
                 for p in f.get("series") or []:
-                    by_t.setdefault(p["t"], []).append(p)
+                    by_t.setdefault(p.get("t_end", p["t"]), []).append(p)
             series = []
             for tt in sorted(by_t):
                 pts = by_t[tt]
@@ -273,9 +322,11 @@ def postprocess(res, sc):
                               "time_s": round(dt - st, 3) if dt is not None else None})
             agg, interval_points = {}, {}
             for f in parts.values():
+                _explicit_intervals(f.get("series") or [])
                 for p in f.get("series") or []:
-                    agg[p["t"]] = agg.get(p["t"], 0) + (p.get("thr_bps") or 0)
-                    interval_points.setdefault(p["t"], []).append(p)
+                    end = p.get("t_end", p["t"])
+                    agg[end] = agg.get(end, 0) + (p.get("thr_bps") or 0)
+                    interval_points.setdefault(end, []).append(p)
             series = [{"t": tt, **_interval_fields(interval_points[tt]), "thr_bps": v} for tt, v in sorted(agg.items())]
             done = [x["time_s"] for x in items if x["time_s"] is not None]
             if t == "http":
