@@ -49,6 +49,11 @@ farqlari `addressing.py` va `engines/ns3_addressing.py`da ushlanadi. DHCPv6/NAT6
 IPv6 BGP/multicast bu bosqichga kirmaydi. `ns3_fast` taxminiy rejimining tradeoff’lari
 README’da qayd etilgan; natijani aniq rejim bilan teng deb ko‘rsatmang.
 
+Analitik TCP sig‘im taqsimoti va cheklangan fayl uzatish integratori
+`engines/tcp_fluid.py`da ajratilgan. Oqim/resurs chegaralari bo‘yicha progress
+qilinadi; 64 ta taqsimlash bosqichi yoki 32 ta tugash hodisasidan keyin natija
+kesilmaydi. [TCP modeli va sintetik benchmark](analytic-tcp.md).
+
 ## Net keshlari va mutable holat
 
 `drivers/demo_driver.Net` qisqa umrli snapshotdir. Interfeyslar, port/link indekslari,

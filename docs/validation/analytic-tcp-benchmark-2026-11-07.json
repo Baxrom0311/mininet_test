@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "benchmark": "analytic_tcp",
+  "evidence_kind": "synthetic_fluid_model",
+  "real_network_measurement": false,
+  "flows_per_case": 1000,
+  "duration_s": 1,
+  "cases": [
+    {
+      "case": "finite_files",
+      "status": "passed",
+      "expected_flows": 1000,
+      "link_capacity_mbps": 10000,
+      "requested_bytes": 500500000,
+      "delivered_bytes": 500500000.0,
+      "completed_flows": 1000,
+      "byte_matched_flows": 1000,
+      "tolerance_bytes_per_flow": 0.125,
+      "wall_s": 1.852095
+    },
+    {
+      "case": "rate_cap_levels",
+      "status": "passed",
+      "expected_flows": 1000,
+      "link_capacity_mbps": 500501.0,
+      "expected_bps": 500500000000,
+      "measured_bps": 500500000000.0,
+      "rate_matched_flows": 1000,
+      "tolerance_bps_per_flow": 0.5,
+      "wall_s": 0.975966
+    }
+  ],
+  "status": "passed"
+}
