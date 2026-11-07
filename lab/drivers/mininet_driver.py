@@ -366,6 +366,8 @@ def _mn_classes():
             for port, intf in sorted(self.intfs.items()):
                 if intf.name != "lo":
                     args += ["-i", f"{port}@{intf.name}"]
+            # BMv2 1.15+: --no-p4 da runtime konfig almashtirish faqat target opsiyasi bilan yoqiladi
+            args += ["--", "--enable-swap"]
             out = self.cmd(" ".join(args) + f" > {self.log_path}.out 2>&1 & echo $!")
             try:
                 self.bmv2_pid = int(out.strip().split()[-1])
@@ -696,7 +698,7 @@ class MininetDriver(BaseDriver):
                     # TX offload o'chirilmasa TCP/UDP paketlar tashlanadi (ICMP o'tadi)
                     cmds.append(f"ethtool -K {ifn} tx off >/dev/null")
         # konfiguratsiyadan olib tashlangan subinterfeyslar
-        for line in node.cmd("ip -o link show type vlan").splitlines():
+        for line in node.cmd("ip -color=never -o link show type vlan").splitlines():
             m = re.match(r"\d+:\s+([^@:]+)", line)
             if m and m.group(1) not in want_sub:
                 cmds.append(f"ip link del {m.group(1)}")
@@ -803,7 +805,7 @@ exit 0
             t0 = time.time()
             while pending and time.time() - t0 < 20:
                 for (c, ifn), ip in list(pending.items()):
-                    if f"inet {ip}/" in self.net.get(c).cmd(f"ip -4 -o addr show dev {ifn}"):
+                    if f"inet {ip}/" in self.net.get(c).cmd(f"ip -color=never -4 -o addr show dev {ifn}"):
                         pending.pop((c, ifn))
                 if pending:
                     time.sleep(0.3)
@@ -881,7 +883,7 @@ exit 0
                      f"ip link set {mv} up"]
             if self._datapath == "user":
                 cmds.append(f"ethtool -K {mv} tx off >/dev/null")
-        for line in node.cmd("ip -o link show type macvlan").splitlines():
+        for line in node.cmd("ip -color=never -o link show type macvlan").splitlines():
             m = re.match(r"\d+:\s+([^@:]+)", line)
             if m and m.group(1).startswith("vrrp4-") and m.group(1) not in want:
                 cmds.append(f"ip link del {m.group(1)}")
@@ -1300,6 +1302,10 @@ exit 0
         os.makedirs(etc, exist_ok=True)
         os.makedirs(run, exist_ok=True)
         daemons = ["zebra", "staticd"] + [x for x in cfg.get("daemons", []) if x in FRR_DAEMONS]
+        if os.path.exists(os.path.join(FRR_BIN, "mgmtd")):
+            # FRR 10+: ripd/staticd/... sozlamalari mgmtd orqali o'tadi — usiz vtysh
+            # konfiguratsiyasi jimgina qabul qilinmaydi. mgmtd birinchi ishga tushishi kerak.
+            daemons.insert(0, "mgmtd")
         if cfg.get("vrrp") and "vrrpd" not in daemons:
             daemons.append("vrrpd")     # VRRP sozlangan — vrrpd avtomatik
         for dm in daemons:
