@@ -135,7 +135,12 @@ class RunManager:
             raise ValueError("scenario: object")
         if engine == "mininet" and sc.get("ip_version", 4) == 6:
             raise ValueError("IPv6 faqat analytic va ns3 dvigatellarida qo'llab-quvvatlanadi")
-        errs = validate_project(project) + validate_scenario(project, sc)
+        errs = validate_project(project)
+        if not errs:
+            from lab.project_shape import project_for_execution
+            project = project_for_execution(project)
+            sc = project["scenarios"][scenario_name]
+            errs = validate_scenario(project, sc)
         if errs:
             raise ValueError("; ".join(errs[:5]))
         eng = {e["id"]: e for e in self.engines()}.get(engine)

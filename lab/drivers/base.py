@@ -112,8 +112,25 @@ class BaseDriver:
         if not self.running:
             raise DriverError("Tarmoq ishga tushirilmagan")
 
-    def _set_project(self, project):
-        self.project = copy.deepcopy(project)
+    def _set_project(self, project, *, collection=None, key=None, device_type=None):
+        """Validate a detached candidate before replacing the running document.
+
+        Live operations may require a named target in the candidate too. A bad
+        request must leave the previous project available to the running network.
+        """
+        from lab.model import validate_project
+        from lab.project_shape import project_for_execution
+        candidate = copy.deepcopy(project)
+        errors = validate_project(candidate)
+        if errors:
+            raise DriverError("; ".join(errors[:5]))
+        if collection is not None:
+            items = candidate.get(collection) or {}
+            if not isinstance(key, str) or key not in items:
+                raise DriverError(f"{collection}.{key}: loyihada yo'q")
+            if device_type is not None and items[key].get("type") != device_type:
+                raise DriverError(f"{key}: qurilma turi {device_type} bo'lsin")
+        self.project = project_for_execution(candidate)
 
     def _publish_state(self):
         self.bus.publish({"type": "state", **self.status()})

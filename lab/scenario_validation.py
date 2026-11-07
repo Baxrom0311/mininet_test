@@ -1,18 +1,14 @@
 """Validate scenario structure and engine input boundaries before admission."""
 
 import ipaddress
-import math
 import re
-import sys
 
 from lab.apps import MODEL_TYPES, validate_app
 from lab.model import APP_TYPES, DEVICE_TYPES, EVENT_ACTIONS, normalize_link_params, ospf_convergence_delay, parse_rate
-from lab.validation_numbers import MAX_UINT64, MIN_TIMER_S, MAX_TIMER_S, integer, number, packet_rate
+from lab.validation_numbers import MAX_POSITION, MAX_UINT64, MIN_TIMER_S, MAX_TIMER_S, integer, number, packet_rate
 
 # The native runner assigns ports from 9000 (unicast) and 9500 (multicast).
 MAX_EXPANDED_APPS = 65535 - 9500 + 1
-# Leave room for squared distances and a speed-of-light propagation timer.
-MAX_POSITION = min(math.sqrt(sys.float_info.max) / 4, (MAX_TIMER_S - 3600) * 3e8 / 4)
 
 
 def _items(sc, field, errors):
@@ -174,7 +170,7 @@ def _event(project, devs, e, i, dur, errors):
                     _check(errors, w, number, seconds, key, minimum=0, maximum=MAX_TIMER_S - dur)
         # Keep the project's existing link normalization and range rules.
         try:
-            normalize_link_params(params)
+            normalize_link_params(params, horizon=dur)
         except (ValueError, TypeError, OverflowError) as ex:
             errors.append(f"{w}: link params: {ex}")
 

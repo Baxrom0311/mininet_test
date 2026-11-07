@@ -152,6 +152,8 @@ jobs:
         run: python -m unittest lab.tests.test_tcp_fluid lab.tests.test_analytic_tcp lab.tests.test_analytic_tcp_benchmark -v
       - name: Real emulation worker lifecycle regression (no root required)
         run: python -m unittest lab.tests.test_emulation_workers -v
+      - name: Project validation and live update regression
+        run: python -m unittest lab.tests.test_project_validation lab.tests.test_project_values lab.tests.test_project_preparation lab.tests.test_live_project_guards lab.tests.smoke_project_inputs -v
       - name: Real network lock regression (no root or Mininet required)
         run: python -m unittest lab.tests.test_real_lock -v
       - name: Scale benchmark evidence regression (no root or Mininet required)

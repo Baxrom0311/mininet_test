@@ -536,14 +536,14 @@ class DemoDriver(BaseDriver):
         return self.status()
 
     # ---- jonli o'zgarishlar ----
-    def _sync(self, project):
+    def _sync(self, project, *, collection=None, key=None, device_type=None):
         with self.lock:
             self._require_running()
-            self._set_project(project)
+            self._set_project(project, collection=collection, key=key, device_type=device_type)
             return {"ok": True}
 
     def add_device(self, project, name):
-        r = self._sync(project)
+        r = self._sync(project, collection="devices", key=name)
         self.bus.log("ok", f"{name} qo'shildi", name)
         return r
 
@@ -556,7 +556,7 @@ class DemoDriver(BaseDriver):
         return {"ok": True}
 
     def add_link(self, project, link_id):
-        return self._sync(project)
+        return self._sync(project, collection="links", key=link_id)
 
     def remove_link(self, link_id):
         with self.lock:
@@ -570,15 +570,18 @@ class DemoDriver(BaseDriver):
             l = self.project["links"].get(link_id)
             if not l:
                 raise DriverError(f"kabel {link_id} topilmadi")
+            if up is not None and type(up) is not bool:
+                raise DriverError("up: boolean required")
+            normalized = normalize_link_params(params) if params is not None else None
             if params is not None:
-                l["params"] = normalize_link_params(params)
+                l["params"] = normalized
             if up is not None:
-                l["up"] = bool(up)
+                l["up"] = up
         self.bus.publish({"type": "link", "link": link_id, "up": l.get("up", True), "params": l.get("params")})
         return {"ok": True, "link": l}
 
     def apply_device_config(self, project, name):
-        r = self._sync(project)
+        r = self._sync(project, collection="devices", key=name)
         self.bus.log("ok", f"{name}: sozlama qo'llandi", name)
         return r
 
@@ -960,7 +963,7 @@ class DemoDriver(BaseDriver):
 
     # ---- P4 / SDN / FRR (demo) ----
     def p4_load(self, project, name):
-        self._sync(project)
+        self._sync(project, collection="devices", key=name, device_type="p4switch")
         d = self.project["devices"][name]
         prog = (d.get("config") or {}).get("program")
         src = (self.project.get("p4_programs") or {}).get(prog, "")
@@ -976,7 +979,7 @@ class DemoDriver(BaseDriver):
         return {"ok": True, "output": "\n".join(f"RuntimeCmd: {l}\n[demo] qabul qilindi" for l in lines)}
 
     def controller_restart(self, project, cname):
-        self._sync(project)
+        self._sync(project, collection="controllers", key=cname)
         return {"ok": True, "log": f"[demo] '{cname}' kontroller kodi saqlandi. Haqiqiy os-ken real driverda ishlaydi."}
 
     def controller_log(self, cname):
