@@ -560,7 +560,9 @@ yuklama/sig'im tahlili uchun, oqim darajasidagi aniq natija uchun emas.
 **Parallel tadqiqotlar**: ns-3 dvigatelida parametrik tadqiqot variantlari bir vaqtda
 ishga tushiriladi (har biri alohida jarayon). API’da standart `NETLAB_RUN_WORKERS=auto`
 CPU/RAM, CPU yuki va konteyner limitlariga moslashadi; `NETLAB_NS3_PARALLEL=N`
-tadqiqotdan navbatga yuboriladigan variantlar sonini cheklaydi.
+tadqiqotning bir vaqtda bajariladigan variantlar sonini cheklaydi. Barcha variant
+ID’lari avvaldan qaytariladi va navbatga birgalikda saqlanadi. Status, umumiy cancel
+va to‘liq hisobot: [parameter-studies.md](../docs/parameter-studies.md).
 Batafsil: [adaptiv workerlar](../docs/adaptive-workers.md).
 Har ns-3 jarayoni katta topologiyada 1–3 GB xotira olishi mumkin (ring 40: ~2.8 GB).
 Analitik (GIL) va Mininet (bitta jonli tarmoq) ketma-ket qoladi.

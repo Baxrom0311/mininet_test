@@ -9,6 +9,12 @@ At most 256 runs may wait or execute in this manager. Mininet execution is addit
 real-driver checks can reject concurrent real submissions. Pending work is not a
 promise that a large emulation fits available memory.
 
+Parameter studies now reserve and persist their entire variant set before any
+engine starts. Rejected invalid/full/closed submissions return synchronously.
+Per-study concurrency uses dispatcher groups, and queued variants can be cancelled
+immediately. [parameter-studies.md](parameter-studies.md) documents durable status,
+group cancellation, report completeness and legacy compatibility.
+
 Metadata lives in ignored `lab/results/runs.sqlite3` (WAL); series remain in the
 existing per-project JSON files. States: queued, running, cancelling, done, error,
 cancelled, interrupted. On startup, nonterminal records owned by a dead process
