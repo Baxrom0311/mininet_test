@@ -14,9 +14,6 @@ import importlib.util
 import json
 import os
 import re
-import subprocess
-import sys
-import tempfile
 import threading
 import time
 import uuid
@@ -353,29 +350,5 @@ class RunManager:
                 self.active.pop(run_id, None)
 
     def _run_ns3(self, project, sc, prog, log):
-        with tempfile.TemporaryDirectory(prefix="netlab-ns3-") as td:
-            inp, out = os.path.join(td, "in.json"), os.path.join(td, "out.json")
-            with open(inp, "w") as f:
-                json.dump({"project": project, "scenario": sc}, f)
-            env = dict(os.environ, PYTHONPATH=os.path.dirname(LAB_DIR) + os.pathsep + os.environ.get("PYTHONPATH", ""))
-            p = subprocess.Popen([sys.executable, "-m", "lab.engines.ns3_runner", inp, out],
-                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
-            tail = []
-            for line in p.stdout:
-                line = line.strip()
-                try:
-                    msg = json.loads(line)
-                except ValueError:
-                    if line and "materialize symbols" not in line:
-                        tail.append(line)
-                        tail[:] = tail[-30:]
-                    continue
-                if "progress" in msg:
-                    prog(msg["progress"])
-                if msg.get("log"):
-                    log(msg["log"])
-            p.wait(timeout=30)
-            if p.returncode != 0 or not os.path.exists(out):
-                raise RuntimeError(f"ns-3 jarayoni xato bilan tugadi (kod {p.returncode}): " + " | ".join(tail[-6:]))
-            with open(out) as f:
-                return json.load(f)
+        from lab.engines.ns3_process import run_ns3
+        return run_ns3(project, sc, prog, log)

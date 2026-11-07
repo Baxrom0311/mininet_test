@@ -1,12 +1,8 @@
 """Bounded execution and cooperative cancellation on top of existing engines."""
 
-import json
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 import os
 from pathlib import Path
-import queue
-import subprocess
-import sys
-import tempfile
 import threading
 
 from lab.engines import manager
@@ -291,51 +287,9 @@ class QueuedRunManager(manager.RunManager):
         self.executor.shutdown(wait=True, cancel_futures=True)
 
     def _run_ns3(self, project, sc, prog, log):
-        """Read logs asynchronously so cancellation also works during silent startup."""
+        from lab.engines.ns3_process import run_ns3
         token = self.tokens[self.local.run_id]
-        with tempfile.TemporaryDirectory(prefix="netlab-ns3-") as td:
-            inp, out = Path(td, "in.json"), Path(td, "out.json")
-            inp.write_text(json.dumps({"project": project, "scenario": sc}))
-            env = dict(os.environ, PYTHONPATH=os.path.dirname(manager.LAB_DIR) + os.pathsep + os.environ.get("PYTHONPATH", ""))
-            process = subprocess.Popen([sys.executable, "-m", "lab.engines.ns3_runner", str(inp), str(out)],
-                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
-            messages = queue.Queue()
-            def read():
-                for line in process.stdout:
-                    messages.put(line)
-                messages.put(None)
-            reader = threading.Thread(target=read, daemon=True)
-            reader.start()
-            tail = []
-            try:
-                while True:
-                    if token.is_set():
-                        raise RunCancelled("run cancelled")
-                    try:
-                        line = messages.get(timeout=.1)
-                    except queue.Empty:
-                        continue
-                    if line is None:
-                        break
-                    try:
-                        msg = json.loads(line)
-                    except ValueError:
-                        tail = (tail + [line.strip()])[-10:]
-                        continue
-                    if "progress" in msg:
-                        prog(msg["progress"])
-                    if msg.get("log"):
-                        log(msg["log"])
-                process.wait(timeout=30)
-                if process.returncode or not out.exists():
-                    raise RuntimeError("ns-3 failed: " + " | ".join(tail))
-                return json.loads(out.read_text())
-            finally:
-                if process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill(); process.wait()
-                reader.join(timeout=2)
-                process.stdout.close()
+        def check_cancel():
+            if token.is_set():
+                raise RunCancelled("run cancelled")
+        return run_ns3(project, sc, prog, log, check_cancel=check_cancel)

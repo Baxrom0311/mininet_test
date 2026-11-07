@@ -141,6 +141,8 @@ jobs:
         run: python -m unittest lab.tests.smoke_ipv6 lab.tests.smoke_isis lab.tests.smoke_ospf lab.tests.smoke_experiments lab.tests.smoke_experiment_comparison lab.tests.smoke_campaigns lab.tests.smoke_studies -v
       - name: Adaptive CPU and RAM dispatch regression
         run: python -m unittest lab.tests.test_adaptive_workers -v
+      - name: ns-3 subprocess lifecycle regression (no ns-3 installation required)
+        run: python -m unittest lab.tests.test_ns3_process lab.tests.test_ns3_process_backlog lab.tests.test_ns3_lifecycle_integration -v
       - name: Runtime safety and dataset labeling regression
         run: python -m unittest lab.tests.test_runtime_safety ml.test_labeling lab.tests.test_calibration lab.tests.test_ospf_convergence lab.tests.test_traffic lab.tests.test_run_queue lab.tests.test_experiments lab.tests.test_result_index lab.tests.test_analysis_windows lab.tests.test_experiment_comparison lab.tests.test_campaigns lab.tests.test_campaign_analysis -v
 

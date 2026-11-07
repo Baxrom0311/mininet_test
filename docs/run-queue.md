@@ -25,7 +25,9 @@ results directory. PID reuse is a remaining recovery limitation.
 `POST /api/runs/{project}/{run_id}/cancel` cancels queued jobs immediately and
 requests cooperative cancellation of active jobs. Analytic runs check at progress
 callbacks. ns-3 cancellation also works during silent child startup, then terminates
-and waits for the subprocess. Emulation cleanup terminates tracked traffic child
+and waits for the subprocess. The shared ns-3 process owner also checks cancellation
+after stdout closes, bounds diagnostic buffering, and cleans up on callback/read
+errors; see [ns3-runtime.md](ns3-runtime.md). Emulation cleanup terminates tracked traffic child
 processes even when a callback fails. Actual privileged emulation cleanup still
 needs validation on a real host.
 
