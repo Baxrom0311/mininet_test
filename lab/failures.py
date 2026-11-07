@@ -21,9 +21,13 @@ import copy
 import math
 import random
 
+from lab.validation_numbers import integer, number
+
 GROUPS = ("links", "devices")
 DISTRIBUTIONS = ("exponential", "fixed")
 MAX_EVENTS = 5000
+# Bound work before interval union/cause attribution, including device fan-out.
+MAX_RAW_INTERVALS = 5000
 
 
 def _targets(project, group, spec):
@@ -32,45 +36,93 @@ def _targets(project, group, spec):
         return sorted(project.get("links") or {}) if t == "all" else list(t or [])
     if t == "all":
         return sorted(n for n, d in (project.get("devices") or {}).items()
-                      if d.get("type") not in ("host", "server"))
+                      if isinstance(d, dict) and d.get("type") not in ("host", "server"))
     return list(t or [])
 
 
-def validate(project, sc):
+def _positive(value, name):
+    value = number(value, name)
+    if value <= 0:
+        raise ValueError(f"{name} > 0 bo'lsin")
+    return value
+
+
+def _input_errors(project, sc):
+    """Check shapes/numbers before any potentially large schedule is generated."""
+    if not isinstance(sc, dict):
+        return ["scenario: obyekt bo'lsin"]
     f = sc.get("failures")
-    if not f:
+    if f is None or f == {}:
         return []
     errs = []
     if not isinstance(f, dict):
         return ["failures: obyekt bo'lsin"]
+    if not isinstance(project, dict):
+        return ["project: obyekt bo'lsin"]
     if f.get("distribution", "exponential") not in DISTRIBUTIONS:
         errs.append(f"failures.distribution: {' | '.join(DISTRIBUTIONS)}")
     try:
-        int(f.get("seed", 1))
-    except (TypeError, ValueError):
-        errs.append("failures.seed butun son bo'lsin")
-    if not any(f.get(g) for g in GROUPS):
+        integer(f.get("seed", 1), "failures.seed")
+    except ValueError as e:
+        errs.append(str(e))
+    try:
+        number(sc.get("duration", 30), "duration", minimum=0)
+    except ValueError as e:
+        errs.append(str(e))
+    events = sc.get("events", [])
+    if events is None:
+        events = []
+    if not isinstance(events, list):
+        errs.append("events: ro'yxat bo'lsin")
+    else:
+        for i, event in enumerate(events):
+            if not isinstance(event, dict):
+                errs.append(f"events[{i}]: obyekt bo'lsin")
+                continue
+            try:
+                number(event.get("t", 0), f"events[{i}].t")
+            except ValueError as e:
+                errs.append(str(e))
+    if not any(f.get(g) is not None for g in GROUPS):
         errs.append("failures: links yoki devices kerak")
     for g in GROUPS:
         spec = f.get(g)
-        if not spec:
+        if spec is None:
+            continue
+        if not isinstance(spec, dict):
+            errs.append(f"failures.{g}: obyekt bo'lsin")
             continue
         for k in ("mtbf_s", "mttr_s"):
             try:
-                if float(spec.get(k, 0)) <= 0:
-                    raise ValueError
-            except (TypeError, ValueError):
-                errs.append(f"failures.{g}.{k} > 0 bo'lsin")
+                _positive(spec.get(k), f"failures.{g}.{k}")
+            except ValueError as e:
+                errs.append(str(e))
         tg = spec.get("targets", "all")
         if tg != "all" and not isinstance(tg, list):
             errs.append(f"failures.{g}.targets: ro'yxat yoki \"all\"")
             continue
-        pool = project.get("links") if g == "links" else project.get("devices")
+        pool = project.get(g) or {}
+        if not isinstance(pool, dict):
+            errs.append(f"project.{g}: obyekt bo'lsin")
+            continue
+        if any(not isinstance(t, str) or not t for t in (pool if tg == "all" else tg)):
+            errs.append(f"failures.{g}.targets: bo'sh bo'lmagan nomlar ro'yxati")
+            continue
         for t in _targets(project, g, spec):
-            if t not in (pool or {}):
+            if t not in pool:
                 errs.append(f"failures.{g}: '{t}' loyihada yo'q")
+    return errs
+
+
+def validate(project, sc):
+    errs = _input_errors(project, sc)
+    if not isinstance(sc, dict) or not sc.get("failures"):
+        return errs
     if not errs:
-        n = len([e for e in expand(project, sc)["events"] if e.get("source") == "failure"])
+        try:
+            n = sum(e.get("source") == "failure" for e in expand(project, sc)["events"])
+        except ValueError as e:
+            return [str(e)]
         if n > MAX_EVENTS:
             errs.append(f"failures: {n} hodisa > {MAX_EVENTS} (MTBF juda kichik yoki davomiylik juda uzun)")
     return errs
@@ -78,13 +130,22 @@ def validate(project, sc):
 
 def down_intervals(seed, group, target, mtbf, mttr, duration, dist="exponential"):
     """[(boshlanish, tugash)] — nishon ishlamay turgan oraliqlar, [0, duration] ichida."""
+    seed = integer(seed, "failures.seed")
+    mtbf = _positive(mtbf, f"failures.{group}.mtbf_s")
+    mttr = _positive(mttr, f"failures.{group}.mttr_s")
+    duration = number(duration, "duration", minimum=0)
+    if dist not in DISTRIBUTIONS:
+        raise ValueError(f"failures.distribution: {' | '.join(DISTRIBUTIONS)}")
     rng = random.Random(f"netlab-failure:{seed}:{group}:{target}")
     out, t = [], 0.0
-    for _ in range(100000):
+    while True:
         up = rng.expovariate(1.0 / mtbf) if dist == "exponential" else mtbf
         t += up
         if t >= duration:
             break
+        if len(out) >= MAX_RAW_INTERVALS:
+            raise ValueError(f"failures: raw interval budget {MAX_RAW_INTERVALS} exceeded "
+                             "(MTBF juda kichik yoki davomiylik juda uzun)")
         dn = rng.expovariate(1.0 / mttr) if dist == "exponential" else mttr
         out.append((round(t, 3), round(min(t + dn, duration), 3)))
         t += dn
@@ -103,23 +164,43 @@ def _union(ivs):
 
 def link_down_map(project, sc):
     """{link_id: [(boshlanish, tugash, [sabablar])]} — generatsiya qilingan uzilishlar."""
+    errs = _input_errors(project, sc)
+    if errs:
+        raise ValueError("; ".join(errs))
     f = sc.get("failures") or {}
     if not f:
         return {}
-    dur = float(sc.get("duration", 30))
-    seed, dist = int(f.get("seed", 1)), f.get("distribution", "exponential")
+    dur = number(sc.get("duration", 30), "duration", minimum=0)
+    seed, dist = integer(f.get("seed", 1), "failures.seed"), f.get("distribution", "exponential")
     raw = {}       # lid -> [(a, b, cause)]
+    generated_count = raw_count = 0
     for g in GROUPS:
         spec = f.get(g)
         if not spec:
             continue
-        mtbf, mttr = float(spec["mtbf_s"]), float(spec["mttr_s"])
+        mtbf = _positive(spec["mtbf_s"], f"failures.{g}.mtbf_s")
+        mttr = _positive(spec["mttr_s"], f"failures.{g}.mttr_s")
         for tgt in _targets(project, g, spec):
             ivs = down_intervals(seed, g, tgt, mtbf, mttr, dur, dist)
+            generated_count += len(ivs)
+            if generated_count > MAX_RAW_INTERVALS:
+                raise ValueError(f"failures: raw interval budget {MAX_RAW_INTERVALS} exceeded across targets")
             if g == "links":
                 lids = [tgt]
             else:
-                lids = [lid for lid, l in project["links"].items() if tgt in (l["a"]["dev"], l["b"]["dev"])]
+                links = project.get("links") or {}
+                if not isinstance(links, dict):
+                    raise ValueError("project.links: obyekt bo'lsin")
+                lids = []
+                for lid, link in links.items():
+                    if (not isinstance(link, dict)
+                            or not all(isinstance(link.get(end), dict) for end in ("a", "b"))):
+                        raise ValueError(f"project.links.{lid}: a/b endpoint obyekt bo'lsin")
+                    if tgt in (link["a"].get("dev"), link["b"].get("dev")):
+                        lids.append(lid)
+            raw_count += len(ivs) * len(lids)
+            if raw_count > MAX_RAW_INTERVALS:
+                raise ValueError(f"failures: raw interval budget {MAX_RAW_INTERVALS} exceeded after device fan-out")
             for lid in lids:
                 raw.setdefault(lid, []).extend((a, b, tgt) for a, b in ivs)
     out = {}
@@ -134,6 +215,9 @@ def link_down_map(project, sc):
 
 def expand(project, sc):
     """failures -> oddiy link_down/link_up hodisalari (vaqt bo'yicha saralangan)."""
+    errs = _input_errors(project, sc)
+    if errs:
+        raise ValueError("; ".join(errs))
     if not sc.get("failures"):
         return sc
     out = copy.deepcopy(sc)

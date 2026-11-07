@@ -187,13 +187,9 @@ def emit(**kw):
 
 
 def rate_str(v):
-    """'5Mbps' | 5 (Mbit/s) | '500kbps' -> ns-3 DataRate satri."""
-    if isinstance(v, (int, float)):
-        return f"{v}Mbps"
-    s = str(v).strip().replace(" ", "")
-    if s.replace(".", "", 1).isdigit():
-        return s + "Mbps"
-    return s.replace("Mbit/s", "Mbps").replace("kbit/s", "kbps")
+    """Canonical integer bit/s, including numeric values printed in exponent form."""
+    from lab.model import parse_rate
+    return f"{int(parse_rate(v))}bps"
 
 
 def time_str(v):
@@ -617,7 +613,10 @@ def main(inp_path, out_path):
             emit(log=f"ilova {app.get('id')}: {dst} da IP yo'q")
             continue
         port = 9000 + i
-        start, stop = float(app.get("start", 1)), float(app.get("stop", duration))
+        start = float(app.get("start", 1))
+        # All engines clip finite windows to the scenario. Do this before
+        # ns.Seconds(): a huge user stop must never overflow native time.
+        stop = min(float(app.get("stop", duration)), duration)
         typ = app.get("type", "udp")
         if fw_on:
             # ns-3 da iptables yo'q: model (lab.firewall) bloklagan oqim ishga tushirilmaydi
@@ -661,7 +660,10 @@ def main(inp_path, out_path):
             sa = srv.Install(nodes[dst]); sa.Start(ns.Seconds(0.0))
             cl = ns.UdpEchoClientHelper(family.address(dip).ConvertTo(), port)
             cl.SetAttribute("MaxPackets", ns.UintegerValue(10 ** 7))
-            cl.SetAttribute("Interval", ns.TimeValue(ns.Seconds(float(app.get("interval", 0.2)))))
+            # No second echo inside the scenario needs an interval longer than
+            # its entire duration; clip before scheduling to avoid time overflow.
+            interval = min(float(app.get("interval", 0.2)), duration)
+            cl.SetAttribute("Interval", ns.TimeValue(ns.Seconds(interval)))
             cl.SetAttribute("PacketSize", ns.UintegerValue(int(app.get("size", 64))))
             ca = cl.Install(nodes[src])
         else:

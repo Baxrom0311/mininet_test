@@ -21,6 +21,7 @@ shart; aks holda bu qabul qiluvchiga oqim yetmaydi.
 import ipaddress
 
 from lab.model import parse_ifname
+from lab.validation_numbers import integer, packet_rate
 
 MCAST_NET = ipaddress.ip_network("224.0.0.0/4")
 LINK_LOCAL = ipaddress.ip_network("224.0.0.0/24")
@@ -28,33 +29,58 @@ MCAST_PORT = 5001
 
 
 def receivers_of(a):
+    if not isinstance(a, dict):
+        raise ValueError("multicast ilova obyekt bo'lsin")
     r = a.get("dst") if a.get("dst") is not None else a.get("receivers")
     if isinstance(r, str):
         r = [x.strip() for x in r.split(",") if x.strip()]
-    return list(r or [])
+    if r is None:
+        return []
+    if not isinstance(r, list) or any(not isinstance(name, str) or not name.strip() for name in r):
+        raise ValueError("qabul qiluvchilar dst: [nom, ...] yoki vergul bilan ajratilgan nomlar bo'lsin")
+    return list(r)
 
 
 def validate_app(project, a):
+    if not isinstance(a, dict):
+        return ["multicast ilova obyekt bo'lsin"]
     errs = []
     try:
-        g = ipaddress.ip_address(a.get("group", ""))
+        group = a.get("group", "")
+        if not isinstance(group, str):
+            raise ValueError
+        g = ipaddress.ip_address(group)
         if g not in MCAST_NET or g in LINK_LOCAL:
             raise ValueError
     except ValueError:
         errs.append("group — 224.0.1.0..239.255.255.255 multicast manzil (masalan 239.1.1.1)")
-    rc = receivers_of(a)
-    devs = project.get("devices") or {}
+    try:
+        rc = receivers_of(a)
+    except ValueError as e:
+        errs.append(str(e))
+        rc = []
+    devs = project.get("devices") if isinstance(project, dict) else None
+    if not isinstance(devs, dict):
+        devs = {}
     if not rc:
         errs.append("qabul qiluvchilar (dst: [...]) bo'sh")
     for r in rc:
         if r not in devs:
             errs.append(f"qabul qiluvchi '{r}' yo'q")
-        elif devs[r]["type"] not in ("host", "server"):
+        elif not isinstance(devs[r], dict) or devs[r].get("type") not in ("host", "server"):
             errs.append(f"qabul qiluvchi '{r}' host/server bo'lsin")
     if a.get("src") in rc:
         errs.append("manba qabul qiluvchilar ichida bo'lmasin")
-    if not a.get("rate"):
-        errs.append("rate kerak (masalan 4Mbps)")
+    try:
+        from lab.model import parse_rate
+        packet_rate(parse_rate(a.get("rate")), a.get("size", 1000))
+    except ValueError as e:
+        errs.append(str(e))
+    try:
+        # ns-3 multicast enables the 20-byte SeqTsSizeHeader in each payload.
+        integer(a.get("size", 1000), "size", minimum=20, maximum=65507)
+    except ValueError as e:
+        errs.append(str(e))
     return errs
 
 
