@@ -18,6 +18,8 @@ import argparse
 import json
 import sys
 
+from lab.topogen_plan import MAX_HOSTS_PER_LAN, MAX_TRANSIT_LINKS, plan
+
 
 class _B:
     def __init__(self, name):
@@ -51,7 +53,7 @@ class _B:
 
     def p2p(self, a, b, bw):
         self.net += 1
-        if self.net > 16000:
+        if self.net > MAX_TRANSIT_LINKS:
             raise ValueError("juda ko'p router-router kabeli (> 16000)")
         hi, lo = divmod(self.net, 64)
         pa, pb = self.np(a), self.np(b)
@@ -61,6 +63,8 @@ class _B:
 
     def lan(self, r, idx, hosts, bw, sw=None, x=0, y=0):
         """r router ostida /24 LAN (10.<idx//256>.<idx%256>.0/24), switch va hostlar."""
+        if not 0 <= hosts <= MAX_HOSTS_PER_LAN:
+            raise ValueError(f"hosts: 0..{MAX_HOSTS_PER_LAN} per LAN")
         if idx >= 65536:
             raise ValueError("LAN'lar soni juda ko'p")
         a, b = divmod(idx, 256)
@@ -120,7 +124,7 @@ class _B:
         return self.p
 
 
-def ring(routers=10, hosts=3, flows=20, core_bw=1000, lan_bw=100, name="ring"):
+def _ring(routers=10, hosts=3, flows=20, core_bw=1000, lan_bw=100, name="ring"):
     import math
     b = _B(name)
     k = max(3, int(routers))
@@ -138,7 +142,7 @@ def ring(routers=10, hosts=3, flows=20, core_bw=1000, lan_bw=100, name="ring"):
     return b.finish(int(flows))
 
 
-def star(branches=8, hosts=3, flows=20, core_bw=100, lan_bw=100, name="star"):
+def _star(branches=8, hosts=3, flows=20, core_bw=100, lan_bw=100, name="star"):
     b = _B(name)
     b.router("hq", 600, 100)
     for i in range(int(branches)):
@@ -148,7 +152,7 @@ def star(branches=8, hosts=3, flows=20, core_bw=100, lan_bw=100, name="star"):
     return b.finish(int(flows))
 
 
-def tree(depth=3, hosts=3, flows=20, core_bw=1000, lan_bw=100, name="tree"):
+def _tree(depth=3, hosts=3, flows=20, core_bw=1000, lan_bw=100, name="tree"):
     b = _B(name)
     depth = max(1, int(depth))
     b.router("r1", 600, 60)
@@ -170,7 +174,7 @@ def tree(depth=3, hosts=3, flows=20, core_bw=1000, lan_bw=100, name="tree"):
     return b.finish(int(flows))
 
 
-def campus(core=2, dist=4, access=8, hosts=5, flows=40, core_bw=10000, dist_bw=1000, lan_bw=100, name="campus"):
+def _campus(core=2, dist=4, access=8, hosts=5, flows=40, core_bw=10000, dist_bw=1000, lan_bw=100, name="campus"):
     b = _B(name)
     cores = [f"c{i}" for i in range(int(core))]
     for i, c in enumerate(cores):
@@ -189,17 +193,44 @@ def campus(core=2, dist=4, access=8, hosts=5, flows=40, core_bw=10000, dist_bw=1
     return b.finish(int(flows))
 
 
+_BUILDERS = {"ring": _ring, "star": _star, "tree": _tree, "campus": _campus}
+
+
+def _direct(kind, extra, **options):
+    unknown = set(extra) - {"ipv6"}
+    if unknown:
+        raise ValueError(f"{kind}: unsupported options: {', '.join(sorted(unknown))}")
+    return generate(kind, **options, **extra)
+
+
+def ring(routers=10, hosts=3, flows=20, core_bw=1000, lan_bw=100, name="ring", **extra):
+    return _direct("ring", extra, routers=routers, hosts=hosts, flows=flows,
+                   core_bw=core_bw, lan_bw=lan_bw, name=name)
+
+
+def star(branches=8, hosts=3, flows=20, core_bw=100, lan_bw=100, name="star", **extra):
+    return _direct("star", extra, branches=branches, hosts=hosts, flows=flows,
+                   core_bw=core_bw, lan_bw=lan_bw, name=name)
+
+
+def tree(depth=3, hosts=3, flows=20, core_bw=1000, lan_bw=100, name="tree", **extra):
+    return _direct("tree", extra, depth=depth, hosts=hosts, flows=flows,
+                   core_bw=core_bw, lan_bw=lan_bw, name=name)
+
+
+def campus(core=2, dist=4, access=8, hosts=5, flows=40, core_bw=10000, dist_bw=1000,
+           lan_bw=100, name="campus", **extra):
+    return _direct("campus", extra, core=core, dist=dist, access=access, hosts=hosts, flows=flows,
+                   core_bw=core_bw, dist_bw=dist_bw, lan_bw=lan_bw, name=name)
+
+
 KINDS = {"ring": ring, "star": star, "tree": tree, "campus": campus}
 
 
 def generate(kind, **kw):
-    if kind not in KINDS:
-        raise ValueError(f"tur {tuple(KINDS)} dan biri")
-    ipv6 = kw.pop("ipv6", False)
-    p = KINDS[kind](**kw)
-    if len(p["devices"]) > 3000:
-        raise ValueError("juda katta (> 3000 qurilma)")
-    return add_ipv6(p) if ipv6 else p
+    request = plan(kind, **kw)
+    p = _BUILDERS[kind](**request["options"])
+    return add_ipv6(p) if request["ipv6"] else p
 
 
 def add_ipv6(project):
@@ -249,7 +280,11 @@ def main(argv=None):
     ap.add_argument("--ipv6", action="store_true", help="IPv6 /64 + IPv6 scenario nusxasi")
     a = ap.parse_args(argv)
     kw = {k: v for k, v in vars(a).items() if k != "kind" and v is not None}
-    json.dump(generate(a.kind, **kw), sys.stdout, indent=1)
+    try:
+        project = generate(a.kind, **kw)
+    except ValueError as error:
+        ap.error(str(error))
+    json.dump(project, sys.stdout, indent=1)
     print()
 
 

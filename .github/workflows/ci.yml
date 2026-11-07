@@ -154,6 +154,8 @@ jobs:
         run: python -m unittest lab.tests.test_emulation_workers -v
       - name: Project validation and live update regression
         run: python -m unittest lab.tests.test_project_validation lab.tests.test_project_values lab.tests.test_project_preparation lab.tests.test_live_project_guards lab.tests.smoke_project_inputs -v
+      - name: Topology planning and traffic import regression
+        run: python -m unittest lab.tests.test_topogen lab.tests.test_traffic_validation lab.tests.test_generation_api lab.tests.smoke_generated_imports -v
       - name: Real network lock regression (no root or Mininet required)
         run: python -m unittest lab.tests.test_real_lock -v
       - name: Scale benchmark evidence regression (no root or Mininet required)
