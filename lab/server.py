@@ -37,6 +37,15 @@ PROJ_NAME_RE = re.compile(r"^[A-Za-z0-9_\-]{1,40}$")
 COOKIE = "netlab_token"
 
 
+def _topology_options(body):
+    # Preserve form clients' omitted-value convention for known options. Unknown
+    # keys reach the generator's schema check instead of being silently dropped.
+    from lab.topogen_plan import DEFAULTS
+    optional = set().union(*DEFAULTS.values(), {"ipv6"})
+    return {key: value for key, value in body.items()
+            if key != "kind" and not (key in optional and value in (None, ""))}
+
+
 def _read_templates():
     out = {"p4": {}, "sdn": {}}
     for kind, ext in (("p4", "*.p4"), ("sdn", "*.py")):
@@ -432,17 +441,18 @@ def create_app(driver_name="demo", token=None):
     @app.post("/api/topogen")
     def topogen(body: dict = Body(...)):
         """Topologiya generatori (ring | star | tree | campus) -> loyiha JSON (saqlanmaydi)."""
-        from lab.topogen import KINDS, generate
-        kind = body.get("kind")
-        allowed = {"routers", "branches", "depth", "core", "dist", "access", "hosts", "flows", "name"}
-        kw = {k: v for k, v in body.items() if k in allowed and v not in (None, "")}
-        if kind not in KINDS:
-            raise ValueError(f"kind: {' | '.join(KINDS)}")
-        p = generate(kind, **kw)
+        from lab.topogen import generate
+        p = generate(body.get("kind"), **_topology_options(body))
         errs = validate_project(p)
         if errs:
             raise ValueError("; ".join(errs[:5]))
         return p
+
+    @app.post("/api/topogen/plan")
+    def topogen_plan(body: dict = Body(...)):
+        """Count nodes, links and applications without allocating a topology."""
+        from lab.topogen import plan
+        return plan(body.get("kind"), **_topology_options(body))
 
     @app.post("/api/analysis/survivability")
     def survivability(body: dict = Body(...)):
