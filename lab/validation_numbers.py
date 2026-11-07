@@ -5,12 +5,15 @@ also be consumable by int(), which the simulation adapters use after validation.
 """
 
 import math
+import sys
 
 MAX_UINT64 = (1 << 64) - 1
 # float(MAX_UINT64) rounds UP to 2**64, outside ns-3's DataRate range.
 MAX_RATE_BPS = math.nextafter(float(1 << 64), 0)
 MIN_TIMER_S = 1e-9
 MAX_TIMER_S = 9223372036  # Whole seconds within signed 64-bit nanoseconds.
+# Room for squared distances and a speed-of-light propagation timer.
+MAX_POSITION = min(math.sqrt(sys.float_info.max) / 4, (MAX_TIMER_S - 3600) * 3e8 / 4)
 
 
 def number(value, name, minimum=None, maximum=None):

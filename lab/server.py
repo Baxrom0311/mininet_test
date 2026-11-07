@@ -279,7 +279,12 @@ def create_app(driver_name="demo", token=None):
 
     @app.post("/api/scenario/validate")
     def scenario_validate(body: dict = Body(...)):
-        return {"errors": validate_scenario(body.get("project") or {}, body.get("scenario") or {})}
+        project = body.get("project")
+        errors = validate_project(project)
+        if not errors:
+            from lab.project_shape import project_for_execution
+            errors = validate_scenario(project_for_execution(project), body.get("scenario"))
+        return {"errors": errors}
 
     @app.post("/api/traffic/import")
     def traffic_import(body: dict = Body(...)):

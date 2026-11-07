@@ -166,20 +166,35 @@ def _check_ip(value, where, errors):
     if not value:
         return
     try:
-        ipaddress.ip_interface(value)
+        address = ipaddress.ip_interface(value)
         if "/" not in value:
             errors.append(f"{where}: IP prefiks bilan yozilsin (masalan 10.0.0.1/24)")
+        if address.version == 4 and address.network.prefixlen < 31 and address.ip in (address.network.network_address, address.network.broadcast_address):
+            errors.append(f"{where}: IPv4 network/broadcast interfeys manzili bo'la olmaydi")
     except ValueError:
         errors.append(f"{where}: noto'g'ri IP '{value}'")
 
 
 def validate_project(p):
     """Xatolar ro'yxatini qaytaradi (bo'sh — hammasi joyida)."""
+    from lab.project_shape import project_for_execution, validate_shape
+    from lab.project_values import validate_values
+    errors = validate_shape(p)
+    if errors:
+        return errors
+    errors = validate_values(p)
+    if errors:
+        return errors
+    return _validate_project(project_for_execution(p))
+
+
+def _validate_project(p):
+    """Semantic checks run only after container and scalar checks pass."""
     errors = []
     devs = p.get("devices") or {}
     ids = {}
     for name, d in devs.items():
-        if not NAME_RE.match(name):
+        if not NAME_RE.fullmatch(name):
             errors.append(f"'{name}': nom kichik lotin harf bilan boshlansin, 1-8 belgi [a-z0-9]")
         if d.get("type") not in DEVICE_TYPES:
             errors.append(f"'{name}': noma'lum tur '{d.get('type')}'")
@@ -205,12 +220,20 @@ def validate_project(p):
                         errors.append(f"{name}/{ifn}: ip6 IPv6 bo'lishi kerak")
                 except ValueError:
                     pass  # _check_ip already reports malformed addresses
+            # Bound interface spellings before int() parses port/VLAN digits.
+            if len(ifn) > IFNAMSIZ:
+                errors.append(f"{name}/{ifn}: interfeys nomi {IFNAMSIZ} belgidan uzun (Linux cheklovi)")
+                continue
             dn, _pt, vl = parse_ifname(ifn)
+            if ifn != "lo" and (dn != name or _pt is None or not 1 <= _pt <= 255):
+                errors.append(f"{name}/{ifn}: interfeys <qurilma>-eth<port 1..255>[.<vlan>] bo'lsin")
+            elif ifn != "lo":
+                expected = ifname(name, _pt) + (f".{vl}" if vl is not None else "")
+                if ifn != expected:
+                    errors.append(f"{name}/{ifn}: interfeys nomi {expected} bo'lsin")
             if vl is not None:
                 if dn != name or not 1 <= vl <= 4094:
                     errors.append(f"{name}/{ifn}: subinterfeys nomi <qurilma>-eth<port>.<vlan 1..4094>")
-                elif len(ifn) > IFNAMSIZ:
-                    errors.append(f"{name}/{ifn}: interfeys nomi {IFNAMSIZ} belgidan uzun (Linux cheklovi)")
         for pk, pc in (cfg.get("ports") or {}).items():
             if d["type"] not in VLAN_TYPES:
                 errors.append(f"{name}: VLAN port sozlamasi faqat switch'da")
@@ -270,6 +293,10 @@ def validate_project(p):
     used = set()
     wifi_sta = {}
     for lid, l in (p.get("links") or {}).items():
+        try:
+            normalize_link_params(l.get("params"))
+        except ValueError as ex:
+            errors.append(f"link {lid}: {ex}")
         for side in ("a", "b"):
             e = l.get(side) or {}
             if e.get("dev") not in devs:
@@ -295,15 +322,22 @@ def validate_project(p):
     for sta, n in wifi_sta.items():
         if n > 1:
             errors.append(f"{sta}: bitta qurilma faqat bitta Wi-Fi AP'ga ulanadi")
+    controller_ports = {}
     for cname, c in (p.get("controllers") or {}).items():
-        if not NAME_RE.match(cname):
+        if not NAME_RE.fullmatch(cname):
             errors.append(f"kontroller '{cname}': noto'g'ri nom")
         port = c.get("port")
         if not isinstance(port, int) or not (1024 <= port <= 65535):
             errors.append(f"kontroller '{cname}': port 1024..65535")
+        elif port in controller_ports:
+            errors.append(f"kontroller '{cname}': port {port} '{controller_ports[port]}' bilan takrorlangan")
+        else:
+            controller_ports[port] = cname
     for pname in (p.get("p4_programs") or {}):
-        if not NAME_RE.match(pname) and not re.match(r"^[a-z][a-z0-9_]{0,23}$", pname):
+        if not NAME_RE.fullmatch(pname) and not re.fullmatch(r"[a-z][a-z0-9_]{0,23}", pname):
             errors.append(f"P4 dastur '{pname}': noto'g'ri nom")
+    if errors:
+        return errors
     from lab.services import validate_services   # (aylanma import bo'lmasin)
     errors += validate_services(p)
     from lab.bgp import validate_bgp
@@ -325,31 +359,41 @@ def validate_project(p):
     return errors
 
 
-def normalize_link_params(params):
+def normalize_link_params(params, *, horizon=3600):
+    """Validate link values before applying them; return a fresh defaulted dict."""
+    from lab.validation_numbers import MAX_TIMER_S, integer, number
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        raise ValueError("link params: object required")
     out = dict(DEFAULT_LINK)
-    for k, v in (params or {}).items():
+    for k, v in params.items():
         if k in out and v not in (None, ""):
             out[k] = v
     if out["medium"] not in ("wire", "wifi"):
         raise ValueError("medium: wire | wifi")
     if out["qdisc"] not in QDISCS:
         raise ValueError(f"qdisc: {' | '.join(QDISCS)}")
-    out["bw"] = float(out["bw"])
-    out["loss"] = float(out["loss"])
-    out["queue"] = int(out["queue"])
+    # ns-3 DataRate is integer bit/s; less than 1 bit/s becomes a zero rate.
+    out["bw"] = number(out["bw"], "bw (Mbit/s)", minimum=1e-6, maximum=10000)
+    out["loss"] = number(out["loss"], "loss (%)", minimum=0, maximum=100)
+    out["queue"] = integer(out["queue"], "queue", minimum=1, maximum=100000)
     for k in ("delay", "jitter"):
-        v = str(out[k]).strip()
+        if isinstance(out[k], bool) or not isinstance(out[k], (int, float, str)):
+            raise ValueError(f"{k}: duration required (masalan 5ms)")
+        try:
+            v = str(out[k]).strip()
+        except ValueError:
+            raise ValueError(f"{k}: finite duration required") from None
         if re.fullmatch(r"\d+(\.\d+)?", v):
             v += "ms"
-        if not re.fullmatch(r"\d+(\.\d+)?(us|ms|s)", v):
-            raise ValueError(f"{k}: '{v}' noto'g'ri (masalan 5ms)")
+        match = re.fullmatch(r"(\d+(?:\.\d+)?)(us|ms|s)", v)
+        if not match:
+            raise ValueError(f"{k}: duration required (masalan 5ms)")
+        seconds = number(match[1], k, minimum=0) * {"us": 1e-6, "ms": .001, "s": 1}[match[2]]
+        # Leave room for a packet scheduled at the largest scenario horizon.
+        number(seconds, k, minimum=0, maximum=MAX_TIMER_S - horizon)
         out[k] = v
-    if not (0 < out["bw"] <= 10000):
-        raise ValueError("bw 0..10000 Mbit/s")
-    if not (0 <= out["loss"] <= 100):
-        raise ValueError("loss 0..100 %")
-    if not (1 <= out["queue"] <= 100000):
-        raise ValueError("queue 1..100000 paket")
     return out
 
 

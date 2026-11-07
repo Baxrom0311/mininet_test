@@ -1048,7 +1048,7 @@ exit 0
     def add_device(self, project, name):
         with self.lock:
             self._require_running()
-            self._set_project(project)
+            self._set_project(project, collection="devices", key=name)
             d = self.project["devices"].get(name)
             if not d:
                 raise DriverError(f"{name} loyihada yo'q")
@@ -1088,7 +1088,7 @@ exit 0
         with self.lock:
             self._require_running()
             old = self.project["devices"].get(name)
-            self._set_project(project)
+            self._set_project(project, collection="devices", key=name)
             d = self.project["devices"][name]
             t = d["type"]
             if t in ("host", "server", "router"):
@@ -1188,7 +1188,7 @@ exit 0
     def add_link(self, project, link_id):
         with self.lock:
             self._require_running()
-            self._set_project(project)
+            self._set_project(project, collection="links", key=link_id)
             l = self.project["links"].get(link_id)
             if not l:
                 raise DriverError(f"kabel {link_id} loyihada yo'q")
@@ -1250,8 +1250,10 @@ exit 0
             l = self.project["links"].get(link_id)
             if not link or not l:
                 raise DriverError(f"kabel {link_id} topilmadi")
+            if up is not None and type(up) is not bool:
+                raise DriverError("up: boolean required")
+            p = normalize_link_params(params) if params is not None else None
             if params is not None:
-                p = normalize_link_params(params)
                 opts, _ok = self._tc_opts(link_id, p)
                 for intf in (link.intf1, link.intf2):
                     intf.params.update(opts)      # keyingi TCReapply ham yangi qiymatlarni olsin
@@ -1261,7 +1263,7 @@ exit 0
                 state = "up" if up else "down"
                 link.intf1.ifconfig(state)
                 link.intf2.ifconfig(state)
-                l["up"] = bool(up)
+                l["up"] = up
             self.bus.publish({"type": "link", "link": link_id, "up": l.get("up", True),
                               "params": l.get("params")})
             return {"ok": True, "link": l}
@@ -1456,7 +1458,7 @@ exit 0
     def controller_restart(self, project, cname):
         with self.lock:
             self._require_running()
-            self._set_project(project)
+            self._set_project(project, collection="controllers", key=cname)
             if cname not in self.project.get("controllers", {}):
                 raise DriverError(f"kontroller {cname} yo'q")
             p = self._ctrl_procs.pop(cname, None)
@@ -1492,7 +1494,7 @@ exit 0
         def work():
             self._require_running()
             if not _locked:
-                self._set_project(project)
+                self._set_project(project, collection="devices", key=name, device_type="p4switch")
             d = self.project["devices"].get(name)
             if not d or d["type"] != "p4switch":
                 raise DriverError(f"{name} P4 switch emas")
