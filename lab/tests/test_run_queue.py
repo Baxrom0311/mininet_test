@@ -96,8 +96,8 @@ class QueueTests(unittest.TestCase):
         process = Mock()
         process.poll.return_value = None
         stop_events = []
-        def fail(driver, sc, prog, log, processes, stop):
-            processes.append(process); stop_events.append(stop)
+        def fail(driver, sc, prog, log, workers):
+            workers.processes.append(process); stop_events.append(workers.stop)
             raise RuntimeError("cancel during measurement")
         with patch.object(emulation, "_run", side_effect=fail), self.assertRaises(RuntimeError):
             emulation.run(None, {})

@@ -56,8 +56,10 @@ fi
 
 if [ "$WANT_SDN" -eq 1 ]; then
   echo "== os-ken (SDN kontroller) =="
-  apt-get install -y python3-os-ken || {
-    echo "python3-os-ken topilmadi — pip orqali os-ken o'rnatiladi (venv ichida)"; PIP_EXTRA="os-ken"; }
+  # Eslatma: Ubuntu 26.04 python3-os-ken 4.x paketida os_ken.cmd (osken-manager) yo'q —
+  # kontroller ishga tushmaydi. Shuning uchun venv'ga os-ken==3.0.0 (cmd bilan) o'rnatamiz.
+  apt-get install -y python3-os-ken || echo "python3-os-ken topilmadi — pip orqali o'rnatiladi"
+  PIP_EXTRA="os-ken==3.0.0"
 fi
 
 if [ "$WANT_P4" -eq 1 ]; then

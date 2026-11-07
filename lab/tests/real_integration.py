@@ -302,7 +302,7 @@ def t_natdhcp(drv, caps):
     _rp, leases = resolve_dhcp(proj)
     drv.start(proj)
     for ls in leases:
-        got = drv.net.get(ls["client"]).cmd(f"ip -4 -o addr show dev {ls['iface']}")
+        got = drv.net.get(ls["client"]).cmd(f"ip -color=never -4 -o addr show dev {ls['iface']}")
         check(f"inet {ls['ip']}/" in got, f"DHCP: {ls['client']} = {ls['ip']} (model bilan bir xil)")
     rt = drv.net.get("pc1").cmd("ip route show default")
     check("10.0.1.1" in rt, f"DHCP: default gateway {rt.strip()}")

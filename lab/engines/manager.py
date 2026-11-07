@@ -251,76 +251,36 @@ class RunManager:
         return f"{who}.{param.get('field')}"
 
     def start_study(self, project, scenario_name, engine, param, values, param2=None, values2=None):
-        """Parametrik tadqiqot (ketma-ket ishga tushirishlar). Bitta parametr — chiziqli grafik;
-        ikkinchi parametr (param2/values2) berilsa — barcha kombinatsiyalar (to'r), natija issiqlik
-        xaritasi. param: {"kind": "link"|"app"|"ap", "link"|"app"|"ap": nom, "field": ...}."""
-        project = copy.deepcopy(project)
-        sc = (project.get("scenarios") or {}).get(scenario_name)
-        if not sc:
-            raise ValueError(f"ssenariy '{scenario_name}' yo'q")
-        if engine == "mininet" and sc.get("ip_version", 4) == 6:
-            raise ValueError("IPv6 faqat analytic va ns3 dvigatellarida qo'llab-quvvatlanadi")
-        errs = validate_project(project) + validate_scenario(project, sc)
-        if errs:
-            raise ValueError("; ".join(errs[:5]))
-        eng = {e["id"]: e for e in self.engines()}.get(engine)
-        if not eng or not eng["available"]:
-            raise ValueError(f"dvigatel '{engine}' mavjud emas")
-        values = list(values or [])
-        if not (2 <= len(values) <= MAX_STUDY_VALUES):
-            raise ValueError(f"qiymatlar soni 2..{MAX_STUDY_VALUES}")
-        two_d = bool(param2)
-        values2 = list(values2 or []) if two_d else [None]
-        if two_d:
-            if len(values2) < 2:
-                raise ValueError("ikkinchi parametr uchun kamida 2 qiymat")
-            if self._param_label(param) == self._param_label(param2):
-                raise ValueError("ikki parametr bir xil bo'lmasin")
-            if len(values) * len(values2) > self.MAX_STUDY_RUNS:
-                raise ValueError(f"kombinatsiyalar soni {len(values) * len(values2)} > {self.MAX_STUDY_RUNS}")
-        variants = []
-        for j, v2 in enumerate(values2):
-            for i, v in enumerate(values):
-                p2, sc2 = copy.deepcopy(project), copy.deepcopy(sc)
-                self._apply_param(p2, sc2, param, v, engine)
-                if two_d:
-                    self._apply_param(p2, sc2, param2, v2, engine)
-                variants.append((i, j, v, v2, p2, sc2))
-        pname = project.get("name") or "untitled"
-        self._dir(pname)
-        study_id = new_run_id()
-        pdesc = {**param, "label": self._param_label(param)}
-        pdesc2 = {**param2, "label": self._param_label(param2)} if two_d else None
+        """Validate a complete study first; the legacy runner retains bounded producer execution."""
+        from lab.engines.studies import prepare_study
+        plan = prepare_study(self, project, scenario_name, engine, param, values, param2, values2)
+        jobs = plan.jobs
 
-        def one(k, i, j, v, v2, p2, sc2, n):
-            rid = f"{study_id}-v{k + 1:02d}"
-            label = f"{pdesc['label']}={v}" + (f", {pdesc2['label']}={v2}" if two_d else "")
+        def one(job):
+            extra = job.extra
             with self._lock:
-                self.active[rid] = {"project": pname, "scenario_name": scenario_name, "engine": engine,
-                                    "progress": 0.0, "created": time.time(), "study_id": study_id, "label": label}
-            self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "index": k, "total": n,
-                              "value": label, "run_id": rid})
-            extra = {"study_id": study_id, "study_param": pdesc, "study_value": v, "study_index": i, "label": label}
-            if two_d:
-                extra.update(study_param2=pdesc2, study_value2=v2, study_index2=j)
-            self._study_worker(rid, pname, p2, scenario_name, sc2, engine, extra=extra)
+                self.active[job.run_id] = {"project": job.project_name, "scenario_name": scenario_name,
+                                           "engine": engine, "progress": 0.0, "created": time.time(), **extra}
+            self.bus.publish({"type": "study", "study_id": plan.study_id, "project": job.project_name,
+                              "index": extra["study_position"], "total": len(jobs),
+                              "value": extra["label"], "run_id": job.run_id})
+            self._study_worker(*job.args())
 
         def go():
-            n = len(variants)
-            par = self.study_parallelism(engine)
-            if par <= 1:
-                for k, var in enumerate(variants):
-                    one(k, *var, n)
+            parallelism = jobs[0].resource_parallelism
+            if parallelism <= 1:
+                for job in jobs:
+                    one(job)
             else:
-                # ns-3: har ishga tushirish alohida jarayon — variantlar bir vaqtda (CPU yadrolari bo'yicha)
                 from concurrent.futures import ThreadPoolExecutor
-                with ThreadPoolExecutor(max_workers=par) as ex:
-                    for f in [ex.submit(one, k, *var, n) for k, var in enumerate(variants)]:
-                        f.result()
-            self.bus.publish({"type": "study", "study_id": study_id, "project": pname, "done": True, "total": n})
+                with ThreadPoolExecutor(max_workers=parallelism) as executor:
+                    for future in [executor.submit(one, job) for job in jobs]:
+                        future.result()
+            self.bus.publish({"type": "study", "study_id": plan.study_id, "project": jobs[0].project_name,
+                              "done": True, "total": len(jobs)})
 
         threading.Thread(target=go, daemon=True).start()
-        return {"study_id": study_id, "runs": len(variants)}
+        return plan.response()
 
     @staticmethod
     def study_parallelism(engine):

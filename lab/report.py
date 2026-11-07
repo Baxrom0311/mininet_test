@@ -447,16 +447,46 @@ def _plabel(p):
     return str(p or "")
 
 
-def study_report(runs):
-    runs = [r for r in runs if r and r.get("status") == "done"]
+def study_report(runs, state=None):
+    from lab.engines.study_status import describe
+    runs = [r for r in runs if r]
     if not runs:
-        return page("Tadqiqot", '<p class="mut">tugagan natija yo\'q</p>')
+        return page("Tadqiqot", '<p class="mut">tadqiqot natijasi yo\'q</p>')
+    state = state or describe(runs)
+    successful = [r for r in runs if r.get("status") == "done"]
+    def metric(run, fid, name):
+        return _metric_of(run, fid, name) if run.get("status") == "done" else None
     p1 = _plabel(runs[0].get("study_param"))
     two_d = any(r.get("study_param2") for r in runs)
-    flows = sorted(set().union(*[set(_visible_flows(r)) for r in runs]) | set().union(*[set(r.get("apps") or {}) for r in runs]))
+    flows = sorted(set().union(*[set(_visible_flows(r)) for r in successful])
+                   | set().union(*[set(r.get("apps") or {}) for r in successful]))
     out = [kv([("Parametr", p1), ("2-parametr", _plabel(runs[0].get("study_param2")) if two_d else "—"),
-               ("Natijalar", len(runs)), ("Ssenariy", runs[0].get("scenario_name")),
+               ("Holat", state["status"]), ("Rejalashtirilgan", state["planned_runs"] if state["plan_known"] else "noma'lum"),
+               ("Kuzatilgan", state["observed_runs"]), ("Natijalar", len(successful)), ("Ssenariy", runs[0].get("scenario_name")),
                ("Dvigatel", runs[0].get("engine_label") or runs[0].get("engine"))])]
+    if not state["plan_known"]:
+        out.append('<p class="mut">To\'liq reja aniqlanmagan; kuzatilgan natijalar barcha variantlar tugaganini isbotlamaydi.</p>')
+    if state["missing_run_ids"]:
+        out.append('<p class="bad">Yetishmayotgan variantlar: ' + e(", ".join(state["missing_run_ids"])) + '</p>')
+    if state["invalid_run_ids"]:
+        out.append('<p class="bad">Noto\'g\'ri variant metama\'lumoti: ' + e(", ".join(map(str, state["invalid_run_ids"]))) + '</p>')
+    if state.get("orphaned_run_ids"):
+        out.append('<p class="bad">Mahalliy worker qolmagan variantlar: ' + e(", ".join(state["orphaned_run_ids"])) + '</p>')
+    out.append("<h2>Variantlar holati</h2>")
+    out.append(table(["Run ID", "Qiymat", "2-qiymat", "Holat", "Xato"],
+                     [[r.get("run_id"), r.get("study_value"), r.get("study_value2"), r.get("status"), r.get("error")]
+                      for r in sorted(runs, key=lambda r: (r.get("study_position") if type(r.get("study_position")) is int else 49,
+                                                          str(r.get("run_id"))))]))
+    if not successful:
+        out.append('<p class="mut">Tugagan muvaffaqiyatli natija yo\'q; kutilayotgan va xatoli variantlar yuqorida ko\'rsatilgan.</p>')
+    axes_valid = all(value is None or type(value) is int and 0 <= value < 49
+                     for run in runs for value in (run.get("study_index"), run.get("study_index2")))
+    coordinates = [(run.get("study_index") or 0, (run.get("study_index2") or 0) if two_d else None)
+                   for run in runs] if axes_valid else []
+    if (state["planning"] == "invalid" or state["invalid_run_ids"] or not axes_valid
+            or len(set(coordinates)) != len(runs)):
+        out.append('<p class="bad">Variant koordinatalari yoki reja noto\'g\'ri; grafiklar hisoblanmadi.</p>')
+        return page(f"Tadqiqot: {p1}", "".join(out), sub=f"study_id {runs[0].get('study_id') or '—'}")
     if not two_d:
         rs = sorted(runs, key=lambda r: r.get("study_index") or 0)
         xl = [str(r.get("study_value")) for r in rs]
@@ -465,13 +495,13 @@ def study_report(runs):
         for r in rs:
             row = [str(r.get("study_value"))]
             for fid in flows:
-                v = _metric_of(r, fid, "avg_thr_bps")
-                row.append(v if v is not None else _metric_of(r, fid, "mos"))
+                v = metric(r, fid, "avg_thr_bps")
+                row.append(v if v is not None else metric(r, fid, "mos"))
             rows.append(row)
         out.append(table([p1] + [f"{f} (Mbit/s | MOS)" for f in flows], rows, num=tuple(range(1, len(flows) + 1))))
         out.append("<h2>Grafiklar</h2><div class='charts'>")
-        for metric, title, unit in METRICS:
-            ser = [(fid, [(i, _metric_of(r, fid, metric)) for i, r in enumerate(rs)]) for fid in flows]
+        for field, title, unit in METRICS:
+            ser = [(fid, [(i, metric(r, fid, field)) for i, r in enumerate(rs)]) for fid in flows]
             ser = [s for s in ser if any(y is not None for _x, y in s[1])]
             if ser:
                 out.append(svg_lines(ser, f"{title} vs {p1}", unit, xlabels=xl))
@@ -483,8 +513,8 @@ def study_report(runs):
         grid = {(r.get("study_index") or 0, r.get("study_index2") or 0): r for r in runs}
         out.append(f"<h2>Issiqlik xaritalari ({e(p1)} × {e(p2)})</h2><div class='charts'>")
         for fid in flows:
-            for metric, title, unit in METRICS:
-                m = [[_metric_of(grid[(i, j)], fid, metric) if (i, j) in grid else None for i, _x in xs] for j, _y in ys]
+            for field, title, unit in METRICS:
+                m = [[metric(grid[(i, j)], fid, field) if (i, j) in grid else None for i, _x in xs] for j, _y in ys]
                 if any(v is not None for row in m for v in row):
                     out.append(svg_heatmap([x for _i, x in xs], [f"{p2}={y}" for _j, y in ys], m,
                                            f"{fid}: {title}", unit))

@@ -32,39 +32,76 @@ class QueuedRunManager(manager.RunManager):
                                    "NETLAB_RUN_MAX_WORKERS" if self.auto_workers else "NETLAB_RUN_WORKERS")
         memory_mb = positive_integer(os.environ.get("NETLAB_RUN_MEMORY_MB", "2048"), "NETLAB_RUN_MEMORY_MB", 1048576)
         self.resource_monitor = resource_monitor or ResourceMonitor()
-        self._resource_lock = threading.Lock()
         self.store = RunStore(database or Path(manager.RESULTS_DIR, "runs.sqlite3"))
         self.result_index = ResultIndex(self.store, manager.RESULTS_DIR)
         self.futures, self.tokens = {}, {}
         self.payloads = {}
         self.queue_lock = threading.RLock()
         self.closed = False
+        self._study_notices = {}
         self.workers = workers
-        self.study_parallelism("ns3")  # Reject invalid producer configuration before starting threads.
+        self.study_parallelism("ns3")  # Reject invalid per-study limits before starting threads.
         self.local = threading.local()
         self.real_lock = threading.Lock()
         from lab.campaigns import CampaignManager
         self.campaigns = CampaignManager(self)
-        self.executor = (AdaptiveExecutor(ceiling=workers, memory_mb=memory_mb, monitor=self.resource_monitor)
-                         if self.auto_workers else ThreadPoolExecutor(max_workers=workers, thread_name_prefix="netlab-run"))
+        self.executor = AdaptiveExecutor(ceiling=workers, memory_mb=memory_mb, monitor=self.resource_monitor,
+                                         adaptive=self.auto_workers)
+
+    def start_study(self, project, scenario_name, engine, param, values, param2=None, values2=None):
+        from lab.engines.studies import prepare_study
+        with self.queue_lock:
+            if self.closed:
+                raise ValueError("run queue closed")
+        plan = prepare_study(self, project, scenario_name, engine, param, values, param2, values2)
+        with self.queue_lock:
+            self._study_notices[plan.study_id] = {"type": "study", "study_id": plan.study_id,
+                "project": plan.jobs[0].project_name, "total": len(plan.jobs),
+                "run_ids": [job.run_id for job in plan.jobs], "submitted": False}
+            try:
+                submit(self, plan.jobs)
+            except BaseException:
+                self._study_notices.pop(plan.study_id, None)
+                raise
+            self._study_notices[plan.study_id]["submitted"] = True
+            self._maybe_study_done(plan.study_id)
+        return plan.response()
+
+    def _maybe_study_done(self, study_id):
+        # This notification follows saved cancellation/results, not Future.cancel's
+        # synchronous callbacks. Never capture projects in long-lived callbacks.
+        try:
+            with self.queue_lock:
+                notice = self._study_notices.get(study_id)
+                if not notice or not notice["submitted"] or any(rid in self.futures for rid in notice["run_ids"]):
+                    return
+                rows = self.store.list(notice["project"], study_id=study_id)
+                states = [row["status"] for row in rows]
+                pending_metadata = any(state not in TERMINAL for state in states)
+                state = ("incomplete" if len(rows) != notice["total"] or any(s not in TERMINAL for s in states)
+                         else "done" if all(s == "done" for s in states)
+                         else "failed" if "error" in states else "interrupted" if "interrupted" in states else "cancelled")
+                notified = notice.get("notified", False)
+                if pending_metadata:
+                    notice["notified"] = True  # Keep ownership evidence for read-only orphan diagnosis.
+                else:
+                    self._study_notices.pop(study_id, None)
+                if notified:
+                    return
+            self.bus.publish({**{key: value for key, value in notice.items() if key not in ("submitted", "notified")},
+                              "done": True, "status": state})
+        except Exception:
+            pass  # A best-effort event must not mask a saved result or storage failure.
 
     def study_parallelism(self, engine):
         if engine != "ns3":
             return 1
         setting = os.environ.get("NETLAB_NS3_PARALLEL", "").strip()
-        # These threads submit jobs and wait; the global executor makes resource decisions.
+        # Per-study admission bound; the global dispatcher also enforces CPU/RAM limits.
         return min(self.workers, positive_integer(setting, "NETLAB_NS3_PARALLEL")) if setting else self.workers
 
     def resource_status(self):
-        if self.auto_workers:
-            return self.executor.status()
-        with self._resource_lock:
-            resources = self.resource_monitor.read().public()
-        with self.queue_lock:
-            return {"mode": "fixed", "ceiling": self.workers, "limit": self.workers,
-                    "active": sum(f.running() for f in self.futures.values()),
-                    "queued": sum(not f.running() and not f.done() for f in self.futures.values()),
-                    "resources": resources}
+        return self.executor.status()
 
     def _dispatch_done(self, project, rid, future):
         if future.cancelled() or future.exception() is None:
@@ -72,6 +109,7 @@ class QueuedRunManager(manager.RunManager):
         with self.queue_lock:
             if rid not in self.futures:
                 return  # Normal execution has already saved its result and released ownership.
+            data = {}
             try:
                 data = self.store.get(project, rid)
                 if data["status"] not in TERMINAL:
@@ -84,6 +122,7 @@ class QueuedRunManager(manager.RunManager):
                 self.futures.pop(rid, None)
                 self.tokens.pop(rid, None)
                 self.payloads.pop(rid, None)
+                self._maybe_study_done(data.get("study_id"))
 
     def _enqueue(self, rid, pname, project, name, sc, engine, extra=None):
         job = PreparedRun(rid, pname, project, name, sc, engine, extra)
@@ -91,16 +130,6 @@ class QueuedRunManager(manager.RunManager):
 
     def _launch_worker(self, *args):
         self._enqueue(*args)
-
-    def _study_worker(self, *args, **kwargs):
-        if self.closed:
-            with self._lock:
-                self.active.pop(args[0], None)
-            return
-        try:
-            self._enqueue(*args, **kwargs).result()
-        except CancelledError:
-            pass
 
     def _execute_prepared(self, rid, resource_engine=None):
         with self.queue_lock:
@@ -119,6 +148,10 @@ class QueuedRunManager(manager.RunManager):
                 with self._lock:
                     self.active.pop(rid, None)
             else:
+                if extra and extra.get("study_id"):
+                    self.bus.publish({"type": "study", "study_id": extra["study_id"], "project": pname,
+                        "index": extra["study_position"], "total": extra["study_total"],
+                        "value": extra["label"], "run_id": rid})
                 if engine == "mininet":
                     with self.real_lock:
                         super()._worker(rid, pname, project, name, sc, engine, extra)
@@ -144,6 +177,8 @@ class QueuedRunManager(manager.RunManager):
                 self.tokens.pop(rid, None)
                 self.payloads.pop(rid, None)
             self.local.run_id = None
+            if extra and extra.get("study_id"):
+                self._maybe_study_done(extra["study_id"])
 
     def _pub(self, rid, **kw):
         token = self.tokens.get(rid)
@@ -226,6 +261,7 @@ class QueuedRunManager(manager.RunManager):
                     self.tokens.pop(rid, None)
                     self.futures.pop(rid, None)
                     self.payloads.pop(rid, None)
+                    self._maybe_study_done(data.get("study_id"))
             else:
                 data["status"] = "cancelling"
                 self.store.save(data)

@@ -15,6 +15,8 @@ class PreparedRun:
     scenario: dict
     engine: str
     extra: dict | None = None
+    resource_group: str | None = None
+    resource_parallelism: int | None = None
 
     def args(self):
         return (self.run_id, self.project_name, self.project, self.scenario_name, self.scenario, self.engine, self.extra)
@@ -54,7 +56,8 @@ def submit(queue, jobs, campaign=None):
                     queue.tokens[job.run_id] = threading.Event()
                     queue.payloads[job.run_id] = job
             for job in jobs:
-                future = queue.executor.submit(queue._execute_prepared, job.run_id, resource_engine=job.engine)
+                future = queue.executor.submit(queue._execute_prepared, job.run_id, resource_engine=job.engine,
+                                               resource_group=job.resource_group, resource_parallelism=job.resource_parallelism)
                 futures[job.run_id] = queue.futures[job.run_id] = future
                 future.add_done_callback(partial(queue._dispatch_done, job.project_name, job.run_id))
             if campaign is not None:

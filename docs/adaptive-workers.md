@@ -36,17 +36,17 @@ their child processes follow the dispatcher limit.
 | `NETLAB_RUN_WORKERS` | `auto` | Adaptive dispatch, or a fixed integer 1..64 |
 | `NETLAB_RUN_MAX_WORKERS` | `64` | Auto mode upper bound, 1..64 |
 | `NETLAB_RUN_MEMORY_MB` | `2048` | Estimated MiB for each ns-3/Mininet run, 1..1048576 |
-| `NETLAB_NS3_PARALLEL` | global ceiling | Optional study producer bound, 1..64, capped by the global ceiling |
+| `NETLAB_NS3_PARALLEL` | global ceiling | Optional per-study execution bound, 1..64, capped by the global ceiling |
 
-Study producer threads submit runs and wait for their futures. They do not bypass
-the global dispatcher. The older standalone `RunManager` estimates its study
-parallelism once at study start; the API's `QueuedRunManager` adapts throughout
-execution. Setting a fixed worker count preserves previous executor behavior and
-bypasses adaptive CPU/RAM admission.
+The API admits every study variant in one transaction. Dispatcher group limits
+bound how many variants of that study execute at once; waiting variants use no
+worker thread. The older standalone `RunManager` retains producer threads and
+estimates capacity at study start. A fixed worker count bypasses CPU/RAM admission
+while retaining study group limits. See [parameter-studies.md](parameter-studies.md).
 
 In auto mode at most one analytic run executes at a time because its Python
-calculation shares the GIL, and at most one Mininet run executes against the
-live network. Independent ns-3 subprocesses use the remaining capacity. A blocked
+calculation shares the GIL. In both auto and fixed modes at most one Mininet run
+is admitted against the live network. Independent ns-3 subprocesses use the remaining capacity. A blocked
 analytic/Mininet job does not prevent another eligible engine from running.
 FIFO order is retained among jobs eligible under these restrictions.
 
@@ -58,9 +58,9 @@ an RTX 3050 does not increase this CPU/RAM budget.
 
 `GET /api/resources` uses the same authentication as other API endpoints. It
 returns `mode`, `ceiling`, current admission `limit`, `active`, `queued`, active
-engine counts, estimated reserved bytes, remaining admission credit, and the
-effective CPU/RAM snapshot. In fixed mode it returns the configured limit and
-current future counts along with a resource snapshot.
+engine/group counts, estimated reserved bytes, remaining admission credit, and the
+effective CPU/RAM snapshot. Fixed mode reports its configured limit and current
+admission counts; the resource snapshot is still refreshed for diagnostics.
 
 Linux `/proc` and cgroup **v2** are supported. Hidden limits and cgroup v1 limits
 are not detected. Use explicit conservative worker/memory settings on hosts with
