@@ -15,8 +15,11 @@ ftp   {src: mijoz, dst: server, file: "20MB", direction: download|upload, start,
 """
 
 import copy
+from decimal import Decimal, InvalidOperation
 import math
 import re
+
+from lab.validation_numbers import MAX_UINT64, number
 
 CODECS = {
     # payload (bayt, 20 ms), Ie, Bpl (PLC bilan), kodek+paketlash kechikishi (ms)
@@ -30,30 +33,62 @@ MODEL_TYPES = ("voip", "http", "ftp", "mcast")
 
 
 def parse_bytes(v):
-    if isinstance(v, (int, float)):
-        return int(v)
-    m = re.match(r"^\s*([\d.]+)\s*([KMG]?)i?B?\s*$", str(v), re.I)
-    if not m:
-        raise ValueError(f"hajm noto'g'ri: {v!r} (masalan 500KB, 20MB)")
-    return int(float(m.group(1)) * {"": 1, "K": 1e3, "M": 1e6, "G": 1e9}[m.group(2).upper()])
+    """Return an exact positive byte count; legacy KiB/MiB/GiB are decimal units."""
+    message = f"hajm 1..{MAX_UINT64} butun bayt bo'lsin (masalan 500KB, 20MB)"
+    try:
+        if isinstance(v, bool):
+            raise ValueError(message)
+        if isinstance(v, int):
+            value = Decimal(v)
+        elif isinstance(v, float):
+            value = Decimal(str(v))
+        elif isinstance(v, str):
+            m = re.fullmatch(r"\s*([\d.]+)\s*([KMG]?)i?B?\s*", v, re.I)
+            if not m:
+                raise ValueError(message)
+            value = Decimal(m.group(1))
+            # Construct the scaled decimal directly, without rounding through the
+            # Decimal context (or a float) before checking the integer boundary.
+            sign, digits, exponent = value.as_tuple()
+            exponent += {"": 0, "K": 3, "M": 6, "G": 9}[m.group(2).upper()]
+            value = Decimal((sign, digits, exponent))
+        else:
+            raise ValueError(message)
+        if not value.is_finite() or not 0 < value <= MAX_UINT64 or value != value.to_integral_value():
+            raise ValueError(message)
+        return int(value)
+    except (InvalidOperation, TypeError, ValueError, OverflowError):
+        raise ValueError(message) from None
 
 
 def validate_app(a, dur):
+    if not isinstance(a, dict):
+        return ["ilova obyekt bo'lsin"]
     errs = []
     t = a.get("type")
-    if t == "voip" and (a.get("codec") or "g711") not in CODECS:
-        errs.append(f"kodek {tuple(CODECS)} dan biri")
-    try:
-        if t == "http":
+    if t == "voip":
+        codec = a.get("codec")
+        if codec is None or codec == "":
+            codec = "g711"
+        if not isinstance(codec, str) or codec not in CODECS:
+            errs.append(f"kodek {tuple(CODECS)} dan biri")
+    if t == "http":
+        try:
             parse_bytes(a.get("page", "500KB"))
-            if float(a.get("think", 5)) <= 0:
-                errs.append("think > 0")
-        if t == "ftp":
+        except ValueError as e:
+            errs.append(str(e))
+        try:
+            if number(a.get("think", 5), "think") <= 0:
+                raise ValueError("think > 0")
+        except ValueError as e:
+            errs.append(str(e))
+    if t == "ftp":
+        try:
             parse_bytes(a.get("file", "10MB"))
-            if a.get("direction", "download") not in ("download", "upload"):
-                errs.append("direction: download | upload")
-    except ValueError as e:
-        errs.append(str(e))
+        except ValueError as e:
+            errs.append(str(e))
+        if a.get("direction", "download") not in ("download", "upload"):
+            errs.append("direction: download | upload")
     return errs
 
 
@@ -160,12 +195,13 @@ def postprocess(res, sc):
         return res
     flows = res["flows"]
     summary = {}
-    for a in sc.get("apps") or []:
-        aid, t = a.get("id"), a.get("type")
+    for i, a in enumerate(sc.get("apps") or []):
+        aid, t = a.get("id") or f"a{i + 1}", a.get("type")
         if t not in MODEL_TYPES:
             continue
         parts = {k: f for k, f in flows.items() if f.get("group") == aid or k.startswith(aid + ".")}
-        base = {"id": aid, "type": t, "src": a["src"], "dst": a["dst"], "label": a.get("label") or f"{t} {a['src']}→{a['dst']}",
+        dst = a.get("dst") if a.get("dst") is not None else a.get("receivers")
+        base = {"id": aid, "type": t, "src": a["src"], "dst": dst, "label": a.get("label") or f"{t} {a['src']}→{dst}",
                 "start": float(a.get("start", 1)), "stop": float(a.get("stop", res.get("duration", 30))), "parts": sorted(parts)}
         if t == "voip":
             codec = a.get("codec") or "g711"

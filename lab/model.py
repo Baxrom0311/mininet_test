@@ -393,137 +393,34 @@ def ospf_convergence_delay(sc):
 
 
 def validate_scenario(project, sc):
-    """Ssenariy (trafik ilovalari + vaqtli hodisalar) xatolari ro'yxati."""
-    errors = []
-    version = sc.get("ip_version", 4)
-    if type(version) is not int or version not in (4, 6):
-        errors.append("ip_version: 4 | 6")
-    for field, limit in (("seed", 2147483647), ("rng_run", 2147483647)):
-        value = sc.get(field, 1)
-        if type(value) is not int or not 1 <= value <= limit:
-            errors.append(f"{field}: integer 1..{limit}")
-    try:
-        dur = float(sc.get("duration", 0))
-    except (TypeError, ValueError):
-        dur = 0
-    if not (1 <= dur <= 3600):
-        errors.append("davomiylik 1..3600 s")
-    sample = sc.get("sample", 1)
-    if type(sample) not in (int, float) or not 0.001 <= sample <= 3600:
-        errors.append("sample: number 0.001..3600 s")
-    elif dur / sample > 100000:
-        errors.append("sample: at most 100000 intervals per scenario")
-    try:
-        ospf_convergence_delay(sc)
-    except ValueError as e:
-        errors.append(str(e))
-    devs = project.get("devices") or {}
-    ids = set()
-    for i, a in enumerate(sc.get("apps") or []):
-        w = f"ilova {a.get('id') or i + 1}"
-        if a.get("dst_ip"):
-            try:
-                if ipaddress.ip_address(a["dst_ip"]).version != version:
-                    errors.append(f"{w}: dst_ip ip_version bilan mos bo'lsin")
-            except ValueError:
-                errors.append(f"{w}: noto'g'ri dst_ip")
-        if a.get("id") in ids:
-            errors.append(f"{w}: id takrorlangan")
-        ids.add(a.get("id"))
-        from lab.apps import MODEL_TYPES, validate_app
-        if a.get("type") not in APP_TYPES + MODEL_TYPES:
-            errors.append(f"{w}: tur {APP_TYPES + MODEL_TYPES} dan biri")
-        elif a.get("type") in MODEL_TYPES:
-            errors += [f"{w}: {e}" for e in validate_app(a, dur)]
-        if a.get("dscp") not in (None, ""):
-            try:
-                if not 0 <= int(a["dscp"]) <= 63:
-                    raise ValueError
-            except (TypeError, ValueError):
-                errors.append(f"{w}: dscp 0..63 (EF=46)")
-        if a.get("dport") not in (None, ""):
-            try:
-                if not 1 <= int(a["dport"]) <= 65535:
-                    raise ValueError
-            except (TypeError, ValueError):
-                errors.append(f"{w}: dport 1..65535")
-        if a.get("bytes") is not None:
-            try:
-                if int(a["bytes"]) <= 0:
-                    raise ValueError
-            except (TypeError, ValueError):
-                errors.append(f"{w}: bytes musbat butun son")
-        if a.get("type") == "mcast":
-            from lab.mcast import validate_app as mc_validate
-            errors += [f"{w}: {e}" for e in mc_validate(project, a)]
-        for k in (("src",) if a.get("type") == "mcast" else ("src", "dst")):
-            d = devs.get(a.get(k))
-            if not d:
-                errors.append(f"{w}: '{a.get(k)}' qurilma yo'q")
-            elif not DEVICE_TYPES[d["type"]]["l3"] or d["type"] == "sdnrouter":
-                errors.append(f"{w}: {a.get(k)} trafik manbai/qabul qiluvchisi bo'la olmaydi (host/server/router)")
-            elif version == 6:
-                from lab.addressing import interface_address
-                try:
-                    has_ip6 = any(interface_address(ic, 6) for ic in
-                                  ((d.get("config") or {}).get("interfaces") or {}).values())
-                except ValueError:
-                    has_ip6 = False
-                if not has_ip6:
-                    errors.append(f"{w}: {a.get(k)} da IPv6 manzil yo'q")
-        if version == 6 and a.get("type") == "mcast":
-            errors.append(f"{w}: IPv6 multicast hozircha qo'llab-quvvatlanmaydi")
-        try:
-            st, sp = float(a.get("start", 0)), float(a.get("stop", dur))
-            if not (0 <= st < sp):
-                errors.append(f"{w}: start < stop bo'lsin")
-        except (TypeError, ValueError):
-            errors.append(f"{w}: start/stop son bo'lsin")
-        if a.get("type") == "udp" and not a.get("rate"):
-            errors.append(f"{w}: UDP uchun rate kerak (masalan 5Mbps)")
-        if a.get("rate"):
-            try:
-                parse_rate(a["rate"])
-            except ValueError as e:
-                errors.append(f"{w}: {e}")
-    from lab.failures import validate as validate_failures
-    errors += validate_failures(project, sc)
-    for i, e in enumerate(sc.get("events") or []):
-        w = f"hodisa {i + 1}"
-        if e.get("action") not in EVENT_ACTIONS:
-            errors.append(f"{w}: amal {EVENT_ACTIONS} dan biri")
-        if e.get("action") == "move":
-            if e.get("device") not in devs:
-                errors.append(f"{w}: qurilma '{e.get('device')}' yo'q")
-            try:
-                float(e.get("x")), float(e.get("y"))
-                if float(e.get("duration", 0) or 0) < 0:
-                    errors.append(f"{w}: davomiylik >= 0")
-            except (TypeError, ValueError):
-                errors.append(f"{w}: x, y son bo'lsin")
-        elif e.get("link") not in (project.get("links") or {}):
-            errors.append(f"{w}: kabel '{e.get('link')}' yo'q")
-        try:
-            if not (0 <= float(e.get("t", -1)) <= dur):
-                errors.append(f"{w}: vaqt 0..davomiylik")
-        except (TypeError, ValueError):
-            errors.append(f"{w}: vaqt son bo'lsin")
-        if e.get("action") == "link_params":
-            try:
-                normalize_link_params(e.get("params") or {})
-            except ValueError as ex:
-                errors.append(f"{w}: {ex}")
-    return errors
+    """Ssenariy xatolari; validation stays independent of engine imports."""
+    from lab.scenario_validation import validate_scenario as validate
+    return validate(project, sc)
 
 
 def parse_rate(v):
-    """'5Mbps' | '500kbps' | '1.5Gbps' | 5 (Mbit/s) -> bit/s (float)."""
-    if isinstance(v, (int, float)):
-        return float(v) * 1e6
-    m = re.fullmatch(r"\s*([\d.]+)\s*([kKmMgG]?)(bps|bit/s|b/s)?\s*", str(v))
-    if not m:
-        raise ValueError(f"tezlik '{v}' noto'g'ri (masalan 5Mbps)")
-    mult = {"": 1, "k": 1e3, "m": 1e6, "g": 1e9}[m.group(2).lower()]
-    if not m.group(2) and not m.group(3):
-        mult = 1e6
-    return float(m.group(1)) * mult
+    """'5Mbps' | '500kbps' | '1.5Gbps' | 5 (Mbit/s) -> finite bit/s.
+
+    Zero is a valid parsed quantity; active applications require a positive rate.
+    ns-3 DataRate stores an unsigned 64-bit integer number of bits per second.
+    """
+    from lab.validation_numbers import MAX_RATE_BPS, number
+    message = "tezlik noto'g'ri (masalan 5Mbps; finite 0..uint64 bit/s)"
+    try:
+        if isinstance(v, bool):
+            raise ValueError(message)
+        if isinstance(v, (int, float)):
+            value = number(v, "rate", minimum=0) * 1e6
+        elif isinstance(v, str):
+            m = re.fullmatch(r"\s*([\d.]+)\s*([kKmMgG]?)(bps|bit/s|b/s)?\s*", v)
+            if not m:
+                raise ValueError(message)
+            mult = {"": 1, "k": 1e3, "m": 1e6, "g": 1e9}[m.group(2).lower()]
+            if not m.group(2) and not m.group(3):
+                mult = 1e6
+            value = number(m.group(1), "rate", minimum=0) * mult
+        else:
+            raise ValueError(message)
+        return number(value, "rate", minimum=0, maximum=MAX_RATE_BPS)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(message) from None

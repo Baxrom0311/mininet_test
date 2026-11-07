@@ -137,6 +137,8 @@ jobs:
           python -m lab.tests.smoke_perf
           python -m lab.tests.smoke_report
           python -m lab.tests.smoke_survivability_n2
+      - name: Scenario and application admission regression
+        run: python -m unittest lab.tests.test_scenario_validation lab.tests.test_application_validation lab.tests.test_failure_validation lab.tests.smoke_scenario_inputs -v
       - name: IPv6 model and ns-3 packet regression
         run: python -m unittest lab.tests.smoke_ipv6 lab.tests.smoke_isis lab.tests.smoke_ospf lab.tests.smoke_experiments lab.tests.smoke_experiment_comparison lab.tests.smoke_campaigns -v
       - name: Adaptive CPU and RAM dispatch regression
