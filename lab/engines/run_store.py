@@ -14,7 +14,7 @@ TERMINAL = {"done", "error", "cancelled", "interrupted"}
 PENDING = {"queued", "running", "cancelling"}
 METADATA_KEYS = ("run_id", "project", "scenario_name", "engine", "engine_label", "status", "created", "duration",
                  "wall_s", "progress", "error", "label", "study_id", "study_param", "study_value", "study_index",
-                 "study_param2", "study_value2", "study_index2", "experiment_id", "replication_index",
+                 "study_param2", "study_value2", "study_index2", "study_position", "study_total", "experiment_id", "replication_index",
                  "replication_count", "seed", "rng_run", "campaign_id", "campaign_variant")
 
 

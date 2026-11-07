@@ -16,12 +16,14 @@ class _Task:
     args: tuple
     kwargs: dict
     engine: str
+    group: str | None = None
     started: bool = False
     abandoned: bool = False
 
 
 class AdaptiveExecutor:
-    def __init__(self, *, ceiling=64, memory_mb=2048, monitor=None, interval=1.):
+    def __init__(self, *, ceiling=64, memory_mb=2048, monitor=None, interval=1., adaptive=True):
+        self.adaptive = adaptive
         self.ceiling = ceiling = positive_integer(ceiling, "NETLAB_RUN_MAX_WORKERS")
         self.memory_mb = positive_integer(memory_mb, "NETLAB_RUN_MEMORY_MB", 1048576)
         if interval <= 0:
@@ -30,6 +32,7 @@ class AdaptiveExecutor:
         self._condition = threading.Condition()
         self._pending = deque()
         self._active, self._engines = 0, Counter()
+        self._groups, self._outstanding_groups, self._group_limits = Counter(), Counter(), {}
         self._reserved = 0
         self._closed, self._refresh_requested = False, False
         self._snapshot, self._sensor_error = None, None
@@ -42,6 +45,11 @@ class AdaptiveExecutor:
     def _refresh(self):
         try:
             snapshot = self.monitor.read()
+            if not self.adaptive:
+                with self._condition:
+                    self._snapshot, self._limit, self._credit = snapshot, self.ceiling, None
+                    self._sensor_error = None
+                return
             cap = min(self.ceiling, cpu_capacity(snapshot))
             if self._snapshot is None:
                 limit = cap
@@ -66,7 +74,7 @@ class AdaptiveExecutor:
                 self._sensor_error = None
         except Exception as error:
             with self._condition:
-                self._limit = 1
+                self._limit = 1 if self.adaptive else self.ceiling
                 self._credit = None
                 self._sensor_error = f"{type(error).__name__}: {error}"
 
@@ -79,12 +87,23 @@ class AdaptiveExecutor:
         with self._condition:
             self._condition.notify_all()
 
-    def submit(self, fn, /, *args, resource_engine="ns3", **kwargs):
+    def submit(self, fn, /, *args, resource_engine="ns3", resource_group=None, resource_parallelism=None, **kwargs):
+        if resource_group is not None:
+            if not isinstance(resource_group, str) or not resource_group:
+                raise ValueError("resource group must be a nonempty string")
+            resource_parallelism = positive_integer(resource_parallelism, "study parallelism")
+        elif resource_parallelism is not None:
+            raise ValueError("parallelism requires a resource group")
         future = Future()
         with self._condition:
             if self._closed:
                 raise RuntimeError("cannot schedule new futures after shutdown")
-            self._pending.append(_Task(future, fn, args, kwargs, resource_engine))
+            if resource_group is not None:
+                if resource_group in self._group_limits and self._group_limits[resource_group] != resource_parallelism:
+                    raise ValueError("resource group parallelism must be consistent")
+                self._group_limits[resource_group] = resource_parallelism
+                self._outstanding_groups[resource_group] += 1
+            self._pending.append(_Task(future, fn, args, kwargs, resource_engine, resource_group))
             future.add_done_callback(self._notify)
             self._condition.notify_all()
         return future
@@ -92,23 +111,42 @@ class AdaptiveExecutor:
     def _cost(self, engine):
         return (256 if engine == "analytic" else self.memory_mb) * MIB
 
+    def _forget_group(self, task):
+        if task.group is not None:
+            self._outstanding_groups[task.group] -= 1
+            if not self._outstanding_groups[task.group]:
+                del self._outstanding_groups[task.group]
+                self._group_limits.pop(task.group, None)
+
     def _take(self):
-        self._pending = deque(task for task in self._pending if not task.future.cancelled())
+        pending = deque()
+        for task in self._pending:
+            if task.future.cancelled():
+                self._forget_group(task)
+            else:
+                pending.append(task)
+        self._pending = pending
         if self._active >= self._limit:
             return None
         for task in self._pending:
             # Python flow analysis shares the GIL; live Mininet shares one network.
-            if task.engine in ("analytic", "mininet") and self._engines[task.engine] >= 1:
+            serialized = task.engine == "mininet" or self.adaptive and task.engine == "analytic"
+            if serialized and self._engines[task.engine] >= 1:
+                continue
+            if task.group is not None and self._groups[task.group] >= self._group_limits[task.group]:
                 continue
             cost = self._cost(task.engine)
             if self._credit is not None and self._credit < cost:
                 continue
             self._pending.remove(task)
             if not task.future.set_running_or_notify_cancel():
+                self._forget_group(task)
                 return None
             self._active += 1
             self._reserved += cost
             self._engines[task.engine] += 1
+            if task.group is not None:
+                self._groups[task.group] += 1
             if self._credit is not None:
                 self._credit -= cost
             return task
@@ -119,6 +157,11 @@ class AdaptiveExecutor:
             self._active -= 1
             self._reserved -= self._cost(task.engine)
             self._engines[task.engine] -= 1
+            if task.group is not None:
+                self._groups[task.group] -= 1
+                if not self._groups[task.group]:
+                    del self._groups[task.group]
+                self._forget_group(task)
             self._condition.notify_all()
 
     def _execute(self, task):
@@ -166,9 +209,10 @@ class AdaptiveExecutor:
 
     def status(self):
         with self._condition:
-            return {"mode": "auto", "ceiling": self.ceiling, "limit": self._limit, "active": self._active,
+            return {"mode": "auto" if self.adaptive else "fixed", "ceiling": self.ceiling, "limit": self._limit, "active": self._active,
                     "queued": sum(not task.future.cancelled() for task in self._pending),
                     "active_engines": dict(self._engines), "run_memory_mb": self.memory_mb,
+                    "active_groups": dict(self._groups),
                     "memory_credit_bytes": self._credit, "sensor_error": self._sensor_error,
                     "estimated_reserved_bytes": self._reserved,
                     "resources": self._snapshot.public() if self._snapshot is not None else None}

@@ -303,6 +303,22 @@ def create_app(driver_name="demo", token=None):
                                 body.get("param") or {}, body.get("values") or [],
                                 body.get("param2") or None, body.get("values2") or None)
 
+    @app.get("/api/studies/{project}/{study_id}")
+    def study_status(project: str, study_id: str):
+        from lab.engines.study_status import status
+        try:
+            return status(runs, project, study_id)
+        except FileNotFoundError:
+            raise HTTPException(404, "tadqiqot topilmadi")
+
+    @app.post("/api/studies/{project}/{study_id}/cancel")
+    def study_cancel(project: str, study_id: str):
+        from lab.engines.study_status import cancel
+        try:
+            return cancel(runs, project, study_id)
+        except FileNotFoundError:
+            raise HTTPException(404, "tadqiqot topilmadi")
+
     @app.post("/api/experiments")
     def experiment_start(body: dict = Body(...)):
         return runs.start_experiment(body.get("project") or {}, body.get("scenario"), body.get("engine", "analytic"),
@@ -526,11 +542,21 @@ def create_app(driver_name="demo", token=None):
     @app.get("/api/studies/{project}/{study_id}/report.html")
     def study_report_html(project: str, study_id: str):
         from lab.report import study_report
-        rs = [runs.get(project, r["run_id"]) for r in runs.list(project, study_id=study_id)
-              if r.get("status") not in ("running", None)]
+        from lab.engines.study_status import status
+        rows = runs.list(project, study_id=study_id)
+        rs = []
+        for row in rows:
+            try:
+                rs.append(runs.get(project, row["run_id"]))
+            except FileNotFoundError:
+                pass  # A concurrent deletion remains visible through the surviving rows' planned count.
         if not rs:
             raise HTTPException(404, "tadqiqot natijalari topilmadi")
-        return _html(study_report(rs), f"{study_id}.html")
+        try:
+            state = status(runs, project, study_id)
+        except FileNotFoundError:
+            raise HTTPException(404, "tadqiqot natijalari topilmadi")
+        return _html(study_report(rs, state), f"{study_id}.html")
 
     # ───────────── WebSocket: hodisalar ─────────────
     @app.websocket("/ws/events")
