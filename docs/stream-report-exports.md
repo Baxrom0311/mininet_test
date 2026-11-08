@@ -68,4 +68,5 @@ functions retain the final compressed ZIP, and HTML report builders still create
 their document strings. Direct-file writers avoid that final ZIP buffer but
 their caller controls file storage. A very large single scalar or CSV row may
 still need proportional encoder storage. This change adds neither streamed HTTP
-responses nor point downsampling, and does not add fsync durability guarantees.
+responses and does not add fsync durability guarantees. SVG display reduction
+is documented separately in [bounded-report-charts.md](bounded-report-charts.md).

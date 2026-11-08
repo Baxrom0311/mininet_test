@@ -1,0 +1,39 @@
+{
+  "reference_commit": "a3573be",
+  "unbounded": {
+    "kind": "synthetic HTML display; not simulator throughput",
+    "measured_at": "2026-11-08T14:27:40.744435+00:00",
+    "points_per_metric": 100000,
+    "metrics": 3,
+    "html_bytes": 3582596,
+    "wall_s": 0.8643589349958347,
+    "traced_peak_bytes": 28805872,
+    "input_unchanged": true,
+    "figures": 3,
+    "polylines": 6,
+    "notes": [
+      "Input construction and content hashing are excluded from allocation tracing.",
+      "Timing is a separate untraced render; peak is from a second render.",
+      "tracemalloc is Python allocation tracing, not total process RSS.",
+      "Reduction applies only to displayed SVG samples; raw results and statistics are unchanged."
+    ]
+  },
+  "bounded": {
+    "kind": "synthetic HTML display; not simulator throughput",
+    "measured_at": "2026-11-08T14:29:05.615070+00:00",
+    "points_per_metric": 100000,
+    "metrics": 3,
+    "html_bytes": 22295,
+    "wall_s": 0.5753422879934078,
+    "traced_peak_bytes": 317390,
+    "input_unchanged": true,
+    "figures": 3,
+    "polylines": 6,
+    "notes": [
+      "Input construction and content hashing are excluded from allocation tracing.",
+      "Timing is a separate untraced render; peak is from a second render.",
+      "tracemalloc is Python allocation tracing, not total process RSS.",
+      "Reduction applies only to displayed SVG samples; raw results and statistics are unchanged."
+    ]
+  }
+}
