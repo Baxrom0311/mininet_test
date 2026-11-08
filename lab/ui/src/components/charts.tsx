@@ -1,12 +1,13 @@
 /** Grafiklar: chiziqli (vaqt / parametr, crosshair + tooltip, hodisa belgilari, log x o'qi)
  *  va issiqlik xaritasi (2D tadqiqot; ketma-ket bir rangli shkala, katakda qiymat). */
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { pointAt, samplePoints } from '@/lib/chartSampling'
 import { useStore } from '@/lib/store'
 import type { ScenarioEvent } from '@/lib/types'
 
 export interface Series { name: string; color: string; points: { x: number; y: number | null | undefined }[] }
 
-function niceMax(v: number) { const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p }
+function niceMax(v: number) { const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; const result=(n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;return Number.isFinite(result) && result > 0 ? result : v }
 function niceStep(v: number) { if (v <= 1) return 1; const p = Math.pow(10, Math.floor(Math.log10(v))); const n = v / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p }
 
 function useWidth() {
@@ -25,20 +26,20 @@ export function LineChart({ series: all, fmt, title, events = [], xMax: xMaxOpt,
 }) {
   const [ref, width] = useWidth()
   const [hover, setHover] = useState<number | null>(null)
-  const series = all.filter((s) => s.points.length)
-  const W = Math.max(width, 360), H = 280, m = { l: 66, r: series.length <= 4 ? 128 : 16, t: 10, b: 28 }
-  const xs = series.flatMap((s) => s.points.map((p) => p.x))
-  const ys = series.flatMap((s) => s.points.map((p) => p.y)).filter((v): v is number => v != null && isFinite(v))
-  const xMax = Math.max(xMaxOpt || 0, ...xs, 1)
-  const yMax = (() => { const v = Math.max(...ys, 0); return v <= 0 ? 1 : niceMax(v) })()
+  const series = useMemo(() => all.slice(0,6).map(s => ({...s,display:samplePoints(s.points)})).filter(s => s.display.valid),[all])
+  useEffect(() => setHover(null),[all])
+  const endLabels=series.length <= 4 && width >= 600
+  const W = Math.max(width, 360), H = 280, m = { l: 66, r: endLabels ? 128 : 16, t: 10, b: 28 }
+  const xMax = series.reduce((max,s) => Math.max(max,s.display.xMax),Number.isFinite(xMaxOpt) ? Math.max(xMaxOpt!,1) : 1)
+  const yMax = (() => { const v = series.reduce((max,s) => Math.max(max,s.display.yMax),0);return v <= 0 ? 1 : niceMax(v) })()
   const tv = (xTicks || []).filter(isFinite)
   const logX = tv.length > 2 && Math.min(...tv) > 0 && Math.max(...tv) / Math.min(...tv) >= 20
   const xLo = logX ? Math.log10(Math.min(...tv)) : 0, xHi = logX ? Math.log10(Math.max(...tv)) : xMax
   const X = (x: number) => m.l + ((logX ? Math.log10(x) : x) - xLo) / ((xHi - xLo) || 1) * (W - m.l - m.r)
   const Y = (y: number) => H - m.b - (y / yMax) * (H - m.t - m.b)
-  let ticks = tv.length ? [...new Set(tv)].sort((a, b) => a - b) : (() => { const st = niceStep(xMax / 6), o: number[] = []; for (let x = 0; x <= xMax + 1e-9; x += st) o.push(x); return o })()
+  let ticks = tv.length ? [...new Set(tv)].sort((a, b) => a - b) : (() => { const st = niceStep(xMax / 6), o: number[] = []; for (let i=0;i<8;i++) {const x=i*st;if (x > xMax) break;o.push(x)} return o })()
   let last = -1e9; ticks = ticks.filter((x) => { if (X(x) - last < 26) return false; last = X(x); return true })
-  const labels = series.length <= 4 ? series.map((s) => { const lp = [...s.points].reverse().find((p) => p.y != null); return lp ? { s, x: X(lp.x) + 6, y: Y(lp.y as number) + 4 } : null })
+  const labels = endLabels ? series.map((s) => { const lp = s.display.points[s.display.points.length-1]; return lp ? { s, x: X(lp.x) + 6, y: Y(lp.y as number) + 4 } : null })
     .filter(Boolean).sort((a, b) => a!.y - b!.y) as { s: Series; x: number; y: number }[] : []
   for (let i = 1; i < labels.length; i++) labels[i].y = Math.max(labels[i].y, labels[i - 1].y + 13)
   const over = labels.length ? labels[labels.length - 1].y - (H - m.b) : 0
@@ -47,7 +48,7 @@ export function LineChart({ series: all, fmt, title, events = [], xMax: xMaxOpt,
     const r = (e.currentTarget.ownerSVGElement as SVGSVGElement).getBoundingClientRect()
     const px = (e.clientX - r.left) * (W / r.width)
     let near: number | null = null
-    series.forEach((s) => s.points.forEach((p) => { if (near == null || Math.abs(X(p.x) - px) < Math.abs(X(near) - px)) near = p.x }))
+    series.forEach((s) => s.display.points.forEach((p) => { if (near == null || Math.abs(X(p.x) - px) < Math.abs(X(near) - px)) near = p.x }))
     setHover(near)
   }
   const evLabel = (e: ScenarioEvent) => ({ link_down: '✕ ', link_up: '✓ ', link_params: '⚙ ', move: '➜ ', roam: '⇄ ' } as Record<string, string>)[e.action] + (e.action === 'roam' ? `${e.device}→${e.to}` : e.link || e.device || '')
@@ -56,7 +57,7 @@ export function LineChart({ series: all, fmt, title, events = [], xMax: xMaxOpt,
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <div className="text-xs font-semibold">{title}</div>
         {series.length >= 2 && <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-          {series.map((s) => <span key={s.name} className="inline-flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />{s.name}</span>)}
+          {series.map((s,i) => <span key={i} className="inline-flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: s.color }} />{s.name}</span>)}
         </div>}
       </div>
       <div ref={ref} className="relative">
@@ -67,31 +68,31 @@ export function LineChart({ series: all, fmt, title, events = [], xMax: xMaxOpt,
                 <text x={m.l - 8} y={y + 4} textAnchor="end" className="fill-muted-foreground font-mono text-[10.5px]">{fmt(v)}</text></g>) })}
             {ticks.map((x) => <text key={x} x={X(x)} y={H - 8} textAnchor="middle" className="fill-muted-foreground font-mono text-[10.5px]">{xFmt(x)}</text>)}
             {events.map((e, i) => (
-              <g key={i}><line x1={X(e.t)} x2={X(e.t)} y1={m.t} y2={H - m.b} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" />
-                <text x={X(e.t) + 4} y={m.t + 11} className="fill-muted-foreground font-mono text-[10.5px]">{evLabel(e)}</text></g>))}
-            {series.map((s) => {
-              let d = '', pen = false
-              s.points.forEach((p) => { if (p.y == null || !isFinite(p.y)) { pen = false; return } d += (pen ? 'L' : 'M') + X(p.x).toFixed(1) + ',' + Y(p.y).toFixed(1); pen = true })
+              <g key={i}><title>{evLabel(e)+' · '+e.t+'s'}</title><line x1={X(e.t)} x2={X(e.t)} y1={m.t} y2={H - m.b} stroke="hsl(var(--muted-foreground))" strokeDasharray="4 4" />
+                {width >= 600 && <text x={X(e.t) + 4} y={m.t + 11} className="fill-muted-foreground font-mono text-[10.5px]">{evLabel(e)}</text>}</g>))}
+            {series.map((s,index) => {
+              let d = '', pen = false, segment=-1
+              s.display.points.forEach((p) => { if (p.y == null || !Number.isFinite(X(p.x))) {pen=false;return} d += (pen && segment === p.segment ? 'L' : 'M')+X(p.x).toFixed(1)+','+Y(p.y).toFixed(1);pen=true;segment=p.segment })
               return (
-                <g key={s.name}><path d={d} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-                  {markers && s.points.map((p, i) => p.y != null && isFinite(p.y) && <circle key={i} cx={X(p.x)} cy={Y(p.y)} r={4} fill={s.color} stroke="hsl(var(--background))" strokeWidth={2} />)}</g>)
+                <g key={index}><path data-chart-line data-source-points={s.display.valid} data-display-points={s.display.points.length} d={d} fill="none" stroke={s.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+                  {markers && s.display.points.map((p, i) => p.y != null && isFinite(p.y) && <circle key={i} cx={X(p.x)} cy={Y(p.y)} r={4} fill={s.color} stroke="hsl(var(--background))" strokeWidth={2} />)}</g>)
             })}
-            {labels.map((l) => <text key={l.s.name} x={l.x} y={l.y} className="fill-muted-foreground text-[11px] font-medium">{l.s.name.length > 18 ? l.s.name.slice(0, 17) + '…' : l.s.name}</text>)}
+            {labels.map((l,i) => <text key={i} x={l.x} y={l.y} className="fill-muted-foreground text-[11px] font-medium">{l.s.name.length > 18 ? l.s.name.slice(0, 17) + '…' : l.s.name}</text>)}
             {hover != null && <line x1={X(hover)} x2={X(hover)} y1={m.t} y2={H - m.b} stroke="hsl(var(--muted-foreground))" />}
-            {hover != null && series.map((s) => { const p = s.points.find((q) => q.x === hover); return p && p.y != null ? <circle key={s.name} cx={X(p.x)} cy={Y(p.y)} r={4.5} fill={s.color} stroke="hsl(var(--background))" strokeWidth={2} /> : null })}
+            {hover != null && series.map((s,i) => { const p = pointAt(s.points,hover,s.display.ordered); return p && p.y != null && Number.isFinite(p.y) ? <circle key={i} cx={X(p.x)} cy={Y(p.y)} r={4.5} fill={s.color} stroke="hsl(var(--background))" strokeWidth={2} /> : null })}
             <rect x={m.l} y={m.t} width={W - m.l - m.r} height={H - m.t - m.b} fill="transparent" onMouseMove={onMove} onMouseLeave={() => setHover(null)} />
           </svg>
         )}
         {hover != null && (
           <div className="glass pointer-events-none absolute top-2 z-10 min-w-[180px] rounded-lg px-2.5 py-2 text-[11.5px]" style={{ left: Math.min((X(hover) / W) * width + 14, width - 200) }}>
             <div className="mb-1 font-mono text-muted-foreground">{xTicks ? `qiymat = ${xFmt(hover)}` : `t = ${hover}s`}</div>
-            {series.map((s) => { const p = s.points.find((q) => q.x === hover); return (
-              <div key={s.name} className="flex items-center gap-1.5 leading-6 text-muted-foreground"><i className="h-2 w-2 rounded-sm" style={{ background: s.color }} />{s.name}
+            {series.map((s,i) => { const p = pointAt(s.points,hover,s.display.ordered); return (
+              <div key={i} className="flex items-center gap-1.5 leading-6 text-muted-foreground"><i className="h-2 w-2 rounded-sm" style={{ background: s.color }} />{s.name}
                 <b className="ml-auto pl-3 font-mono font-semibold text-foreground">{p && p.y != null ? fmt(p.y) : '—'}</b></div>) })}
           </div>
         )}
       </div>
-      {(logX || note) && <div className="px-1 pb-1 text-[11px] text-muted-foreground">{[logX && "x o'qi logarifmik", note].filter(Boolean).join(' · ')}</div>}
+      {(logX || note || series.some(s => s.display.reduced)) && <div className="px-1 pb-1 text-[11px] text-muted-foreground">{[logX && "x o'qi logarifmik",series.some(s => s.display.reduced) && 'Grafik nuqtalari qisqartirildi; ekstremum va uzilishlar saqlandi. To‘liq namunalar ZIP’da.', note].filter(Boolean).join(' · ')}</div>}
     </div>
   )
 }
@@ -109,6 +110,7 @@ export function Heatmap({ xs, ys, value, fmt, title, xLabel, yLabel }: {
 }) {
   const [ref, width] = useWidth()
   const [hover, setHover] = useState<{ i: number; j: number } | null>(null)
+  const scaleId=useId().replace(/:/g,'')
   const theme = useStore((s) => s.theme)          // mavzu almashsa — ranglar qayta o'qiladi
   const dark = theme === 'dark'
   const cs = getComputedStyle(document.documentElement)
@@ -138,8 +140,8 @@ export function Heatmap({ xs, ys, value, fmt, title, xLabel, yLabel }: {
           }))}
           <text x={m.l + (W - m.l - m.r) / 2} y={H - 6} textAnchor="middle" className="fill-muted-foreground text-[11px]">{xLabel}</text>
           <text x={14} y={m.t + (H - m.t - m.b) / 2} textAnchor="middle" transform={`rotate(-90 14 ${m.t + (H - m.t - m.b) / 2})`} className="fill-muted-foreground text-[11px]">{yLabel}</text>
-          <defs><linearGradient id="hmscale" x1="0" x2="0" y1="1" y2="0"><stop offset="0" stopColor={lo} /><stop offset="1" stopColor={hi} /></linearGradient></defs>
-          <rect x={W - m.r + 16} y={m.t} width={12} height={H - m.t - m.b} rx={3} fill="url(#hmscale)" />
+          <defs><linearGradient id={scaleId} x1="0" x2="0" y1="1" y2="0"><stop offset="0" stopColor={lo} /><stop offset="1" stopColor={hi} /></linearGradient></defs>
+          <rect x={W - m.r + 16} y={m.t} width={12} height={H - m.t - m.b} rx={3} fill={`url(#${scaleId})`} />
           <text x={W - m.r + 34} y={m.t + 10} className="fill-muted-foreground font-mono text-[10px]">{fmt(vMax)}</text>
           <text x={W - m.r + 34} y={H - m.b} className="fill-muted-foreground font-mono text-[10px]">{fmt(vMin)}</text>
         </svg>

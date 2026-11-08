@@ -86,3 +86,20 @@
 
 /* xterm */
 .xterm .xterm-viewport { background: transparent !important; }
+
+.results-workspace { container: results / inline-size; }
+.results-layout { grid-template-columns: 250px minmax(0, 1fr); }
+.results-history-toggle { display: none; }
+@container results (min-width: 720px) {
+  .result-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@container results (max-width: 760px) {
+  .results-layout { grid-template-columns: 210px minmax(0, 1fr); }
+}
+@container results (max-width: 580px) {
+  .results-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .results-history { border-right: 0; border-bottom: 1px solid hsl(var(--border)); }
+  .results-history-toggle { display: inline-flex; }
+  .results-history.history-expanded { height: min(380px, 48vh); }
+  .results-history:not(.history-expanded) :is(.results-history-scroll, .results-history-filters, .results-history-footer) { display: none; }
+}

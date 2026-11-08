@@ -31,7 +31,7 @@ export function Segmented<T extends string>({ value, onChange, items, className 
   return (
     <div className={cn('inline-flex h-8 items-center rounded-lg bg-muted/70 p-0.5 text-muted-foreground', className)}>
       {items.map((it) => (
-        <button key={it.value} onClick={() => onChange(it.value)}
+        <button key={it.value} aria-pressed={value === it.value} onClick={() => onChange(it.value)}
           className={cn('inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-all [&_svg]:size-3.5',
             value === it.value && 'bg-background text-foreground shadow')}>
           {it.label}

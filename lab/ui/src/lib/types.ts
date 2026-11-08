@@ -38,17 +38,22 @@ export interface Pipeline {
   deparsers: { name: string; order: string[] }[]; headers: string[]; counters: string[]; registers: { name: string; size?: number | null }[]
 }
 export interface FlowPoint { t: number; thr_bps: number; delay_ms: number | null; jitter_ms: number | null; loss_pct: number | null; rtt_ms?: number | null }
-export interface FlowResult { id: string; label: string; type: string; src: string; dst: string; series: FlowPoint[]; summary: Record<string, number | null> }
+export interface FlowResult { id?: string; label?: string; hidden?: boolean; type: string; src: string; dst: string | string[]; series: FlowPoint[]; summary: Record<string, number | null> }
 export interface RunResult {
   run_id: string; scenario_name: string; engine: string; engine_label?: string; created: number; duration: number; wall_s?: number
   status: string; error?: string; label?: string; flows: Record<string, FlowResult>; links?: Record<string, LinkPoint[]>
   nodes?: Record<string, NodePoint[]>; route_events?: RouteEvent[]; convergence?: Convergence[]
   /** ilova modellari xulosasi (voip: avg_mos/min_mos/quality, http: pages/avg_page_s, ftp: transfer_s) */
-  apps?: Record<string, { type: 'voip' | 'http' | 'ftp'; [k: string]: any }>
+  apps?: Record<string, { type: 'voip' | 'http' | 'ftp' | 'mcast'; [k: string]: any }>
+  availability?: { mean_flow_availability?: number; min_flow_availability?: number; flows?: Record<string, { type?: string; availability_pct?: number; downtime_s?: number; outages?: unknown[] }> }
+  reproducibility?: { project?: Project }
   events?: ScenarioEvent[]; notes?: string[]
   study_id?: string; study_param?: any; study_value?: any; study_index?: number; study_param2?: any; study_value2?: any; study_index2?: number
 }
-export type RunListItem = Pick<RunResult, 'run_id' | 'scenario_name' | 'engine' | 'created' | 'wall_s' | 'status' | 'label' | 'study_id' | 'study_param' | 'study_value' | 'study_index' | 'study_param2' | 'study_value2' | 'study_index2'> & { progress?: number }
+export type RunListItem = Pick<RunResult, 'run_id' | 'scenario_name' | 'engine' | 'created' | 'wall_s' | 'status' | 'label' | 'study_id' | 'study_param' | 'study_value' | 'study_index' | 'study_param2' | 'study_value2' | 'study_index2'> & { progress?: number; queue_state?: string; duration?: number }
+export interface RunPage { runs: RunListItem[]; total: number; limit: number; offset: number }
+export interface StudyState { status: string; complete: boolean; settled?: boolean; planned_runs: number | null; observed_runs: number; missing_run_ids: string[]; invalid_run_ids: string[]; orphaned_run_ids?: string[]; planning: string; runs: { run_id: string; status: string; progress: number; error?: string; study_value?: unknown; study_value2?: unknown }[] }
+export interface InvalidResults { total: number; limit: number; offset: number; files: { run_id: string; error: string; size: number }[] }
 /** POST /api/analysis/survivability — yakka nosozliklar ta'siri (N-1) va sig'im rejasi */
 export interface SurvivabilityCase {
   kind: 'link' | 'device' | 'srlg' | 'pair'; target: string; down_links: string[]; score: number

@@ -1,18 +1,24 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, BarChart3, Download, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowLeft, BarChart3, Download, FileText, Loader2, RefreshCw, Square, X } from 'lucide-react'
 import { Heatmap, LineChart, type Series } from '@/components/charts'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Select } from '@/components/ui/select'
-import { DataTable, Section } from '@/components/ui/table'
+import { Section } from '@/components/ui/table'
 import { Segmented } from '@/components/ui/tabs'
+import { toast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
-import { on } from '@/lib/bus'
 import { engineName, fmtBps, fmtMs, fmtPct, seriesColor, storage } from '@/lib/format'
+import { downloadCsv, filterRuns, isActive, resultsCsv, runState, statusLabel, visibleFlows } from '@/lib/results'
 import { useStore, type Win } from '@/lib/store'
-import type { RunListItem, RunResult } from '@/lib/types'
-import { WindowFrame } from './WindowFrame'
+import type { InvalidResults, RunResult } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import { ResultInsights, ResultStats, ResultSummary, ResultTable as DataTable } from './ResultInsights'
+import { useRunHistory } from './useRunHistory'
+import { useRunSelection } from './useRunSelection'
+import { ResultsHistory } from './ResultsHistory'
+import { RunChart } from './RunChart'
+import { WindowFrame } from './WindowFrame'
 
 type MetricId = 'thr_bps' | 'delay_ms' | 'rtt_ms' | 'jitter_ms' | 'loss_pct' | 'util'
 const METRICS: { id: MetricId; label: string; fmt: (v: number) => string; sum?: string; link?: boolean }[] = [
@@ -21,169 +27,176 @@ const METRICS: { id: MetricId; label: string; fmt: (v: number) => string; sum?: 
   { id: 'rtt_ms', label: 'RTT', fmt: fmtMs, sum: 'avg_rtt_ms' },
   { id: 'jitter_ms', label: 'Jitter', fmt: fmtMs, sum: 'avg_jitter_ms' },
   { id: 'loss_pct', label: "Yo'qotish", fmt: fmtPct, sum: 'loss_pct' },
-  { id: 'util', label: 'Kabel yuklamasi', fmt: (v) => fmtPct(v * 100), link: true },
+  { id: 'util', label: 'Kabel yuklamasi', fmt: v => fmtPct(v*100), link: true },
 ]
-const FIELD_NAME: Record<string, string> = { channel: 'AP kanali', tx_power: 'AP quvvati, dBm', bw: 'kabel tezligi, Mbit/s', delay: 'kechikish, ms', loss: 'loss, %', queue: 'navbat, paket', rate: 'ilova tezligi', size: 'paket, B' }
-const pnum = (v: unknown) => { const m = String(v).match(/[\d.]+/); return m ? parseFloat(m[0]) : NaN }
-const runName = (r: RunResult) => (r.label || r.scenario_name) + ' · ' + engineName(r.engine)
-
-export function ResultsWindow({ win }: { win: Win }) {
-  const project = useStore((s) => s.project)
-  const pname = project.name
-  const [runs, setRuns] = useState<RunListItem[]>([])
-  const [cache, setCache] = useState<Record<string, RunResult>>({})
-  const [selected, setSelected] = useState<string[]>(win.arg?.run ? [win.arg.run] : [])
-  const [study, setStudy] = useState<string | null>(win.arg?.study || null)
-  const [metric, setMetric] = useState<MetricId>(storage.get('netlab.metric', 'thr_bps'))
-  const [flowSel, setFlowSel] = useState('')
-  const [linkSel, setLinkSel] = useState('')
-
-  useEffect(() => { if (win.arg?.run) { setStudy(null); setSelected([win.arg.run]) } if (win.arg?.study) setStudy(win.arg.study) }, [win.arg])
-  const loadList = async () => {
-    try {
-      const r = (await api.get<{ runs: RunListItem[] }>('/api/runs/' + encodeURIComponent(pname))).runs
-      setRuns(r)
-      setSelected((s) => s.length ? s : (r.find((x) => x.status !== 'running' && !x.study_id)?.run_id ? [r.find((x) => x.status !== 'running' && !x.study_id)!.run_id] : []))
-    } catch { setRuns([]) }
-  }
-  useEffect(() => { loadList() }, [pname])
-  useEffect(() => on('ev:run', (ev: any) => { if (ev.done || ev.progress === 0) loadList() }), [pname])
-  const need = useMemo(() => study ? runs.filter((r) => r.study_id === study && r.status === 'done').map((r) => r.run_id) : selected, [study, runs, selected])
+const FIELD_NAME: Record<string,string> = {channel:'AP kanali',tx_power:'AP quvvati, dBm',bw:'kabel tezligi, Mbit/s',delay:'kechikish, ms',loss:'loss, %',queue:'navbat, paket',rate:'ilova tezligi',size:'paket, B'}
+const runName = (run:RunResult) => (run.label || run.scenario_name || run.run_id)+' · '+engineName(run.engine)
+function StateBadge({status}:{status:string}) {
+  return <Badge variant={status === 'done' ? 'success' : ['error','failed'].includes(status) ? 'destructive' : isActive(status) ? 'warning' : 'outline'}>{statusLabel(status)}</Badge>
+}
+export function ResultsWindow({win}:{win:Win}) {
+  const project=useStore(state => state.project.name)
+  const scoped = win.arg?.project === project ? win : {...win,arg:undefined}
+  return <ResultsWorkspace key={project} win={scoped} />
+}
+function ResultsWorkspace({win}:{win:Win}) {
+  const project=useStore(state => state.project), pname=project.name
+  const history=useRunHistory(pname), {runs}=history
+  const [selected,setSelected]=useState<string[]>(win.arg?.run ? [win.arg.run] : [])
+  const [study,setStudy]=useState<string|null>(win.arg?.study || null)
+  const [epoch,setEpoch]=useState(0)
+  const [search,setSearch]=useState('')
+  const [view,setView]=useState<'charts'|'apps'|'network'|'events'>('charts')
+  const [metric,setMetric]=useState<MetricId>(storage.get('netlab.metric','thr_bps'))
+  const [flowSel,setFlowSel]=useState(''), [linkSel,setLinkSel]=useState('')
+  const [action,setAction]=useState(''), [actionError,setActionError]=useState('')
+  const [showInvalid,setShowInvalid]=useState(false), [invalidPage,setInvalidPage]=useState(0)
+  const [invalid,setInvalid]=useState<InvalidResults|null>(null), [invalidError,setInvalidError]=useState('')
+  const auto=useRef(Boolean(win.arg))
+  const detail=useRunSelection(pname,selected,study,runs,epoch)
+  const {data,studyRuns,studyState}=detail
+  const root='/api/runs/'+encodeURIComponent(pname)
+  const visible=useMemo(() => filterRuns(runs,search),[runs,search])
+  const M=METRICS.find(item => item.id === metric) || METRICS[0]
+  const validAxes=studyRuns.every(run => Number.isInteger(run.study_index) && run.study_index! >= 0 && run.study_index! < 49 &&
+    (!run.study_param2 || Number.isInteger(run.study_index2) && run.study_index2! >= 0 && run.study_index2! < 49)) &&
+    new Set(studyRuns.map(run => `${run.study_index}:${run.study_index2 ?? ''}`)).size === studyRuns.length
   useEffect(() => {
-    need.filter((id) => !cache[id]).forEach((id) => api.get<RunResult>(`/api/runs/${encodeURIComponent(pname)}/${id}`).then((r) => setCache((c) => ({ ...c, [id]: r }))).catch(() => {}))
-  }, [need.join(',')])
-  useStore((s) => s.theme)   // mavzu almashsa seriya ranglari qayta o'qiladi
-  const data = need.map((id) => cache[id]).filter(Boolean)
-    .sort((a, b) => (a.study_index2 ?? 0) - (b.study_index2 ?? 0) || (a.study_index ?? 0) - (b.study_index ?? 0))
-  const M = METRICS.find((m) => m.id === metric) || METRICS[0]
-
-  const exportCsv = () => {
-    const lines = [['run_id', 'scenario', 'engine', 'param', 'value', 'param2', 'value2', 'flow', 'avg_thr_bps', 'avg_delay_ms', 'avg_rtt_ms', 'avg_jitter_ms', 'loss_pct'].join(',')]
-    data.forEach((r) => Object.values(r.flows || {}).forEach((f) => {
-      const s = f.summary || {}
-      lines.push([r.run_id, r.scenario_name, r.engine, r.study_param?.label, r.study_value, r.study_param2?.label, r.study_value2, JSON.stringify(f.label || f.id),
-        s.avg_thr_bps, s.avg_delay_ms, s.avg_rtt_ms, s.avg_jitter_ms, s.loss_pct].map((v) => v ?? '').join(','))
-    }))
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type: 'text/csv' })); a.download = `${pname}_natijalar.csv`; a.click()
+    if (win.arg?.run) {auto.current=true;setStudy(null);setSelected([win.arg.run])}
+    if (win.arg?.study) {auto.current=true;setStudy(win.arg.study)}
+  },[win.arg])
+  useEffect(() => {
+    if (!auto.current && runs.length) {
+      auto.current=true
+      const first=runs.find(run => run.status === 'done' && !run.study_id) || runs.find(run => !run.study_id)
+      if (first) setSelected([first.run_id])
+    }
+  },[runs])
+  useEffect(() => {
+    if (!showInvalid) return
+    const controller=new AbortController()
+    setInvalidError('')
+    api.get<InvalidResults>(`/api/results/${encodeURIComponent(pname)}/invalid?limit=20&offset=${invalidPage*20}`,controller.signal)
+      .then(setInvalid).catch(error => {if (!controller.signal.aborted) setInvalidError(error.message)})
+    return () => controller.abort()
+  },[showInvalid,invalidPage,pname,epoch])
+  useStore(state => state.theme)
+  const refresh=() => {history.refresh();setEpoch(value => value+1)}
+  const choose=(id:string,checked=true,exclusive=false) => {
+    auto.current=true;setStudy(null);setFlowSel('');setActionError('')
+    setSelected(current => {
+      if (!checked) return current.filter(value => value !== id)
+      if (exclusive) return [id]
+      if (current.includes(id)) return current
+      if (current.length >= 20) {toast('Solishtirish uchun ko‘pi bilan 20 ta natija tanlang.','warn');return current}
+      return [...current,id]
+    })
   }
-  const summaryTable = (key: (r: RunResult) => string, keyHead: string) => (
-    <Section title="Xulosa (o'rtacha qiymatlar)">
-      <DataTable columns={[keyHead, 'Oqim', "O'tkazuvchanlik", 'Kechikish', 'RTT', 'Jitter', "Yo'qotish"]}
-        rows={data.flatMap((r) => Object.values(r.flows || {}).map((f) => { const s = f.summary || {}; return [key(r), f.label || f.id, fmtBps(s.avg_thr_bps), fmtMs(s.avg_delay_ms), fmtMs(s.avg_rtt_ms), fmtMs(s.avg_jitter_ms), fmtPct(s.loss_pct)] }))} />
-    </Section>
-  )
-  const metricTabs = <Segmented value={metric} onChange={(v) => { setMetric(v); storage.set('netlab.metric', v) }} items={METRICS.map((m) => ({ value: m.id, label: m.label }))} />
+  const perform=async (id:string,kind:'cancel'|'delete'|'study') => {
+    if (kind === 'delete' && !confirm('Natija o‘chirilsinmi?')) return
+    setAction(id);setActionError('')
+    try {
+      if (kind === 'delete') {await api.del(`${root}/${encodeURIComponent(id)}`);setSelected(current => current.filter(value => value !== id))}
+      else await api.post(kind === 'study' ? `/api/studies/${encodeURIComponent(pname)}/${encodeURIComponent(id)}/cancel` : `${root}/${encodeURIComponent(id)}/cancel`)
+      refresh()
+    } catch(error) {setActionError(error instanceof Error ? error.message : 'Amal bajarilmadi')}
+    finally {setAction('')}
+  }
+  const exportCsv=() => downloadCsv(resultsCsv(data),`${pname}_natijalar.csv`)
+  const exportComparison=async () => {
+    setAction('export');setActionError('')
+    try {
+      const response=await fetch('/api/reports/compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project:pname,run_ids:selected})})
+      if (!response.ok) {const error=await response.json();throw new Error(error.error || error.detail || 'Hisobot tayyorlanmadi')}
+      const url=URL.createObjectURL(await response.blob()), anchor=document.createElement('a')
+      anchor.href=url;anchor.download=pname+'_solishtirish.html';anchor.click();setTimeout(() => URL.revokeObjectURL(url),1000)
+    } catch(error) {setActionError(error instanceof Error ? error.message : 'Eksport bajarilmadi')}
+    finally {setAction('')}
+  }
+  const summaryTable=(key:(run:RunResult)=>string,keyHead:string) => <ResultSummary data={data} getKey={key} heading={keyHead} />
+  const metricTabs = <Segmented className="h-auto flex-wrap [&_button]:whitespace-nowrap" value={metric} onChange={(v) => { setMetric(v); storage.set('netlab.metric', v) }} items={METRICS.map((m) => ({ value: m.id, label: m.label }))} />
 
   let body: React.ReactNode
-  if (!data.length) body = <div className="p-8 text-center text-xs text-muted-foreground">{study ? 'Tadqiqot natijalari hali tayyor emas…' : 'Chapdan bir yoki bir nechta natijani tanlang.'}</div>
+  if (study && !validAxes) body = <div role="alert" className="rounded-lg border border-warning/40 p-4 text-xs text-warning">Variant koordinatalari noto‘g‘ri; grafik hisoblanmadi. To‘liq holat yuqorida ko‘rsatilgan.</div>
+  else if (!data.length) body = <div className="p-8 text-center text-xs text-muted-foreground">{study ? 'Tadqiqot natijalari hali tayyor emas…' : 'Chapdan bir yoki bir nechta natijani tanlang.'}</div>
   else if (study) {
     const P = data[0].study_param || {}, P2 = data[0].study_param2
-    const flowIds = [...new Set(data.flatMap((r) => Object.keys(r.flows || {})))]
+    const flowIds = [...new Set(data.flatMap((r) => visibleFlows(r).map(([id]) => id)))]
     const fsel = flowIds.includes(flowSel) ? flowSel : flowIds[0]
     const val = (r?: RunResult): number | null => {
       if (!r) return null
       if (M.link) { const lid = P.kind === 'link' ? P.link : Object.keys(r.links || {})[0]; const pts = r.links?.[lid] || []; return pts.length ? pts.reduce((a, p) => a + p.util, 0) / pts.length : null }
-      return (r.flows[fsel]?.summary || {})[M.sum!] ?? null
+      return (r.flows?.[fsel]?.summary || {})[M.sum!] ?? null
     }
     if (P2) {
-      const xs = [...new Set(data.map((r) => r.study_index!))].sort((a, b) => a - b), ys = [...new Set(data.map((r) => r.study_index2!))].sort((a, b) => a - b)
+      const xs = [...new Set(studyRuns.map((r) => r.study_index!))].sort((a, b) => a - b), ys = [...new Set(studyRuns.map((r) => r.study_index2!))].sort((a, b) => a - b)
       const find = (i: number, j: number) => data.find((r) => r.study_index === xs[i] && r.study_index2 === ys[j])
       body = (
         <>
           <div className="flex flex-wrap items-center gap-2">{metricTabs}{!M.link && <><span className="text-xs text-muted-foreground">Oqim:</span>
-            <Select className="w-56" value={fsel} onChange={setFlowSel} options={flowIds.map((f) => ({ value: f, label: data[0].flows[f]?.label || f }))} /></>}</div>
-          <Heatmap xs={xs.map((i) => data.find((r) => r.study_index === i)!.study_value)} ys={ys.map((j) => data.find((r) => r.study_index2 === j)!.study_value2)}
+            <Select className="w-56" value={fsel} onChange={setFlowSel} options={flowIds.map((f) => ({ value: f, label: data[0].flows?.[f]?.label || f }))} /></>}</div>
+          <Heatmap xs={xs.map((i) => studyRuns.find((r) => r.study_index === i)!.study_value)} ys={ys.map((j) => studyRuns.find((r) => r.study_index2 === j)!.study_value2)}
             value={(i, j) => val(find(i, j))} fmt={M.fmt} xLabel={`${P.label} (${FIELD_NAME[P.field] || P.field})`} yLabel={`${P2.label} (${FIELD_NAME[P2.field] || P2.field})`}
-            title={`${M.label} (o'rtacha)${M.link ? '' : ' — ' + (data[0].flows[fsel]?.label || fsel)} · ${engineName(data[0].engine)}`} />
+            title={`${M.label} (o'rtacha)${M.link ? '' : ' — ' + (data[0].flows?.[fsel]?.label || fsel)} · ${engineName(data[0].engine)}`} />
           {summaryTable((r) => `${r.study_value} × ${r.study_value2}`, `${P.label} × ${P2.label}`)}
         </>
       )
     } else {
-      const sorted = [...data].sort((a, b) => (a.study_index || 0) - (b.study_index || 0))
-      const xs = sorted.map((r) => pnum(r.study_value))
-      const series: Series[] = M.link ? [{ name: 'kabel yuklamasi', color: seriesColor(0), points: sorted.map((r, i) => ({ x: xs[i], y: val(r) })) }]
-        : flowIds.slice(0, 6).map((fid, k) => ({ name: sorted[0].flows[fid]?.label || fid, color: seriesColor(k), points: sorted.map((r, i) => ({ x: xs[i], y: (r.flows[fid]?.summary || {})[M.sum!] ?? null })) }))
+      const sorted = [...studyRuns].sort((a, b) => (a.study_index || 0) - (b.study_index || 0))
+      const xs = sorted.map((_,i) => i)
+      const series: Series[] = M.link ? [{ name: 'kabel yuklamasi', color: seriesColor(0), points: sorted.map((r, i) => ({ x: xs[i], y: val(data.find(item => item.run_id === r.run_id)) })) }]
+        : flowIds.slice(0, 6).map((fid, k) => ({ name: data[0].flows?.[fid]?.label || fid, color: seriesColor(k), points: sorted.map((r, i) => ({ x: xs[i], y: (data.find(item => item.run_id === r.run_id)?.flows?.[fid]?.summary || {})[M.sum!] ?? null })) }))
       body = (
         <>
           <div className="flex flex-wrap items-center gap-2">{metricTabs}</div>
-          <LineChart series={series} fmt={M.fmt} markers xTicks={xs} xFmt={(x) => String(x)} xMax={Math.max(...xs)}
+          <LineChart series={series} fmt={M.fmt} markers xTicks={xs} xFmt={(x) => String(sorted[x]?.study_value ?? x)} xMax={Math.max(...xs)}
             title={`${M.label} (o'rtacha) ↔ ${P.label} — ${FIELD_NAME[P.field] || P.field} · ${engineName(sorted[0].engine)}`} />
           {summaryTable((r) => String(r.study_value), P.label)}
         </>
       )
     }
   } else {
-    const multi = data.length > 1
-    const flowIds = [...new Set(data.flatMap((r) => Object.keys(r.flows || {})))]
-    let series: Series[] = []
-    let ctrl: React.ReactNode = null
-    if (M.link) {
-      const lids = [...new Set(data.flatMap((r) => Object.keys(r.links || {})))]
-      const ls = lids.includes(linkSel) ? linkSel : lids[0] || ''
-      ctrl = <Select className="w-56" value={ls} onChange={setLinkSel} options={lids.map((l) => { const L = project.links[l]; return { value: l, label: L ? `${l}: ${L.a.dev}↔${L.b.dev}` : l } })} />
-      series = data.map((r, i) => ({ name: runName(r), color: seriesColor(i), points: (r.links?.[ls] || []).map((p) => ({ x: p.t, y: p.util })) }))
-    } else if (multi) {
-      const fs = flowIds.includes(flowSel) ? flowSel : flowIds[0]
-      ctrl = <><span className="text-xs text-muted-foreground">Oqim:</span><Select className="w-56" value={fs} onChange={setFlowSel} options={flowIds.map((f) => ({ value: f, label: data.find((r) => r.flows[f])?.flows[f].label || f }))} /></>
-      series = data.map((r, i) => ({ name: runName(r), color: seriesColor(i), points: (r.flows[fs]?.series || []).map((p) => ({ x: p.t, y: (p as any)[metric] })) }))
-    } else {
-      series = flowIds.map((fid, i) => ({ name: data[0].flows[fid].label || fid, color: seriesColor(i), points: data[0].flows[fid].series.map((p) => ({ x: p.t, y: (p as any)[metric] })) }))
-    }
-    const notes = [...new Set(data.flatMap((r) => r.notes || []))]
-    const errs = data.filter((r) => r.status === 'error').map((r) => `${runName(r)}: ${r.error}`)
-    body = (
-      <>
-        <div className="flex flex-wrap items-center gap-2">{metricTabs}{ctrl}</div>
-        <LineChart series={series.slice(0, 6)} fmt={M.fmt} events={multi ? [] : data[0].events || []} xMax={Math.max(...data.map((r) => r.duration || 0))}
-          title={M.label + (M.link ? '' : multi ? ' — solishtirish' : ' — barcha oqimlar')} />
-        {summaryTable(runName, 'Ishga tushirish')}
-        {(notes.length > 0 || errs.length > 0) && <div className="whitespace-pre-wrap text-[11px] leading-5 text-muted-foreground">{[...errs.map((e) => '⚠ ' + e), ...notes.map((n) => '• ' + n)].join('\n')}</div>}
-      </>
-    )
+    const notes=[...new Set(data.flatMap(run => run.notes || []))]
+    const errors=data.filter(run => run.status === 'error').map(run => `${runName(run)}: ${run.error}`)
+    body=<><div className="flex flex-wrap items-center gap-2">{metricTabs}</div>
+      <RunChart data={data} metric={M} flow={flowSel} link={linkSel} onFlow={setFlowSel} onLink={setLinkSel} />
+      {summaryTable(runName,'Ishga tushirish')}
+      {(notes.length > 0 || errors.length > 0) && <div className="whitespace-pre-wrap text-[11px] leading-5 text-muted-foreground">{[...errors.map(error => '⚠ '+error),...notes.map(note => '• '+note)].join('\n')}</div>}
+    </>
   }
 
-  // ro'yxat: tadqiqotlar guruhlangan
-  const studies = [...new Set(runs.filter((r) => r.study_id).map((r) => r.study_id!))]
   return (
-    <WindowFrame win={win} icon={<BarChart3 />} title={'Natijalar — ' + pname} sub="ssenariy ishga tushirishlari: grafiklar, solishtirish, tadqiqotlar">
-      <div className="grid min-h-0 flex-1 grid-cols-[250px_1fr]">
-        <div className="flex min-h-0 flex-col gap-1.5 overflow-auto border-r p-3">
-          <div className="px-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Ishga tushirishlar</div>
-          {!runs.length && <div className="px-1 text-xs text-muted-foreground">Hali yo'q — Ssenariy oynasida "Ishga tushirish".</div>}
-          {studies.map((sid) => {
-            const mem = runs.filter((r) => r.study_id === sid), r0 = mem[0]
-            const twoD = mem.some((r) => r.study_param2)
-            return (
-              <button key={sid} onClick={() => setStudy(sid)} className={cn('flex flex-col gap-0.5 rounded-lg border px-2.5 py-2 text-left text-xs transition-colors hover:border-foreground/40',
-                study === sid && 'border-foreground/60 bg-accent')}>
-                <span className="font-semibold">Tadqiqot{twoD ? ' (2D)' : ''}: {r0.scenario_name}</span>
-                <span className="text-[11px] text-muted-foreground">{mem.length} ta · {engineName(r0.engine)}{mem.some((r) => r.status === 'running') ? ' · ishlayapti…' : ''}</span>
-              </button>
-            )
-          })}
-          {runs.filter((r) => !r.study_id).map((r) => (
-            <label key={r.run_id} className={cn('flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-2 text-xs hover:border-foreground/40', r.status === 'error' && 'border-destructive/50')}>
-              <Checkbox checked={selected.includes(r.run_id) && !study} onChange={(v) => { setStudy(null); setSelected((s) => v ? [...s.filter((x) => x !== r.run_id), r.run_id] : s.filter((x) => x !== r.run_id)) }} />
-              <div className="min-w-0 flex-1">
-                <div className="truncate font-semibold">{r.label || r.scenario_name}{r.status === 'error' && ' ⚠'}</div>
-                <div className="text-[11px] text-muted-foreground">{engineName(r.engine)} · {r.status === 'running' ? Math.round((r.progress || 0) * 100) + '%…' : new Date(r.created * 1000).toLocaleTimeString()}{r.wall_s != null ? ` · ${r.wall_s}s` : ''}</div>
-              </div>
-              {r.status !== 'running' && <button title="O'chirish" className="text-muted-foreground hover:text-destructive" onClick={async (e) => {
-                e.preventDefault(); if (!confirm("Natija o'chirilsinmi?")) return
-                await api.del(`/api/runs/${encodeURIComponent(pname)}/${r.run_id}`); setSelected((s) => s.filter((x) => x !== r.run_id)); loadList()
-              }}><X className="h-3.5 w-3.5" /></button>}
-            </label>
-          ))}
-        </div>
-        <div className="flex min-h-0 flex-col gap-3 overflow-auto p-3">
-          <div className="flex items-center gap-2">
-            {study && <Button size="sm" variant="ghost" onClick={() => setStudy(null)}><ArrowLeft /> vaqt bo'yicha</Button>}
-            <div className="flex-1" />
-            <Button size="sm" variant="outline" onClick={exportCsv} disabled={!data.length}><Download /> CSV</Button>
+    <WindowFrame win={win} icon={<BarChart3 />} title={'Natijalar — '+pname} sub="Grafiklar, ilovalar sifati va tarmoq hodisalari">
+      <div className="results-workspace flex min-h-0 flex-1 flex-col"><div className="results-layout grid min-h-0 flex-1">
+        <ResultsHistory history={history} visible={visible} search={search} onSearch={setSearch} selected={selected} study={study} onStudy={id => {setStudy(id);setFlowSel('');setActionError('')}} onChoose={choose} onAction={perform} busy={Boolean(action)} onInvalid={() => setShowInvalid(value => !value)} />
+        <div className="flex min-h-0 min-w-0 flex-col">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-card/40 px-4 py-2.5">
+            {study ? <Button size="xs" variant="ghost" onClick={() => setStudy(null)}><ArrowLeft /> Natijalarga</Button> : <div className="flex items-center gap-2 text-xs"><span className="font-semibold">{selected.length ? selected.length+' ta tanlandi' : 'Tahlil'}</span>{selected.length > 0 && <button aria-label="Tanlovni tozalash" className="text-muted-foreground hover:text-foreground" onClick={() => {auto.current=true;setSelected([])}}><X className="size-3.5" /></button>}</div>}
+            <div className="flex-1" /><Button size="xs" variant="ghost" onClick={refresh} aria-label="Natijalarni yangilash"><RefreshCw className={cn('size-3.5',history.loading && 'animate-spin')} /> Yangilash</Button>
+            {study ? <Button size="xs" variant="outline" asChild><a href={`/api/studies/${encodeURIComponent(pname)}/${encodeURIComponent(study)}/report.html`} target="_blank" rel="noreferrer"><FileText /> HTML</a></Button> : data.length === 1 ? <><Button size="xs" variant="outline" asChild><a href={`${root}/${encodeURIComponent(data[0].run_id)}/report.html`} target="_blank" rel="noreferrer"><FileText /> HTML</a></Button><Button size="xs" variant="outline" asChild><a href={`${root}/${encodeURIComponent(data[0].run_id)}/export.zip`}><Download /> ZIP</a></Button></> : data.length > 1 ? <Button size="xs" variant="outline" disabled={Boolean(action) || data.length !== selected.length} onClick={exportComparison}><FileText /> HTML</Button> : null}
+            <Button size="xs" variant="outline" onClick={exportCsv} disabled={!data.length || detail.loading.length > 0}><Download /> CSV</Button>
           </div>
-          {body}
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
+            {actionError && <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs">{actionError}</div>}
+            {showInvalid && <Section title="O‘qilmagan natijalar" right={<Button size="xs" variant="ghost" disabled={Boolean(action)} onClick={async () => {setAction('reindex');try {await api.post(root+'/reindex');setInvalidPage(0);refresh()} catch(error) {setActionError(error instanceof Error ? error.message : 'Qayta tekshirilmadi')} finally {setAction('')}}}><RefreshCw /> Qayta tekshirish</Button>}>
+              {invalidError ? <p role="alert" className="p-3 text-xs text-destructive">{invalidError}</p> : invalid ? <><DataTable columns={['Run ID','Fayl, bayt','Sabab']} rows={invalid.files.map(file => [file.run_id,file.size,file.error])} empty="Barcha natijalar o‘qildi. Buzilgan fayl topilmadi." />{invalid.total > 20 && <div className="flex items-center justify-between border-t p-2 text-xs"><span>{invalidPage*20+1}–{Math.min((invalidPage+1)*20,invalid.total)} / {invalid.total}</span><div className="flex gap-1"><Button size="xs" variant="ghost" disabled={!invalidPage} onClick={() => setInvalidPage(value => value-1)}>Oldingi</Button><Button size="xs" variant="ghost" disabled={(invalidPage+1)*20 >= invalid.total} onClick={() => setInvalidPage(value => value+1)}>Keyingi</Button></div></div>}</> : <p className="p-3 text-xs text-muted-foreground">Tekshirilmoqda…</p>}
+            </Section>}
+            {study && <Section title="Tadqiqot holati" right={studyState && <StateBadge status={studyState.status} />}>
+              {detail.studyError ? <p role="alert" className="p-3 text-xs text-destructive">{detail.studyError}</p> : studyState ? <><div className="flex flex-wrap items-center justify-between gap-2 p-3 text-xs text-muted-foreground"><span>{studyState.observed_runs} / {studyState.planned_runs ?? '?'} variant · {studyState.complete ? 'Barcha variantlar tayyor' : studyState.settled ? 'Variantlar yakunlandi; barchasi muvaffaqiyatli emas' : 'Tadqiqot hali to‘liq emas'}</span>{isActive(studyState.status) && <Button size="xs" variant="outline" disabled={Boolean(action)} onClick={() => perform(study,'study')}><Square /> Tadqiqotni bekor qilish</Button>}</div><DataTable columns={['Run ID','Qiymat','Holat','Xato']} rows={studyState.runs.map(run => [run.run_id,String(run.study_value ?? '')+(run.study_value2 != null ? ' × '+String(run.study_value2) : ''),<StateBadge status={run.status} />,run.error || '—'])} />{!!studyState.missing_run_ids.length && <p className="p-3 text-xs text-warning">Yetishmayotgan variantlar: {studyState.missing_run_ids.join(', ')}</p>}</> : <p className="p-3 text-xs text-muted-foreground">Variantlar yuklanmoqda…</p>}
+            </Section>}
+            {!study && selected.length > 0 && <div className="flex flex-wrap gap-2">{selected.map(id => {const run=runs.find(item => item.run_id === id) || data.find(item => item.run_id === id);return <div key={id} className="flex max-w-full items-center gap-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-[10px]"><span className="max-w-48 truncate" title={id}>{run?.label || run?.scenario_name || id}</span>{run && <StateBadge status={runState(run)} />}{detail.loading.includes(id) && <Loader2 className="size-3 animate-spin" />}</div>})}</div>}
+            {Object.entries(detail.errors).map(([id,error]) => <div key={id} role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs"><b>{id}</b><p className="mt-1">{error}</p><Button size="xs" variant="outline" className="mt-2" onClick={refresh}>Qayta urinish</Button></div>)}
+            {detail.loading.length > 0 && <div role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> {detail.loading.length} ta natija yuklanmoqda…</div>}
+            {!!data.length && <><ResultStats data={data} /><div className="sticky top-0 z-10 flex shrink-0 gap-1 overflow-auto border-b bg-background/95" role="tablist" aria-label="Natija bo‘limlari">{([{id:'charts',label:'Grafiklar'},{id:'apps',label:'Ilovalar'},{id:'network',label:'Tarmoq sifati'},{id:'events',label:'Hodisalar'}] as const).map(tab => <button key={tab.id} role="tab" tabIndex={view === tab.id ? 0 : -1} onKeyDown={event => {
+                  const ids=['charts','apps','network','events'] as const
+                  const current=ids.indexOf(view)
+                  const next=event.key === 'ArrowRight' ? (current+1)%4 : event.key === 'ArrowLeft' ? (current+3)%4 : event.key === 'Home' ? 0 : event.key === 'End' ? 3 : -1
+                  if (next >= 0) {event.preventDefault();setView(ids[next]);document.getElementById('result-tab-'+win.id+'-'+ids[next])?.focus()}
+                }} aria-selected={view === tab.id} aria-controls={'result-'+win.id+'-'+tab.id} id={'result-tab-'+win.id+'-'+tab.id} onClick={() => setView(tab.id)} className={cn('whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground',view === tab.id && 'border-primary text-foreground')}>{tab.label}</button>)}</div></>}
+            <div id={'result-'+win.id+'-'+view} role={data.length ? "tabpanel" : undefined} aria-labelledby={data.length ? 'result-tab-'+win.id+'-'+view : undefined} className="flex flex-col gap-3">{view === 'charts' || !data.length ? body : <ResultInsights data={data} tab={view} />}</div>
+          </div>
         </div>
-      </div>
+      </div></div>
     </WindowFrame>
   )
 }

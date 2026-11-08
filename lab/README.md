@@ -179,6 +179,9 @@ npm run dev       # http://127.0.0.1:5173 (backend 8080 da ishlab tursin: /api v
 npm run build     # tiplar tekshiruvi + lab/web-react ga yig'ish (commit qiling)
 ```
 
+Natijalar oynasidagi yangi tahlil bo‘limlari, eksport, mobil ko‘rinish va brauzer
+tekshiruvlari: [Natijalar oynasi qo‘llanmasi](../docs/ui-results-workspace.md).
+
 Tuzilma: `src/lib/` — API, WebSocket hodisalari, zustand store, Wi-Fi modeli;
 `src/components/ui/` — shadcn komponentlari; `src/features/` — kanvas, panellar va
 oynalar (qurilma, P4, SDN, ssenariy, natijalar); `src/components/charts.tsx` —

@@ -1,12 +1,13 @@
 export const fmtBps = (b?: number | null) => {
-  if (!b) return '0'
+  if (b == null || !Number.isFinite(b)) return '—'
+  if (b === 0) return '0 b/s'
   if (b >= 1e9) return (b / 1e9).toFixed(2) + ' Gb/s'
   if (b >= 1e6) return (b / 1e6).toFixed(2) + ' Mb/s'
   if (b >= 1e3) return (b / 1e3).toFixed(1) + ' kb/s'
   return Math.round(b) + ' b/s'
 }
-export const fmtMs = (v?: number | null) => v == null ? '—' : v >= 1000 ? (v / 1000).toFixed(2) + ' s' : v.toFixed(v < 10 ? 2 : 1) + ' ms'
-export const fmtPct = (v?: number | null) => v == null ? '—' : v.toFixed(v < 1 ? 2 : 1) + '%'
+export const fmtMs = (v?: number | null) => v == null || !Number.isFinite(v) ? '—' : v >= 1000 ? (v / 1000).toFixed(2) + ' s' : v.toFixed(v < 10 ? 2 : 1) + ' ms'
+export const fmtPct = (v?: number | null) => v == null || !Number.isFinite(v) ? '—' : v.toFixed(v < 1 ? 2 : 1) + '%'
 export const clock = (ts?: number) => (ts ? new Date(ts * 1000) : new Date()).toTimeString().slice(0, 8)
 export const engineName = (e?: string) => ({ analytic: 'analitik', ns3: 'ns-3', mininet: 'mininet' } as Record<string, string>)[e || ''] || e || ''
 

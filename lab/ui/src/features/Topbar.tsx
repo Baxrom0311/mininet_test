@@ -52,7 +52,7 @@ export function Topbar() {
       </div>
       <div className="flex items-center gap-1.5">
         <span className={cn('h-2 w-2 rounded-full bg-warning', !dirty && 'invisible')} title="Saqlanmagan o'zgarishlar" />
-        <Input className="h-8 w-44 font-medium" value={name} onChange={(e) => setName(e.target.value)}
+        <Input aria-label="Loyiha nomi" className="h-8 w-44 font-medium" value={name} onChange={(e) => setName(e.target.value)}
           onBlur={() => { const v = name.trim().replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40) || 'untitled'; setName(v); if (v !== project.name) mutate((p) => { p.name = v }) }} />
       </div>
       <Button variant="ghost" size="sm" onClick={() => { if (running()) return toast("Avval tarmoqni to'xtating", 'warn'); if (confirmDirty()) { loadProject(emptyProject()); } }}><FilePlus2 /> Yangi</Button>
