@@ -6,14 +6,14 @@ import { cn } from '@/lib/utils'
 export type Option = { value: string; label: React.ReactNode; disabled?: boolean }
 
 /** Ixcham shadcn Select: options ro'yxati bilan. Bo'sh qiymat uchun "__none__" ishlatiladi (Radix bo'sh qiymatni qabul qilmaydi). */
-export function Select({ value, onChange, options, placeholder, className, disabled }: {
-  value: string | undefined; onChange: (v: string) => void; options: Option[]; placeholder?: string; className?: string; disabled?: boolean
+export function Select({ value, onChange, options, placeholder, className, disabled, ariaLabel }: {
+  value: string | undefined; onChange: (v: string) => void; options: Option[]; placeholder?: string; className?: string; disabled?: boolean; ariaLabel?: string
 }) {
   const NONE = '__none__'
   const v = value === '' || value == null ? NONE : value
   return (
     <SelectPrimitive.Root value={v} onValueChange={(x) => onChange(x === NONE ? '' : x)} disabled={disabled}>
-      <SelectPrimitive.Trigger className={cn(
+      <SelectPrimitive.Trigger aria-label={ariaLabel} className={cn(
         'flex h-8 w-full items-center justify-between gap-2 whitespace-nowrap rounded-md border border-input bg-background/50 px-2.5 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 [&>span]:truncate',
         className)}>
         <SelectPrimitive.Value placeholder={placeholder} />

@@ -116,9 +116,9 @@ jobs:
           node-version: "20"
       # React UI tiplar tekshiruvi va yig'ish. Yig'ilgan lab/web-react repo'da saqlanadi
       # (foydalanuvchiga Node.js shart emas); bu yerda manba bilan mosligi tekshiriladi.
-      - name: Build React UI (typecheck + vite build)
+      - name: Test and build React UI (unit tests + typecheck + vite build)
         working-directory: lab/ui
-        run: npm ci --no-audit --no-fund && npm run build
+        run: npm ci --no-audit --no-fund && npm test && npm run build
       - name: Built UI must be committed (lab/web-react up to date)
         run: |
           git diff --stat --exit-code -- lab/web-react || (echo "lab/web-react eskirgan: cd lab/ui && npm run build" && exit 1)

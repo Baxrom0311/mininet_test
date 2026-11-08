@@ -291,10 +291,11 @@ export function openWin(kind: WinKind, ref: string, opts: { tab?: string; w?: nu
   const id = `${kind}:${ref}`
   const s = S()
   const ex = s.wins.find((w) => w.id === id)
+  const arg = opts.arg && kind === 'results' ? { ...opts.arg, project: s.project.name } : opts.arg
   const z = s.zTop + 1
-  if (ex) { set({ zTop: z, wins: s.wins.map((w) => w.id === id ? { ...w, z, tab: opts.tab || w.tab, arg: opts.arg ?? w.arg } : w) }); return }
+  if (ex) { set({ zTop: z, wins: s.wins.map((w) => w.id === id ? { ...w, z, tab: opts.tab || w.tab, arg: arg ?? w.arg } : w) }); return }
   const off = (s.wins.length * 28) % 200
-  const w: Win = { id, kind, ref, tab: opts.tab, z, x: Math.min(innerWidth - 480, 290 + off), y: Math.min(innerHeight - 340, 80 + off), w: opts.w || 760, h: opts.h || 540, arg: opts.arg }
+  const w: Win = { id, kind, ref, tab: opts.tab, z, x: Math.min(innerWidth - 480, 290 + off), y: Math.min(innerHeight - 340, 80 + off), w: opts.w || 760, h: opts.h || 540, arg }
   set({ zTop: z, wins: [...s.wins, w] })
 }
 export const closeWin = (id: string) => set((s) => ({ wins: s.wins.filter((w) => w.id !== id) }))
