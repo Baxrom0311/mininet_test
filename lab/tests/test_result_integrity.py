@@ -85,9 +85,11 @@ class ResultIntegrityTests(unittest.TestCase):
         with patch('lab.engines.analytic.run', return_value={'duration': 1, 'flows': {}, 'metric': float('nan')}):
             rid = self.manager.start(project, 'test', 'analytic')['run_id']
             deadline = time.monotonic() + 5
-            while self.manager.active and time.monotonic() < deadline:
+            # The engine may release active progress before the queue's exception
+            # handler commits its error row. Await queue ownership cleanup.
+            while self.manager.futures and time.monotonic() < deadline:
                 time.sleep(.01)
-            self.assertFalse(self.manager.active)
+            self.assertFalse(self.manager.futures)
         self.assertEqual(self.manager.get(project['name'], rid)['status'], 'error')
         self.assertFalse(Path(self.temp.name, project['name'], rid+'.json').exists())
 
