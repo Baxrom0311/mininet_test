@@ -1,0 +1,184 @@
+{
+  "reference_commit": "bdec21e",
+  "buffered": {
+    "kind": "synthetic ZIP export; not Mininet/ns-3 throughput",
+    "measured_at": "2026-11-08T11:27:24.666574+00:00",
+    "python": "3.12.14",
+    "flows": 20,
+    "points_per_flow": 2000,
+    "samples": 40000,
+    "target": "bytes",
+    "zip_bytes": 412774,
+    "wall_s": 0.24051804100599838,
+    "traced_peak_bytes": 18603295,
+    "entries": {
+      "flows.csv": {
+        "bytes": 1437922,
+        "sha256": "f9d775ba428b8eeac0cd37a3e37bee9a65ad3dce8e2cd75900a60a256963fee1"
+      },
+      "flow_summary.csv": {
+        "bytes": 942,
+        "sha256": "516a6617ed385749e6a026233fa64cf1384dd31ef434f554e69c4da7e39d5138"
+      },
+      "links.csv": {
+        "bytes": 105,
+        "sha256": "92f72b54777db25f1a7ea1688e374c74739cc90ebccb864fddad249920eafea7"
+      },
+      "nodes.csv": {
+        "bytes": 105,
+        "sha256": "4ead7f28a86f9ea2ed8e4676f8b727da3e0348386ddb732e6a8fceff6771771b"
+      },
+      "apps.csv": {
+        "bytes": 118,
+        "sha256": "5105ff30160ed3af61740218c493482abe9107865b5b589afc94c43009bdb71c"
+      },
+      "availability.csv": {
+        "bytes": 70,
+        "sha256": "84766ef5f37f8f0ea3ceeac809bb286f809dcde8df18cf650b11b9d3a948a6ac"
+      },
+      "convergence.csv": {
+        "bytes": 66,
+        "sha256": "c4f2ecfce2e6b9be4717e946e1a3da8a1540f5a87e585506616226b8a4c5acf0"
+      },
+      "route_events.csv": {
+        "bytes": 53,
+        "sha256": "f70db4cd89a77501152edd9c763a08f3305ab52cffd359482fe9243b77b6e91f"
+      },
+      "events.csv": {
+        "bytes": 60,
+        "sha256": "400e42d8381e8ad29d0be478b31bc3e44e0b7004f4b79e69fcf666220d3b0af4"
+      },
+      "results.json": {
+        "bytes": 2580509,
+        "sha256": "e5ea9fd8a79eeb37cec00ac1e752d7041fcb04a960b643e7666c406e75a53314"
+      }
+    },
+    "notes": [
+      "Input fixture allocation and archive inspection are excluded from the measured peak.",
+      "Wall time is measured in a separate untraced export; allocation measurement uses a second export.",
+      "tracemalloc is Python allocation tracing, not total process RSS or complete native memory accounting.",
+      "The bytes target includes final ZIP bytes; the file target writes directly to a temporary file."
+    ]
+  },
+  "streamed_bytes": {
+    "kind": "synthetic ZIP export; not Mininet/ns-3 throughput",
+    "measured_at": "2026-11-08T11:27:27.391195+00:00",
+    "python": "3.12.14",
+    "flows": 20,
+    "points_per_flow": 2000,
+    "samples": 40000,
+    "target": "bytes",
+    "zip_bytes": 412974,
+    "wall_s": 0.5299911580004846,
+    "traced_peak_bytes": 812110,
+    "entries": {
+      "flows.csv": {
+        "bytes": 1437922,
+        "sha256": "f9d775ba428b8eeac0cd37a3e37bee9a65ad3dce8e2cd75900a60a256963fee1"
+      },
+      "flow_summary.csv": {
+        "bytes": 942,
+        "sha256": "516a6617ed385749e6a026233fa64cf1384dd31ef434f554e69c4da7e39d5138"
+      },
+      "links.csv": {
+        "bytes": 105,
+        "sha256": "92f72b54777db25f1a7ea1688e374c74739cc90ebccb864fddad249920eafea7"
+      },
+      "nodes.csv": {
+        "bytes": 105,
+        "sha256": "4ead7f28a86f9ea2ed8e4676f8b727da3e0348386ddb732e6a8fceff6771771b"
+      },
+      "apps.csv": {
+        "bytes": 118,
+        "sha256": "5105ff30160ed3af61740218c493482abe9107865b5b589afc94c43009bdb71c"
+      },
+      "availability.csv": {
+        "bytes": 70,
+        "sha256": "84766ef5f37f8f0ea3ceeac809bb286f809dcde8df18cf650b11b9d3a948a6ac"
+      },
+      "convergence.csv": {
+        "bytes": 66,
+        "sha256": "c4f2ecfce2e6b9be4717e946e1a3da8a1540f5a87e585506616226b8a4c5acf0"
+      },
+      "route_events.csv": {
+        "bytes": 53,
+        "sha256": "f70db4cd89a77501152edd9c763a08f3305ab52cffd359482fe9243b77b6e91f"
+      },
+      "events.csv": {
+        "bytes": 60,
+        "sha256": "400e42d8381e8ad29d0be478b31bc3e44e0b7004f4b79e69fcf666220d3b0af4"
+      },
+      "results.json": {
+        "bytes": 2580509,
+        "sha256": "e5ea9fd8a79eeb37cec00ac1e752d7041fcb04a960b643e7666c406e75a53314"
+      }
+    },
+    "notes": [
+      "Input fixture allocation and archive inspection are excluded from the measured peak.",
+      "Wall time is measured in a separate untraced export; allocation measurement uses a second export.",
+      "tracemalloc is Python allocation tracing, not total process RSS or complete native memory accounting.",
+      "The bytes target includes final ZIP bytes; the file target writes directly to a temporary file."
+    ]
+  },
+  "streamed_file": {
+    "kind": "synthetic ZIP export; not Mininet/ns-3 throughput",
+    "measured_at": "2026-11-08T11:27:30.570833+00:00",
+    "python": "3.12.14",
+    "flows": 20,
+    "points_per_flow": 2000,
+    "samples": 40000,
+    "target": "file",
+    "zip_bytes": 412974,
+    "wall_s": 0.6416100899950834,
+    "traced_peak_bytes": 471881,
+    "entries": {
+      "flows.csv": {
+        "bytes": 1437922,
+        "sha256": "f9d775ba428b8eeac0cd37a3e37bee9a65ad3dce8e2cd75900a60a256963fee1"
+      },
+      "flow_summary.csv": {
+        "bytes": 942,
+        "sha256": "516a6617ed385749e6a026233fa64cf1384dd31ef434f554e69c4da7e39d5138"
+      },
+      "links.csv": {
+        "bytes": 105,
+        "sha256": "92f72b54777db25f1a7ea1688e374c74739cc90ebccb864fddad249920eafea7"
+      },
+      "nodes.csv": {
+        "bytes": 105,
+        "sha256": "4ead7f28a86f9ea2ed8e4676f8b727da3e0348386ddb732e6a8fceff6771771b"
+      },
+      "apps.csv": {
+        "bytes": 118,
+        "sha256": "5105ff30160ed3af61740218c493482abe9107865b5b589afc94c43009bdb71c"
+      },
+      "availability.csv": {
+        "bytes": 70,
+        "sha256": "84766ef5f37f8f0ea3ceeac809bb286f809dcde8df18cf650b11b9d3a948a6ac"
+      },
+      "convergence.csv": {
+        "bytes": 66,
+        "sha256": "c4f2ecfce2e6b9be4717e946e1a3da8a1540f5a87e585506616226b8a4c5acf0"
+      },
+      "route_events.csv": {
+        "bytes": 53,
+        "sha256": "f70db4cd89a77501152edd9c763a08f3305ab52cffd359482fe9243b77b6e91f"
+      },
+      "events.csv": {
+        "bytes": 60,
+        "sha256": "400e42d8381e8ad29d0be478b31bc3e44e0b7004f4b79e69fcf666220d3b0af4"
+      },
+      "results.json": {
+        "bytes": 2580509,
+        "sha256": "e5ea9fd8a79eeb37cec00ac1e752d7041fcb04a960b643e7666c406e75a53314"
+      }
+    },
+    "notes": [
+      "Input fixture allocation and archive inspection are excluded from the measured peak.",
+      "Wall time is measured in a separate untraced export; allocation measurement uses a second export.",
+      "tracemalloc is Python allocation tracing, not total process RSS or complete native memory accounting.",
+      "The bytes target includes final ZIP bytes; the file target writes directly to a temporary file."
+    ]
+  },
+  "identical_entry_contents": true
+}

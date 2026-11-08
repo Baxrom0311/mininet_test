@@ -33,16 +33,19 @@ bounded, including subnormal numbers and axes near floating-point precision
 limits. Unsafe ranges omit the chart; heatmaps normalize their color range to
 avoid overflow. Raw and tabular data remain available.
 
-The report CLI renders fully before writing. It writes a unique temporary file
-beside the destination and atomically replaces the destination after success.
+The report CLI writes a unique temporary file beside the destination and
+atomically replaces the destination after successful rendering. HTML renders
+in memory; ZIP entries write directly into the temporary file.
 Rendering or replacement failure reports an argparse error and preserves an
 existing output; temporary files are cleaned up. Directory input requires result
 IDs to match JSON filenames, consistent with server history loading. No fsync or
 power-loss durability guarantee is added.
 
-Reports and ZIPs remain buffered in memory, and validation walks their consumed
-series. This change does not introduce streaming export, point downsampling or
-full semantic validation of every extension field.
+HTML reports and the HTTP response's final ZIP bytes remain buffered in memory.
+ZIP CSV rows and JSON now write incrementally, including nested campaign ZIPs;
+see [stream-report-exports.md](stream-report-exports.md). Validation still walks
+consumed series. Point downsampling and full validation of extension schemas
+are not included.
 
 ```sh
 python -m unittest lab.tests.test_report_export_integrity -v

@@ -22,7 +22,7 @@ import tempfile
 import zipfile
 
 from lab.report_inputs import report_runs, validate_run
-from lab.report_export import _csv, csv_bundle
+from lab.report_export import _csv, csv_bundle, write_csv, write_csv_bundle, write_json, write_results
 from lab.analysis_windows import finite
 
 # UI bilan bir xil dataviz palitrasi (lab/ui/src/index.css: --s1..--s6, --seq-lo/hi)
@@ -624,25 +624,31 @@ def experiment_report(summary):
     return page("Experiment: " + summary["experiment_id"], body)
 
 
-def experiment_bundle(runs, summary):
-    buf = io.BytesIO(csv_bundle(runs))
-    with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("experiment.json", json.dumps(summary, ensure_ascii=False, indent=2, allow_nan=False))
+def write_experiment_bundle(runs, summary, target):
+    """Write to a caller-owned target; discard partial output on failure."""
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
+        write_results(z, runs)
+        write_json(z, "experiment.json", summary, indent=2)
         z.writestr("report.html", experiment_report(summary))
         w = summary.get("window") or {}
-        z.writestr("experiment_statistics.csv", _csv([
+        write_csv(z, "experiment_statistics.csv", (
             [r["flow"], r["metric"], r["n"], r["missing"], r.get("incomplete", 0), r.get("window_mismatch", False),
              r["mean"], r["sample_stddev"],
              *(r["ci95"] or [None, None]), w.get("start_s"), w.get("end_s")]
-            for r in summary["metrics"]], ["flow", "metric", "n", "missing", "incomplete_coverage", "window_mismatch", "mean", "sample_stddev",
-                                          "ci95_low", "ci95_high", "start_s", "end_s"]))
+            for r in summary["metrics"]), ["flow", "metric", "n", "missing", "incomplete_coverage", "window_mismatch", "mean", "sample_stddev",
+                                          "ci95_low", "ci95_high", "start_s", "end_s"])
         if summary.get("run_windows"):
-            z.writestr("window_coverage.csv", _csv([
+            write_csv(z, "window_coverage.csv", (
                 [a["run_id"], fid, metric, m["value"], m["covered_s"], f["expected_s"], m["samples"], f["expected_bins"],
                  m["complete"], f["selected_start_s"], f["selected_end_s"], f["trimmed_s"], f["legacy_intervals"], f["error"]]
-                for a in summary["run_windows"] for fid, f in a["flows"].items() for metric, m in f["metrics"].items()],
+                for a in summary["run_windows"] for fid, f in a["flows"].items() for metric, m in f["metrics"].items()),
                 ["run_id", "flow", "metric", "value", "covered_s", "expected_s", "samples", "expected_bins", "complete",
-                 "selected_start_s", "selected_end_s", "trimmed_s", "legacy_intervals", "error"]))
+                 "selected_start_s", "selected_end_s", "trimmed_s", "legacy_intervals", "error"])
+
+
+def experiment_bundle(runs, summary):
+    buf = io.BytesIO()
+    write_experiment_bundle(runs, summary, buf)
     return buf.getvalue()
 
 
@@ -661,12 +667,12 @@ def _load(path):
         return load_json(fh)
 
 
-def _write_report(path, content):
+def _write_report(path, write):
     directory = os.path.dirname(os.path.abspath(path))
     fd, temporary = tempfile.mkstemp(prefix="."+os.path.basename(path)+"-", suffix=".tmp", dir=directory)
     try:
         with os.fdopen(fd, "wb") as stream:
-            stream.write(content)
+            write(stream)
         os.replace(temporary, path)
     finally:
         if os.path.exists(temporary):
@@ -686,7 +692,7 @@ def main(argv=None):
         if not isinstance(data, (dict, list)):
             raise ValueError("result must be an object or array")
         if a.zip:
-            content = csv_bundle(data)
+            _write_report(a.out, lambda stream: write_csv_bundle(data, stream))
         else:
             if isinstance(data, list):
                 doc = study_report(data) if a.study else compare_report(data)
@@ -694,8 +700,7 @@ def main(argv=None):
                 doc = survivability_report(data)
             else:
                 doc = run_report(data)
-            content = doc.encode("utf-8")
-        _write_report(a.out, content)
+            _write_report(a.out, lambda stream: stream.write(doc.encode("utf-8")))
     except (OSError, ValueError, TypeError, OverflowError) as error:
         ap.error(str(error))
 

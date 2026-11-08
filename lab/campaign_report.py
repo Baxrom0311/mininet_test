@@ -5,7 +5,8 @@ import json
 import zipfile
 
 from lab.experiment_comparison_report import comparison_report
-from lab.report import _csv, _num, e, experiment_bundle, kv, page, table
+from lab.report import _num, e, write_experiment_bundle, kv, page, table
+from lab.report_export import write_csv, write_json
 
 
 def compact_report(report):
@@ -54,39 +55,40 @@ def campaign_report(report):
     return page("Experiment campaign", body)
 
 
-def campaign_bundle(plan, report, cohorts):
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("plan.json", json.dumps(plan, ensure_ascii=False, indent=2, allow_nan=False))
-        z.writestr("campaign.json", json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False))
+def write_campaign_bundle(plan, report, cohorts, target):
+    """Stream nested experiment ZIPs without materializing their complete bytes."""
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
+        write_json(z, "plan.json", plan, indent=2)
+        write_json(z, "campaign.json", report, indent=2)
         z.writestr("report.html", campaign_report(report))
         fields = ("run_id", "variant", "experiment_id", "seed", "rng_run", "status", "progress", "error")
-        z.writestr("run_status.csv", _csv([[r[k] for k in fields] for r in report["campaign"]["runs"]], fields))
-        metrics = []
-        errors = []
+        write_csv(z, "run_status.csv", ([r[k] for k in fields] for r in report["campaign"]["runs"]), fields)
         for c in report["comparisons"]:
             if c["error"]:
-                errors.append([c["variant"], c["error"]])
                 continue
             z.writestr(f"comparisons/{c['variant']}.html", comparison_report(c["result"]))
-            for r in c["result"]["metrics"]:
-                metrics.append([c["variant"], r["flow"], r["metric"], r["pairs"], r["missing_pairs"], r["delta_mean"],
-                                r["delta_unit"], r["relative_change_pct"], *(r["ci95"] or [None, None]), r["ci_excludes_zero"]])
-        z.writestr("effects.csv", _csv(metrics, ["variant", "flow", "metric", "pairs", "missing_pairs", "delta_mean", "unit",
-                                                "relative_change_pct", "ci95_low", "ci95_high", "ci_excludes_zero"]))
-        z.writestr("comparison_errors.csv", _csv(errors, ["variant", "error"]))
+        write_csv(z, "effects.csv", (
+            [c["variant"], r["flow"], r["metric"], r["pairs"], r["missing_pairs"], r["delta_mean"],
+             r["delta_unit"], r["relative_change_pct"], *(r["ci95"] or [None, None]), r["ci_excludes_zero"]]
+            for c in report["comparisons"] if not c["error"] for r in c["result"]["metrics"]),
+            ["variant", "flow", "metric", "pairs", "missing_pairs", "delta_mean", "unit",
+             "relative_change_pct", "ci95_low", "ci95_high", "ci_excludes_zero"])
+        write_csv(z, "comparison_errors.csv", ([c["variant"], c["error"]] for c in report["comparisons"] if c["error"]), ["variant", "error"])
         for c in report["experiments"]:
             records = cohorts[c["variant"]]
             if not records:
                 z.writestr(f"experiments/{c['variant']}-unavailable.txt", c["error"] or "No surviving run records")
                 continue
-            if c["summary"] is not None:
-                data = experiment_bundle(records, c["summary"])
-            else:
-                raw = io.BytesIO()
-                with zipfile.ZipFile(raw, "w", zipfile.ZIP_DEFLATED) as nested:
-                    nested.writestr("results.json", json.dumps(records, ensure_ascii=False, allow_nan=False))
-                    nested.writestr("error.txt", c["error"] or "Cohort validation failed")
-                data = raw.getvalue()
-            z.writestr(f"experiments/{c['variant']}.zip", data)
+            with z.open(f"experiments/{c['variant']}.zip", "w", force_zip64=True) as nested_target:
+                if c["summary"] is not None:
+                    write_experiment_bundle(records, c["summary"], nested_target)
+                else:
+                    with zipfile.ZipFile(nested_target, "w", zipfile.ZIP_DEFLATED) as nested:
+                        write_json(nested, "results.json", records)
+                        nested.writestr("error.txt", c["error"] or "Cohort validation failed")
+
+
+def campaign_bundle(plan, report, cohorts):
+    buf = io.BytesIO()
+    write_campaign_bundle(plan, report, cohorts, buf)
     return buf.getvalue()
