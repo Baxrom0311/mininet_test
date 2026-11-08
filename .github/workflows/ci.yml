@@ -176,6 +176,8 @@ jobs:
         run: python -m unittest lab.tests.test_report_export_integrity -v
       - name: Incremental ZIP export regression
         run: python -m unittest lab.tests.test_stream_exports -v
+      - name: Bounded report chart regression
+        run: python -m unittest lab.tests.test_report_sampling -v
 
   docker-build:
     runs-on: ubuntu-latest

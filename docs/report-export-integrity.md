@@ -44,8 +44,9 @@ power-loss durability guarantee is added.
 HTML reports and the HTTP response's final ZIP bytes remain buffered in memory.
 ZIP CSV rows and JSON now write incrementally, including nested campaign ZIPs;
 see [stream-report-exports.md](stream-report-exports.md). Validation still walks
-consumed series. Point downsampling and full validation of extension schemas
-are not included.
+consumed series. SVG display envelopes are described in
+[bounded-report-charts.md](bounded-report-charts.md); extension schemas are not
+fully validated.
 
 ```sh
 python -m unittest lab.tests.test_report_export_integrity -v

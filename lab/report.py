@@ -24,6 +24,7 @@ import zipfile
 from lab.report_inputs import report_runs, validate_run
 from lab.report_export import _csv, csv_bundle, write_csv, write_csv_bundle, write_json, write_results
 from lab.analysis_windows import finite
+from lab.report_sampling import sample_series
 
 # UI bilan bir xil dataviz palitrasi (lab/ui/src/index.css: --s1..--s6, --seq-lo/hi)
 PAL_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#6250d6"]
@@ -126,20 +127,17 @@ def _nice(lo, hi):
 
 def svg_lines(series, title, unit="", w=640, h=220, xlabels=None):
     """series: [(nom, [(x, y|None), ...])]. xlabels — kategorik o'q (x = indeks)."""
-    series = [(name, [(x, y if finite(x) and finite(y) else None) for x, y in points])
-              for name, points in series]
-    pts = [(x, y) for _n, s in series for x, y in s if y is not None]
-    if not pts:
+    series, omitted = sample_series(series)
+    if not series:
         return ""
     ml, mr, mt, mb = 52, 12, 10, 26
-    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-    x0, x1 = min(xs), max(xs)
+    x0, x1 = min(s.xmin for _, s in series), max(s.xmax for _, s in series)
     if x1 == x0:
         x1 = x0 + 1
     if not finite(x1-x0) or x1 <= x0:
         return ""
     try:
-        y0, y1, ystep = _nice(min(0.0, min(ys)), max(ys))
+        y0, y1, ystep = _nice(min(0.0, min(s.ymin for _, s in series)), max(s.ymax for _, s in series))
         x_0, x_1, xstep = _nice(x0, x1)
     except (ValueError, OverflowError, ZeroDivisionError):
         return ""
@@ -163,16 +161,15 @@ def svg_lines(series, title, unit="", w=640, h=220, xlabels=None):
             if x0 - 1e-9 <= xv <= x1 + 1e-9:
                 g.append(f'<text x="{px(xv):.1f}" y="{h - 8}" text-anchor="middle">{e(_num(round(xv, 6)))}</text>')
     paths, leg = [], []
-    for i, (name, s) in enumerate(series):
+    for i, (name, sampled) in enumerate(series):
         col = f"var(--s{i % 6 + 1})"
-        segs, cur = [], []
-        for x, y in s:
-            if y is None:
-                if cur:
-                    segs.append(cur)
+        segs, cur, previous_segment = [], [], None
+        for _, x, y, segment in sampled.points:
+            if previous_segment is not None and segment != previous_segment and cur:
+                segs.append(cur)
                 cur = []
-            else:
-                cur.append(f"{px(x):.1f},{py(y):.1f}")
+            cur.append(f"{px(x):.1f},{py(y):.1f}")
+            previous_segment = segment
         if cur:
             segs.append(cur)
         for sg in segs:
@@ -184,7 +181,17 @@ def svg_lines(series, title, unit="", w=640, h=220, xlabels=None):
         leg.append(f'<span><i style="background:{col}"></i>{e(name)}</span>')
     svg = (f'<svg viewBox="0 0 {w} {h}" role="img" aria-label="{e(title)}">'
            f'<line x1="{ml}" x2="{ml}" y1="{mt}" y2="{h - mb}" stroke="var(--line)"/>{"".join(g)}{"".join(paths)}</svg>')
-    return (f"<figure><figcaption>{e(title)}{(' (' + e(unit) + ')') if unit else ''}</figcaption>{svg}"
+    source = sum(s.valid for _, s in series)
+    rendered = sum(len(s.points) for _, s in series)
+    note = ""
+    if rendered < source:
+        note += f"Ko‘rsatish uchun {rendered} / {source} nuqta tanlandi; minimum/maksimum saqlandi. "
+    if omitted:
+        note += f"Dastlabki {len(series)} qator ko‘rsatildi; yana {omitted} qator grafikdan tashqarida. "
+    if note:
+        note = '<p class="mut">'+e(note+"To‘liq namunalar CSV/JSON eksportda.")+'</p>'
+    return (f'<figure data-source-points="{source}" data-rendered-points="{rendered}" data-omitted-series="{omitted}">'
+            f"<figcaption>{e(title)}{(' (' + e(unit) + ')') if unit else ''}</figcaption>{note}{svg}"
             f'<div class="leg">{"".join(leg)}</div></figure>')
 
 
@@ -246,8 +253,9 @@ def _visible_flows(run):
 
 
 def _series(f, key, scale=1.0):
-    return [(p.get("t"), (p.get(key) * scale) if isinstance(p.get(key), (int, float)) else None)
-            for p in f.get("series") or [] if p.get("t") is not None]
+    for point in f.get("series") or []:
+        value = point.get(key)
+        yield point.get("t"), value*scale if finite(value) else None
 
 
 def run_label(run):
@@ -525,11 +533,12 @@ def study_report(runs, state=None):
             rows.append(row)
         out.append(table([p1] + [f"{f} (Mbit/s | MOS)" for f in flows], rows, num=tuple(range(1, len(flows) + 1))))
         out.append("<h2>Grafiklar</h2><div class='charts'>")
+        def points_for(fid, field):
+            for i, run in enumerate(rs):
+                yield i, metric(run, fid, field)
         for field, title, unit in METRICS:
-            ser = [(fid, [(i, metric(r, fid, field)) for i, r in enumerate(rs)]) for fid in flows]
-            ser = [s for s in ser if any(y is not None for _x, y in s[1])]
-            if ser:
-                out.append(svg_lines(ser, f"{title} vs {p1}", unit, xlabels=xl))
+            ser = ((fid, points_for(fid, field)) for fid in flows)
+            out.append(svg_lines(ser, f"{title} vs {p1}", unit, xlabels=xl))
         out.append("</div>")
     else:
         p2 = _plabel(runs[0].get("study_param2"))
