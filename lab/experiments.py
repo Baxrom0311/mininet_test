@@ -4,7 +4,9 @@ import copy
 import math
 import statistics
 
-from lab.reproducibility import comparison_key, digest, verify
+from lab.analysis_windows import finite
+from lab.experiment_inputs import completed_inputs, validate_cohort
+from lab.reproducibility import comparison_key, digest
 
 # Two-sided 95% Student t quantiles, df=1..24. Replications are bounded at 25.
 T95 = (12.706204736, 4.302652730, 3.182446305, 2.776445105, 2.570581836,
@@ -36,7 +38,7 @@ def variants(project, scenario_name, repetitions, seed):
 def interval(values, eligible=True):
     if len(values) > 25:
         raise ValueError("at most 25 independent samples")
-    if any(type(v) not in (int, float) or not math.isfinite(v) for v in values):
+    if any(not finite(v) for v in values):
         raise ValueError("finite numeric samples required")
     n = len(values)
     mean = statistics.mean(values) if n else None
@@ -52,29 +54,11 @@ def interval(values, eligible=True):
 
 
 def summarize(runs, *, start_s=None, end_s=None):
-    if not runs:
-        raise ValueError("experiment runs not found")
-    counts = {r.get("replication_count") for r in runs}
-    ids = {r.get("experiment_id") for r in runs}
-    if len(counts) != 1 or len(ids) != 1 or None in ids:
-        raise ValueError("one experiment is required")
-    expected = next(iter(counts))
-    if type(expected) is not int or not 2 <= expected <= 25 or len(runs) > expected:
-        raise ValueError("invalid replication count")
-    seeds = [(r.get("seed"), r.get("rng_run")) for r in runs]
-    indices = [r.get("replication_index") for r in runs]
-    if (any(type(s) is not int or type(n) is not int or not 1 <= s <= 2147483647 or n < 1 for s, n in seeds)
-            or len(set(seeds)) != len(seeds)
-            or any(type(i) is not int or not 0 <= i < expected for i in indices)
-            or len(set(indices)) != len(indices)):
-        raise ValueError("replication seeds and indices must be distinct")
+    expected, experiment_id = validate_cohort(runs)
     done = [r for r in runs if r.get("status") == "done"]
     keys, runtime_keys = set(), set()
     for r in done:
-        record = r.get("reproducibility") or {}
-        if not verify(record):
-            raise ValueError("completed run lacks verified reproducibility inputs")
-        sc = record["project"]["scenarios"][record["scenario_name"]]
+        record, sc = completed_inputs(r)
         key = comparison_key(record["project"], sc, r.get("engine"))
         if (key != record.get("comparison_key") or sc.get("seed") != r.get("seed")
                 or sc.get("rng_run") != r.get("rng_run")):
@@ -113,7 +97,7 @@ def summarize(runs, *, start_s=None, end_s=None):
                 values = [c.get("value") for c in coverage]
             else:
                 values = [r.get("flows", {}).get(fid, {}).get("summary", {}).get(metric) for r in done]
-            valid = [v for v in values if type(v) in (int, float) and math.isfinite(v)]
+            valid = [v for v in values if finite(v)]
             if not valid and not windowed:
                 continue
             eligible = complete and len(valid) == expected
@@ -128,7 +112,7 @@ def summarize(runs, *, start_s=None, end_s=None):
     for r in runs:
         status = r.get("status", "unknown")
         statuses[status] = statuses.get(status, 0) + 1
-    result = {"experiment_id": next(iter(ids)), "expected": expected, "observed": len(runs),
+    result = {"experiment_id": experiment_id, "expected": expected, "observed": len(runs),
             "complete": complete, "statuses": statuses, "confidence": .95, "method": "Student t, per-run summary",
             "metrics": rows,
             "notes": ["Intervals require independent replications and an approximately normal sample mean.",
