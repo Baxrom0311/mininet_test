@@ -4,8 +4,8 @@ import io
 import json
 import zipfile
 
-from lab.report import _csv, _num, csv_bundle, e, kv, page, table
-from lab.report_export import replay_inputs
+from lab.report import _num, e, kv, page, table
+from lab.report_export import replay_inputs, write_csv, write_json, write_results
 
 
 def comparison_report(result):
@@ -45,20 +45,26 @@ def comparison_report(result):
     return page("Paired experiment comparison", body)
 
 
-def comparison_bundle(baseline, candidate, result):
-    buf = io.BytesIO(csv_bundle(baseline + candidate))
-    with zipfile.ZipFile(buf, "a", zipfile.ZIP_DEFLATED) as z:
-        z.writestr("comparison.json", json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
+def write_comparison_bundle(baseline, candidate, result, target):
+    """Write to a caller-owned target, including nonseekable ZIP entries."""
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
+        write_results(z, baseline + candidate)
+        write_json(z, "comparison.json", result, indent=2)
         z.writestr("report.html", comparison_report(result))
         columns = ("flow", "metric", "pairs", "missing_pairs", "incomplete_pairs", "window_mismatch", "baseline_mean",
                    "candidate_mean", "delta_mean", "delta_stddev", "delta_unit", "relative_change_pct", "ci_excludes_zero", "preferred_direction")
-        z.writestr("paired_statistics.csv", _csv([[*[r[k] for k in columns], *(r["ci95"] or [None, None])]
-                                               for r in result["metrics"]], [*columns, "ci95_low", "ci95_high"]))
+        write_csv(z, "paired_statistics.csv", ([*[r[k] for k in columns], *(r["ci95"] or [None, None])]
+                                               for r in result["metrics"]), [*columns, "ci95_low", "ci95_high"])
         columns = ("flow", "metric", "seed", "rng_run", "baseline_run_id", "candidate_run_id", "baseline", "candidate", "delta", "complete", "reason")
-        z.writestr("paired_samples.csv", _csv([[s[k] for k in columns] for s in result["samples"]], columns))
+        write_csv(z, "paired_samples.csv", ([s[k] for k in columns] for s in result["samples"]), columns)
         mapping = []
         for index, (role, run) in enumerate([*(('baseline', r) for r in baseline), *(('candidate', r) for r in candidate)], 1):
             available = replay_inputs(run) is not None
             mapping.append([role, run["run_id"], run["seed"], run["rng_run"], f"runs/{index:02d}/" if available else None, available])
-        z.writestr("run_map.csv", _csv(mapping, ["role", "run_id", "seed", "rng_run", "input_directory", "replay_inputs_available"]))
+        write_csv(z, "run_map.csv", mapping, ["role", "run_id", "seed", "rng_run", "input_directory", "replay_inputs_available"])
+
+
+def comparison_bundle(baseline, candidate, result):
+    buf = io.BytesIO()
+    write_comparison_bundle(baseline, candidate, result, buf)
     return buf.getvalue()

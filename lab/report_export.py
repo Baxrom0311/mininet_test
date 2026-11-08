@@ -2,6 +2,7 @@
 
 import csv
 import io
+from itertools import chain
 import json
 import zipfile
 
@@ -39,74 +40,111 @@ def _csv(rows, header):
     return buf.getvalue()
 
 
-def csv_bundle(runs):
-    """runs: bitta natija yoki ro'yxat -> zip bayt (flows/links/nodes/apps/availability/convergence/... .csv)."""
-    runs = report_runs(runs)
+HEADERS = {
+    "flows.csv": ["run_id", "flow", "t", "thr_bps", "delay_ms", "jitter_ms", "loss_pct", "rtt_ms", "mos"],
+    "flow_summary.csv": ["run_id", "flow", "type", "src", "dst", "avg_thr_bps", "avg_delay_ms", "avg_jitter_ms",
+                         "loss_pct", "avg_rtt_ms", "hidden"],
+    "links.csv": ["run_id", "link", "t", "ab_bps", "ba_bps", "util", "queue_ab", "queue_ba", "drops_ab", "drops_ba"],
+    "nodes.csv": ["run_id", "device", "t", "routes", "fwd_pps", "rx_pps", "tx_pps", "noroute", "discards"],
+    "apps.csv": ["run_id", "app", "type", "summary_json"],
+    "availability.csv": ["run_id", "flow", "availability_pct", "downtime_s", "outages"],
+    "convergence.csv": ["run_id", "t", "action", "target", "converged_s", "devices"],
+    "route_events.csv": ["run_id", "t", "device", "added", "removed"],
+    "events.csv": ["run_id", "t", "action", "target", "source"],
+}
+
+
+def write_csv(archive, name, rows, header):
+    """Consume rows once, writing UTF-8 CSV directly into a ZIP64 entry."""
+    with archive.open(name, "w", force_zip64=True) as binary:
+        with io.TextIOWrapper(binary, encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(header)
+            writer.writerows(rows)
+
+
+def _json_chunks(value, indent):
     try:
-        raw = json.dumps(runs[0] if len(runs) == 1 else runs, ensure_ascii=False, allow_nan=False)
+        yield from json.JSONEncoder(ensure_ascii=False, allow_nan=False, indent=indent).iterencode(value)
     except (TypeError, ValueError, OverflowError, RecursionError) as error:
         raise ValueError("report data must contain finite JSON values") from error
-    files = {"flows.csv": [], "flow_summary.csv": [], "links.csv": [], "nodes.csv": [], "apps.csv": [],
-             "availability.csv": [], "convergence.csv": [], "route_events.csv": [], "events.csv": []}
-    for r in runs:
-        rid = r.get("run_id") or ""
-        for fid, f in (r.get("flows") or {}).items():
-            s = f.get("summary") or {}
-            files["flow_summary.csv"].append([rid, fid, f.get("type"), f.get("src"),
-                                              json.dumps(f.get("dst")) if isinstance(f.get("dst"), list) else f.get("dst"),
-                                              s.get("avg_thr_bps"), s.get("avg_delay_ms"), s.get("avg_jitter_ms"),
-                                              s.get("loss_pct"), s.get("avg_rtt_ms"), bool(f.get("hidden"))])
-            for p in f.get("series") or []:
-                files["flows.csv"].append([rid, fid, p.get("t"), p.get("thr_bps"), p.get("delay_ms"), p.get("jitter_ms"),
-                                           p.get("loss_pct"), p.get("rtt_ms"), p.get("mos")])
-        for lid, pts in (r.get("links") or {}).items():
-            for p in pts or []:
-                files["links.csv"].append([rid, lid, p.get("t"), p.get("ab_bps"), p.get("ba_bps"), p.get("util"),
-                                           p.get("queue_ab"), p.get("queue_ba"), p.get("drops_ab"), p.get("drops_ba")])
-        for dv, pts in (r.get("nodes") or {}).items():
-            for p in pts or []:
-                files["nodes.csv"].append([rid, dv, p.get("t"), p.get("routes"), p.get("fwd_pps"), p.get("rx_pps"),
-                                           p.get("tx_pps"), p.get("noroute"), p.get("discards")])
-        for aid, a in (r.get("apps") or {}).items():
-            files["apps.csv"].append([rid, aid, a.get("type"), json.dumps({k: v for k, v in a.items() if k != "type"},
-                                                                          ensure_ascii=False, default=str)])
-        for fid, a in ((r.get("availability") or {}).get("flows") or {}).items():
-            files["availability.csv"].append([rid, fid, a.get("availability_pct"), a.get("downtime_s"),
-                                              len(a.get("outages") or [])])
-        for c in r.get("convergence") or []:
-            files["convergence.csv"].append([rid, c.get("t"), c.get("action"), c.get("link"), c.get("converged_s"),
-                                             " ".join(c.get("devices") or [])])
-        for ev in r.get("route_events") or []:
-            files["route_events.csv"].append([rid, ev.get("t"), ev.get("dev"), " | ".join(ev.get("added") or []),
-                                              " | ".join(ev.get("removed") or [])])
-        for ev in r.get("events") or []:
-            files["events.csv"].append([rid, ev.get("t"), ev.get("action"), ev.get("link") or ev.get("device"),
-                                        ev.get("source") or ""])
-    headers = {
-        "flows.csv": ["run_id", "flow", "t", "thr_bps", "delay_ms", "jitter_ms", "loss_pct", "rtt_ms", "mos"],
-        "flow_summary.csv": ["run_id", "flow", "type", "src", "dst", "avg_thr_bps", "avg_delay_ms", "avg_jitter_ms",
-                             "loss_pct", "avg_rtt_ms", "hidden"],
-        "links.csv": ["run_id", "link", "t", "ab_bps", "ba_bps", "util", "queue_ab", "queue_ba", "drops_ab", "drops_ba"],
-        "nodes.csv": ["run_id", "device", "t", "routes", "fwd_pps", "rx_pps", "tx_pps", "noroute", "discards"],
-        "apps.csv": ["run_id", "app", "type", "summary_json"],
-        "availability.csv": ["run_id", "flow", "availability_pct", "downtime_s", "outages"],
-        "convergence.csv": ["run_id", "t", "action", "target", "converged_s", "devices"],
-        "route_events.csv": ["run_id", "t", "device", "added", "removed"],
-        "events.csv": ["run_id", "t", "action", "target", "source"],
-    }
+
+
+def write_json(archive, name, value, *, indent=None):
+    """Write encoder chunks; propagate target I/O failures as storage errors."""
+    with archive.open(name, "w", force_zip64=True) as binary:
+        with io.TextIOWrapper(binary, encoding="utf-8", newline="") as stream:
+            for chunk in _json_chunks(value, indent):
+                stream.write(chunk)
+
+
+def _rows(runs, name):
+    for run in runs:
+        rid = run.get("run_id") or ""
+        if name in ("flows.csv", "flow_summary.csv"):
+            for fid, flow in (run.get("flows") or {}).items():
+                if name == "flow_summary.csv":
+                    summary = flow.get("summary") or {}
+                    yield [rid, fid, flow.get("type"), flow.get("src"),
+                           json.dumps(flow.get("dst")) if isinstance(flow.get("dst"), list) else flow.get("dst"),
+                           summary.get("avg_thr_bps"), summary.get("avg_delay_ms"), summary.get("avg_jitter_ms"),
+                           summary.get("loss_pct"), summary.get("avg_rtt_ms"), bool(flow.get("hidden"))]
+                else:
+                    for point in flow.get("series") or []:
+                        yield [rid, fid, *[point.get(key) for key in ("t", "thr_bps", "delay_ms", "jitter_ms", "loss_pct", "rtt_ms", "mos")]]
+        elif name in ("links.csv", "nodes.csv"):
+            section, fields = (("links", ("t", "ab_bps", "ba_bps", "util", "queue_ab", "queue_ba", "drops_ab", "drops_ba"))
+                               if name == "links.csv" else ("nodes", ("t", "routes", "fwd_pps", "rx_pps", "tx_pps", "noroute", "discards")))
+            for key, points in (run.get(section) or {}).items():
+                for point in points or []:
+                    yield [rid, key, *[point.get(field) for field in fields]]
+        elif name == "apps.csv":
+            for aid, app in (run.get("apps") or {}).items():
+                yield [rid, aid, app.get("type"), json.dumps({key: value for key, value in app.items() if key != "type"},
+                                                           ensure_ascii=False, default=str)]
+        elif name == "availability.csv":
+            for fid, item in ((run.get("availability") or {}).get("flows") or {}).items():
+                yield [rid, fid, item.get("availability_pct"), item.get("downtime_s"), len(item.get("outages") or [])]
+        elif name == "convergence.csv":
+            for item in run.get("convergence") or []:
+                yield [rid, item.get("t"), item.get("action"), item.get("link"), item.get("converged_s"), " ".join(item.get("devices") or [])]
+        elif name == "route_events.csv":
+            for item in run.get("route_events") or []:
+                yield [rid, item.get("t"), item.get("dev"), " | ".join(item.get("added") or []), " | ".join(item.get("removed") or [])]
+        elif name == "events.csv":
+            for item in run.get("events") or []:
+                yield [rid, item.get("t"), item.get("action"), item.get("link") or item.get("device"), item.get("source") or ""]
+
+
+def write_results(archive, runs):
+    """Append result entries to a caller-owned open ZIP; discard it on failure."""
+    runs = report_runs(runs)
+    for name, header in HEADERS.items():
+        rows = _rows(runs, name)
+        first = next(rows, None)
+        if first is None and name not in ("flows.csv", "flow_summary.csv"):
+            continue
+        write_csv(archive, name, chain((first,), rows) if first is not None else (), header)
+    write_json(archive, "results.json", runs[0] if len(runs) == 1 else runs)
+    for index, run in enumerate(runs):
+        prefix = "" if len(runs) == 1 else f"runs/{index + 1:02d}/"
+        payloads = replay_inputs(run)
+        if payloads is None:
+            if run.get("reproducibility") is not None:
+                archive.writestr(prefix+"replay-unavailable.txt", "Recorded inputs do not establish a replay request.")
+            continue
+        for name, payload in payloads.items():
+            write_json(archive, prefix+name, payload, indent=2)
+
+
+def write_csv_bundle(runs, target):
+    """Write to a caller-owned binary target without closing it; partial on error."""
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
+        write_results(archive, runs)
+
+
+def csv_bundle(runs):
+    """Compatibility API returning the final ZIP bytes in memory."""
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for name, rows in files.items():
-            if rows or name in ("flows.csv", "flow_summary.csv"):
-                z.writestr(name, _csv(rows, headers[name]))
-        z.writestr("results.json", raw)
-        for index, run in enumerate(runs):
-            prefix = "" if len(runs) == 1 else f"runs/{index + 1:02d}/"
-            payloads = replay_inputs(run)
-            if payloads is None:
-                if run.get("reproducibility") is not None:
-                    z.writestr(prefix+"replay-unavailable.txt", "Recorded inputs do not establish a replay request.")
-                continue
-            for name, payload in payloads.items():
-                z.writestr(prefix + name, json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False))
+    write_csv_bundle(runs, buf)
     return buf.getvalue()
