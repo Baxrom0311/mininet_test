@@ -29,5 +29,5 @@ Edits that intentionally preserve both require a forced reindex; strict direct
 retrieval still checks the file. See [result-index.md](result-index.md).
 
 ```sh
-python -m unittest lab.tests.test_result_integrity lab.tests.test_result_index -v
+python -m unittest lab.tests.test_result_integrity lab.tests.test_result_index lab.tests.test_invalid_result_index -v
 ```

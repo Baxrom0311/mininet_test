@@ -159,7 +159,7 @@ jobs:
       - name: Simulation preflight regression
         run: python -m unittest lab.tests.test_simulation_preflight lab.tests.smoke_preflight -v
       - name: Result JSON integrity regression
-        run: python -m unittest lab.tests.test_result_integrity -v
+        run: python -m unittest lab.tests.test_result_integrity lab.tests.test_invalid_result_index -v
       - name: Real network lock regression (no root or Mininet required)
         run: python -m unittest lab.tests.test_real_lock -v
       - name: Scale benchmark evidence regression (no root or Mininet required)

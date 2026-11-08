@@ -24,6 +24,8 @@ class RunStore:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
+            db.execute("CREATE TABLE IF NOT EXISTS invalid_results (project TEXT NOT NULL,id TEXT NOT NULL,"
+                       "mtime_ns INTEGER NOT NULL,size INTEGER NOT NULL,error TEXT NOT NULL,PRIMARY KEY(project,id))")
             columns = db.execute("PRAGMA table_info(runs)").fetchall()
             if not columns:
                 self._create(db, "runs")
@@ -110,6 +112,7 @@ class RunStore:
     def save(self, data, signature=None):
         with self.connect() as db:
             self._write(db, data, signature)
+            db.execute("DELETE FROM invalid_results WHERE project=? AND id=?", (data["project"], data["run_id"]))
 
     def get(self, project, run_id):
         with self.connect() as db:
@@ -172,6 +175,36 @@ class RunStore:
             return {rid: (mtime, size) for rid, mtime, size in db.execute(
                 "SELECT id,result_mtime_ns,result_size FROM runs WHERE project=? AND result_mtime_ns IS NOT NULL", (project,))}
 
-    def delete(self, project, run_id):
+    def delete(self, project, run_id, *, preserve_pending=False):
         with self.connect() as db:
-            db.execute("DELETE FROM runs WHERE project=? AND id=?", (project, run_id))
+            pending_guard = " AND status NOT IN ('queued','running','cancelling')" if preserve_pending else ""
+            db.execute("DELETE FROM runs WHERE project=? AND id=?" + pending_guard, (project, run_id))
+            db.execute("DELETE FROM invalid_results WHERE project=? AND id=?", (project, run_id))
+
+    def invalid_signatures(self, project):
+        with self.connect() as db:
+            return {rid: (mtime, size) for rid, mtime, size in db.execute(
+                "SELECT id,mtime_ns,size FROM invalid_results WHERE project=?", (project,))}
+
+    def reject_result(self, project, run_id, signature, error):
+        with self.connect() as db:
+            db.execute("DELETE FROM runs WHERE project=? AND id=? AND status NOT IN ('queued','running','cancelling')", (project, run_id))
+            db.execute("INSERT INTO invalid_results VALUES (?,?,?,?,?) ON CONFLICT(project,id) DO UPDATE SET "
+                       "mtime_ns=excluded.mtime_ns,size=excluded.size,error=excluded.error",
+                       (project, run_id, *signature, str(error)[:500]))
+
+    @staticmethod
+    def validate_invalid_page(limit, offset):
+        if type(limit) is not int or not 1 <= limit <= 1000 or type(offset) is not int or not 0 <= offset <= 1000000:
+            raise ValueError("limit: 1..1000; offset: 0..1000000")
+
+    def invalid_page(self, project, limit=100, offset=0):
+        self.validate_invalid_page(limit, offset)
+        with self.connect() as db:
+            db.execute("BEGIN")
+            total = db.execute("SELECT COUNT(*) FROM invalid_results WHERE project=?", (project,)).fetchone()[0]
+            rows = db.execute("SELECT id,mtime_ns,size,error FROM invalid_results WHERE project=? ORDER BY id LIMIT ? OFFSET ?",
+                              (project, limit, offset)).fetchall()
+        return {"total": total, "limit": limit, "offset": offset,
+                "files": [{"run_id": rid, "mtime_ns": mtime, "size": size, "error": error}
+                          for rid, mtime, size, error in rows]}
