@@ -39,6 +39,8 @@ def _grid(lo, hi, duration, step):
 
 
 def _interval(point, step, duration):
+    if not isinstance(point, dict):
+        raise ValueError("sample point must be an object")
     if "t_start" in point or "t_end" in point:
         start, end = point.get("t_start"), point.get("t_end")
         if not finite(start) or not finite(end) or not 0 <= start < end <= duration + EPS:

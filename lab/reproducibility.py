@@ -79,6 +79,11 @@ def capture(project, scenario_name, scenario, effective_scenario, engine):
 
 def verify(record):
     """Validate exported input hashes before treating a run as reproducible."""
-    return (record.get("schema") == 1 and "project" in record and "effective_scenario" in record
-            and record.get("project_sha256") == digest(record["project"])
-            and record.get("effective_scenario_sha256") == digest(record["effective_scenario"]))
+    if (not isinstance(record, dict) or type(record.get("schema")) is not int or record["schema"] != 1
+            or not isinstance(record.get("project"), dict) or not isinstance(record.get("effective_scenario"), dict)):
+        return False
+    try:
+        return (record.get("project_sha256") == digest(record["project"])
+                and record.get("effective_scenario_sha256") == digest(record["effective_scenario"]))
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        return False

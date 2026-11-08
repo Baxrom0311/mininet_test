@@ -393,9 +393,11 @@ def create_app(driver_name="demo", token=None):
         if not isinstance(experiment_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", experiment_id):
             raise ValueError("invalid experiment_id")
         rs = [runs.get(project, r["run_id"]) for r in runs.list(project, experiment_id=experiment_id)]
-        rs.sort(key=lambda r: r["replication_index"])
         if not rs:
             raise HTTPException(404, "experiment not found")
+        from lab.experiment_inputs import validate_cohort
+        validate_cohort(rs)
+        rs.sort(key=lambda r: r["replication_index"])
         return rs
 
     def _experiment(project, experiment_id, start_s=None, end_s=None):

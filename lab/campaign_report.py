@@ -5,7 +5,7 @@ import json
 import zipfile
 
 from lab.experiment_comparison_report import comparison_report
-from lab.report import _csv, _num, csv_bundle, e, experiment_bundle, kv, page, table
+from lab.report import _csv, _num, e, experiment_bundle, kv, page, table
 
 
 def compact_report(report):
@@ -80,6 +80,13 @@ def campaign_bundle(plan, report, cohorts):
             if not records:
                 z.writestr(f"experiments/{c['variant']}-unavailable.txt", c["error"] or "No surviving run records")
                 continue
-            data = experiment_bundle(records, c["summary"]) if c["summary"] is not None else csv_bundle(records)
+            if c["summary"] is not None:
+                data = experiment_bundle(records, c["summary"])
+            else:
+                raw = io.BytesIO()
+                with zipfile.ZipFile(raw, "w", zipfile.ZIP_DEFLATED) as nested:
+                    nested.writestr("results.json", json.dumps(records, ensure_ascii=False, allow_nan=False))
+                    nested.writestr("error.txt", c["error"] or "Cohort validation failed")
+                data = raw.getvalue()
             z.writestr(f"experiments/{c['variant']}.zip", data)
     return buf.getvalue()

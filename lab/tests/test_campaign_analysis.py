@@ -72,7 +72,7 @@ class CampaignAnalysisTests(unittest.TestCase):
             self.manager._save(self.name, run)
         with patch.object(comparison, "_conditions", wraps=comparison._conditions) as guards:
             report = self.analyze()
-        self.assertEqual(guards.call_count, 1)
+        self.assertEqual(guards.call_count, 0)  # Invalid output metadata now fails during cohort preparation.
         self.assertFalse(report["analysis_complete"])
         self.assertTrue(all("scenario metadata" in c["error"] and c["result"] is None for c in report["comparisons"]))
         for rid in baseline["run_ids"]:
