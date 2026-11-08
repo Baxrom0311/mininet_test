@@ -5,7 +5,7 @@ import json
 import zipfile
 
 from lab.report import _csv, _num, csv_bundle, e, kv, page, table
-from lab.reproducibility import verify
+from lab.report_export import replay_inputs
 
 
 def comparison_report(result):
@@ -58,7 +58,7 @@ def comparison_bundle(baseline, candidate, result):
         z.writestr("paired_samples.csv", _csv([[s[k] for k in columns] for s in result["samples"]], columns))
         mapping = []
         for index, (role, run) in enumerate([*(('baseline', r) for r in baseline), *(('candidate', r) for r in candidate)], 1):
-            available = verify(run.get("reproducibility") or {})
+            available = replay_inputs(run) is not None
             mapping.append([role, run["run_id"], run["seed"], run["rng_run"], f"runs/{index:02d}/" if available else None, available])
         z.writestr("run_map.csv", _csv(mapping, ["role", "run_id", "seed", "rng_run", "input_directory", "replay_inputs_available"]))
     return buf.getvalue()

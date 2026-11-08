@@ -1,10 +1,14 @@
 """Actual queued ns-3 campaigns and paired window effects, IPv4 plus IPv6."""
 
 import importlib.util
+import csv
+import io
+import json
 import os
 import tempfile
 import time
 import unittest
+import zipfile
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -61,6 +65,25 @@ class PacketCampaigns(unittest.TestCase):
                     self.assertEqual(compact["representation"], "cohort_references")
                     self.assertEqual(compact["comparisons"][0]["result"]["metrics"], comparison["result"]["metrics"])
                     self.assertEqual(compact["comparisons"][0]["result"]["baseline"]["summary_ref"], "/experiments/0/summary")
+                    response = client.get(base + "/export.zip")
+                    self.assertEqual(response.status_code, 200, response.text if response.status_code != 200 else "")
+                    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                        with zipfile.ZipFile(io.BytesIO(archive.read("experiments/baseline.zip"))) as nested:
+                            self.assertEqual(len(json.loads(nested.read("results.json"))), 2)
+                            self.assertIn("runs/01/run-request.json", nested.namelist())
+                            self.assertGreater(len(list(csv.DictReader(io.StringIO(nested.read("flows.csv").decode())))), 0)
+                    response = client.post("/api/experiments/compare/export.zip", json={
+                        "project": project["name"], "baseline_id": plan["conditions"][0]["experiment_id"],
+                        "candidate_id": plan["conditions"][1]["experiment_id"], "start_s": 1.2, "end_s": 3.5})
+                    self.assertEqual(response.status_code, 200, response.text if response.status_code != 200 else "")
+                    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+                        rows = list(csv.DictReader(io.StringIO(archive.read("run_map.csv").decode())))
+                        self.assertEqual(len(rows), 4)
+                        for item in rows:
+                            self.assertEqual(item["replay_inputs_available"], "True")
+                            self.assertIn(item["input_directory"]+"run-request.json", archive.namelist())
+                    rid = plan["conditions"][0]["run_ids"][0]
+                    self.assertEqual(client.get(f"/api/runs/{project['name']}/{rid}/report.html").status_code, 200)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,6 @@ POST /api/reports/compare, GET /api/studies/{p}/{sid}/report.html,
 POST /api/analysis/survivability/report.
 """
 
-import csv
 import html
 import io
 import json
@@ -19,7 +18,12 @@ import math
 import os
 import sys
 import time
+import tempfile
 import zipfile
+
+from lab.report_inputs import report_runs, validate_run
+from lab.report_export import _csv, csv_bundle
+from lab.analysis_windows import finite
 
 # UI bilan bir xil dataviz palitrasi (lab/ui/src/index.css: --s1..--s6, --seq-lo/hi)
 PAL_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#6250d6"]
@@ -63,6 +67,8 @@ def _num(v, nd=2):
         return "—"
     if isinstance(v, bool):
         return "ha" if v else "yo'q"
+    if isinstance(v, int):
+        return f"{v:,}".replace(",", " ") if abs(v) >= 1000 else str(v)
     if isinstance(v, (int, float)):
         if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
             return "—"
@@ -73,7 +79,7 @@ def _num(v, nd=2):
 
 
 def mbps(bps):
-    return "—" if bps is None else f"{bps / 1e6:.3f}".rstrip("0").rstrip(".")
+    return "—" if not finite(bps) else f"{bps / 1e6:.3f}".rstrip("0").rstrip(".")
 
 
 def table(cols, rows, num=()):
@@ -104,16 +110,24 @@ def _nice(lo, hi):
     if hi <= lo:
         hi = lo + 1
     span = hi - lo
-    step = 10 ** math.floor(math.log10(span / 4))
+    if not finite(span) or span <= 0:
+        raise ValueError("unsupported chart range")
+    exponent = math.floor(math.log10(span) - math.log10(4))
+    step = 10.0 ** exponent if exponent > -324 else span
     for m in (1, 2, 2.5, 5, 10):
         if span / (step * m) <= 5:
             step *= m
             break
-    return math.floor(lo / step) * step, math.ceil(hi / step) * step, step
+    lower, upper = math.floor(lo / step) * step, math.ceil(hi / step) * step
+    if not finite(lower) or not finite(upper) or not finite(upper-lower) or upper <= lower:
+        raise ValueError("unsupported chart range")
+    return lower, upper, step
 
 
 def svg_lines(series, title, unit="", w=640, h=220, xlabels=None):
     """series: [(nom, [(x, y|None), ...])]. xlabels — kategorik o'q (x = indeks)."""
+    series = [(name, [(x, y if finite(x) and finite(y) else None) for x, y in points])
+              for name, points in series]
     pts = [(x, y) for _n, s in series for x, y in s if y is not None]
     if not pts:
         return ""
@@ -122,25 +136,32 @@ def svg_lines(series, title, unit="", w=640, h=220, xlabels=None):
     x0, x1 = min(xs), max(xs)
     if x1 == x0:
         x1 = x0 + 1
-    y0, y1, ystep = _nice(min(0.0, min(ys)), max(ys))
+    if not finite(x1-x0) or x1 <= x0:
+        return ""
+    try:
+        y0, y1, ystep = _nice(min(0.0, min(ys)), max(ys))
+        x_0, x_1, xstep = _nice(x0, x1)
+    except (ValueError, OverflowError, ZeroDivisionError):
+        return ""
     px = lambda x: ml + (x - x0) / (x1 - x0) * (w - ml - mr)          # noqa: E731
     py = lambda y: h - mb - (y - y0) / (y1 - y0) * (h - mt - mb)       # noqa: E731
     g = []
-    yv = y0
-    while yv <= y1 + 1e-9:
+    for tick in range(8):
+        yv = y0 + tick * ystep
+        if yv > y1:
+            break
         g.append(f'<line x1="{ml}" x2="{w - mr}" y1="{py(yv):.1f}" y2="{py(yv):.1f}" stroke="var(--grid)"/>'
                  f'<text x="{ml - 6}" y="{py(yv) + 3:.1f}" text-anchor="end">{e(_num(round(yv, 6)))}</text>')
-        yv += ystep
     if xlabels:
         for i, lab in enumerate(xlabels):
             g.append(f'<text x="{px(i):.1f}" y="{h - 8}" text-anchor="middle">{e(lab)}</text>')
     else:
-        x_0, x_1, xstep = _nice(x0, x1)
-        xv = x_0
-        while xv <= x_1 + 1e-9:
+        for tick in range(8):
+            xv = x_0 + tick * xstep
+            if xv > x_1:
+                break
             if x0 - 1e-9 <= xv <= x1 + 1e-9:
                 g.append(f'<text x="{px(xv):.1f}" y="{h - 8}" text-anchor="middle">{e(_num(round(xv, 6)))}</text>')
-            xv += xstep
     paths, leg = [], []
     for i, (name, s) in enumerate(series):
         col = f"var(--s{i % 6 + 1})"
@@ -175,10 +196,13 @@ def _lerp(c1, c2, t):
 
 def svg_heatmap(xlabels, ylabels, matrix, title, unit=""):
     """matrix[j][i] — y=j qatori, x=i ustuni (None — bo'sh)."""
+    matrix = [[value if finite(value) else None for value in row] for row in matrix]
     vals = [v for row in matrix for v in row if v is not None]
     if not vals:
         return ""
     lo, hi = min(vals), max(vals)
+    scale = max(abs(lo), abs(hi), 1)
+    span = hi/scale - lo/scale
     cw, ch, ml, mt = 64, 30, 90, 8
     w, h = ml + cw * len(xlabels) + 10, mt + ch * len(ylabels) + 40
     cells = []
@@ -188,7 +212,7 @@ def svg_heatmap(xlabels, ylabels, matrix, title, unit=""):
             if v is None:
                 cells.append(f'<rect x="{x}" y="{y}" width="{cw - 2}" height="{ch - 2}" fill="var(--grid)"/>')
                 continue
-            t = (v - lo) / (hi - lo) if hi > lo else 0.5
+            t = (v/scale - lo/scale) / span if span > 0 else 0.5
             fill = _lerp(SEQ_LO, SEQ_HI, t)
             tc = "#ffffff" if t > 0.55 else "#0d1b2a"
             cells.append(f'<rect x="{x}" y="{y}" width="{cw - 2}" height="{ch - 2}" rx="3" fill="{fill}">'
@@ -213,7 +237,7 @@ def page(title, body, sub=""):
 def _ts(t):
     try:
         return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(t)))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError, OSError):
         return "—"
 
 
@@ -357,12 +381,13 @@ def _run_body(run, charts=True):
 
 
 def run_report(run):
+    validate_run(run)
     return page(f"Natija: {run_label(run)}", _run_body(run), sub=f"run_id {run.get('run_id') or '—'}")
 
 
 # ─────────────────────────── solishtirish ───────────────────────────
 def compare_report(runs):
-    runs = [r for r in runs if r]
+    runs = report_runs(runs)
     if not runs:
         return page("Solishtirish", '<p class="mut">natija yo\'q</p>')
     out = ["<h2>Natijalar</h2>"]
@@ -449,7 +474,7 @@ def _plabel(p):
 
 def study_report(runs, state=None):
     from lab.engines.study_status import describe
-    runs = [r for r in runs if r]
+    runs = report_runs(runs)
     if not runs:
         return page("Tadqiqot", '<p class="mut">tadqiqot natijasi yo\'q</p>')
     state = state or describe(runs)
@@ -573,87 +598,6 @@ def survivability_report(rep):
 
 
 # ─────────────────────────── CSV ───────────────────────────
-def _csv(rows, header):
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(header)
-    w.writerows(rows)
-    return buf.getvalue()
-
-
-def csv_bundle(runs):
-    """runs: bitta natija yoki ro'yxat -> zip bayt (flows/links/nodes/apps/availability/convergence/... .csv)."""
-    if isinstance(runs, dict):
-        runs = [runs]
-    files = {"flows.csv": [], "flow_summary.csv": [], "links.csv": [], "nodes.csv": [], "apps.csv": [],
-             "availability.csv": [], "convergence.csv": [], "route_events.csv": [], "events.csv": []}
-    for r in runs:
-        rid = r.get("run_id") or ""
-        for fid, f in (r.get("flows") or {}).items():
-            s = f.get("summary") or {}
-            files["flow_summary.csv"].append([rid, fid, f.get("type"), f.get("src"),
-                                              json.dumps(f.get("dst")) if isinstance(f.get("dst"), list) else f.get("dst"),
-                                              s.get("avg_thr_bps"), s.get("avg_delay_ms"), s.get("avg_jitter_ms"),
-                                              s.get("loss_pct"), s.get("avg_rtt_ms"), bool(f.get("hidden"))])
-            for p in f.get("series") or []:
-                files["flows.csv"].append([rid, fid, p.get("t"), p.get("thr_bps"), p.get("delay_ms"), p.get("jitter_ms"),
-                                           p.get("loss_pct"), p.get("rtt_ms"), p.get("mos")])
-        for lid, pts in (r.get("links") or {}).items():
-            for p in pts or []:
-                files["links.csv"].append([rid, lid, p.get("t"), p.get("ab_bps"), p.get("ba_bps"), p.get("util"),
-                                           p.get("queue_ab"), p.get("queue_ba"), p.get("drops_ab"), p.get("drops_ba")])
-        for dv, pts in (r.get("nodes") or {}).items():
-            for p in pts or []:
-                files["nodes.csv"].append([rid, dv, p.get("t"), p.get("routes"), p.get("fwd_pps"), p.get("rx_pps"),
-                                           p.get("tx_pps"), p.get("noroute"), p.get("discards")])
-        for aid, a in (r.get("apps") or {}).items():
-            files["apps.csv"].append([rid, aid, a.get("type"), json.dumps({k: v for k, v in a.items() if k != "type"},
-                                                                          ensure_ascii=False, default=str)])
-        for fid, a in ((r.get("availability") or {}).get("flows") or {}).items():
-            files["availability.csv"].append([rid, fid, a.get("availability_pct"), a.get("downtime_s"),
-                                              len(a.get("outages") or [])])
-        for c in r.get("convergence") or []:
-            files["convergence.csv"].append([rid, c.get("t"), c.get("action"), c.get("link"), c.get("converged_s"),
-                                             " ".join(c.get("devices") or [])])
-        for ev in r.get("route_events") or []:
-            files["route_events.csv"].append([rid, ev.get("t"), ev.get("dev"), " | ".join(ev.get("added") or []),
-                                              " | ".join(ev.get("removed") or [])])
-        for ev in r.get("events") or []:
-            files["events.csv"].append([rid, ev.get("t"), ev.get("action"), ev.get("link") or ev.get("device"),
-                                        ev.get("source") or ""])
-    headers = {
-        "flows.csv": ["run_id", "flow", "t", "thr_bps", "delay_ms", "jitter_ms", "loss_pct", "rtt_ms", "mos"],
-        "flow_summary.csv": ["run_id", "flow", "type", "src", "dst", "avg_thr_bps", "avg_delay_ms", "avg_jitter_ms",
-                             "loss_pct", "avg_rtt_ms", "hidden"],
-        "links.csv": ["run_id", "link", "t", "ab_bps", "ba_bps", "util", "queue_ab", "queue_ba", "drops_ab", "drops_ba"],
-        "nodes.csv": ["run_id", "device", "t", "routes", "fwd_pps", "rx_pps", "tx_pps", "noroute", "discards"],
-        "apps.csv": ["run_id", "app", "type", "summary_json"],
-        "availability.csv": ["run_id", "flow", "availability_pct", "downtime_s", "outages"],
-        "convergence.csv": ["run_id", "t", "action", "target", "converged_s", "devices"],
-        "route_events.csv": ["run_id", "t", "device", "added", "removed"],
-        "events.csv": ["run_id", "t", "action", "target", "source"],
-    }
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-        for name, rows in files.items():
-            if rows or name in ("flows.csv", "flow_summary.csv"):
-                z.writestr(name, _csv(rows, headers[name]))
-        z.writestr("results.json", json.dumps(runs if len(runs) > 1 else runs[0], ensure_ascii=False, default=str))
-        from lab.reproducibility import verify
-        for index, run in enumerate(runs):
-            record = run.get("reproducibility") or {}
-            if not verify(record):
-                continue  # Legacy results contain no topology snapshot; do not invent one.
-            prefix = "" if len(runs) == 1 else f"runs/{index + 1:02d}/"
-            manifest = {k: v for k, v in record.items() if k not in ("project", "effective_scenario")}
-            payloads = {"project.json": record["project"], "manifest.json": manifest,
-                        "effective-input.json": {"project": record["project"], "scenario": record["effective_scenario"]},
-                        "run-request.json": {"project": record["project"], "scenario": record["scenario_name"],
-                                             "engine": run.get("engine")}}
-            for name, payload in payloads.items():
-                z.writestr(prefix + name, json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False))
-    return buf.getvalue()
-
 
 def experiment_report(summary):
     body = kv([("Expected", summary["expected"]), ("Observed", summary["observed"]),
@@ -710,11 +654,23 @@ def _load(path):
             if f.endswith(".json"):
                 with open(os.path.join(path, f)) as fh:
                     from lab.result_json import load_result
-                    out.append(load_result(fh))
+                    out.append(load_result(fh, f[:-5]))
         return out
     with open(path) as fh:
         from lab.result_json import load_json
         return load_json(fh)
+
+
+def _write_report(path, content):
+    directory = os.path.dirname(os.path.abspath(path))
+    fd, temporary = tempfile.mkstemp(prefix="."+os.path.basename(path)+"-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
 
 
 def main(argv=None):
@@ -729,20 +685,19 @@ def main(argv=None):
         data = _load(a.src)
         if not isinstance(data, (dict, list)):
             raise ValueError("result must be an object or array")
-    except (OSError, ValueError) as error:
+        if a.zip:
+            content = csv_bundle(data)
+        else:
+            if isinstance(data, list):
+                doc = study_report(data) if a.study else compare_report(data)
+            elif "cases" in data and "capacity_plan" in data:
+                doc = survivability_report(data)
+            else:
+                doc = run_report(data)
+            content = doc.encode("utf-8")
+        _write_report(a.out, content)
+    except (OSError, ValueError, TypeError, OverflowError) as error:
         ap.error(str(error))
-    if a.zip:
-        with open(a.out, "wb") as f:
-            f.write(csv_bundle(data))
-        return
-    if isinstance(data, list):
-        doc = study_report(data) if a.study else compare_report(data)
-    elif "cases" in data and "capacity_plan" in data:
-        doc = survivability_report(data)
-    else:
-        doc = run_report(data)
-    with open(a.out, "w") as f:
-        f.write(doc)
 
 
 if __name__ == "__main__":
