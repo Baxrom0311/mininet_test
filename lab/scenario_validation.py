@@ -209,6 +209,8 @@ def validate_scenario(project, sc):
     if not isinstance(project, dict) or not isinstance(project.get("devices", {}), dict) or not isinstance(project.get("links", {}), dict):
         return ["project: devices/links objects"]
     errors = []
+    if "ns3_fast" in sc and type(sc["ns3_fast"]) is not bool:
+        errors.append("ns3_fast: boolean required")
     version = sc.get("ip_version", 4)
     if type(version) is not int or version not in (4, 6):
         errors.append("ip_version: 4 | 6")
