@@ -121,6 +121,24 @@ class RunStore:
             raise FileNotFoundError(run_id)
         return json.loads(row[0])
 
+    def mark_cancelling(self, project, run_id):
+        # Serialize the read and transition with worker commits. A stale cancel
+        # request must never overwrite a terminal result with pending metadata.
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT status,metadata FROM runs WHERE project=? AND id=?", (project, run_id)).fetchone()
+            if row is None:
+                raise FileNotFoundError(run_id)
+            status, raw = row
+            data = json.loads(raw)
+            if status in TERMINAL:
+                return data
+            if status not in PENDING:
+                raise ValueError("run is not pending")
+            data["status"] = "cancelling"
+            self._write(db, data)
+            return data
+
     def get_many(self, project, ids):
         if not ids:
             return {}

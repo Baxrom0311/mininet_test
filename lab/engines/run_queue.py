@@ -268,8 +268,7 @@ class QueuedRunManager(manager.RunManager):
                     self.payloads.pop(rid, None)
                     self._maybe_study_done(data.get("study_id"))
             else:
-                data["status"] = "cancelling"
-                self.store.save(data)
+                self.store.mark_cancelling(project, rid)
             return self.store.get(project, rid)
 
     def delete(self, project, rid):

@@ -170,6 +170,8 @@ jobs:
         run: python -m unittest lab.tests.test_calibration_evidence -v
       - name: Durable parameter study admission and report regression
         run: python -m unittest lab.tests.test_study_preparation lab.tests.test_study_queue lab.tests.test_study_reports lab.tests.test_study_notifications lab.tests.test_dispatch_groups -v
+      - name: Cancellation terminal state regression
+        run: python -m unittest lab.tests.test_cancellation_terminal_race -v
 
   docker-build:
     runs-on: ubuntu-latest
