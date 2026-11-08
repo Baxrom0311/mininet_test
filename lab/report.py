@@ -709,10 +709,12 @@ def _load(path):
         for f in sorted(os.listdir(path)):
             if f.endswith(".json"):
                 with open(os.path.join(path, f)) as fh:
-                    out.append(json.load(fh))
+                    from lab.result_json import load_result
+                    out.append(load_result(fh))
         return out
     with open(path) as fh:
-        return json.load(fh)
+        from lab.result_json import load_json
+        return load_json(fh)
 
 
 def main(argv=None):
@@ -723,7 +725,12 @@ def main(argv=None):
     ap.add_argument("--zip", action="store_true", help="CSV to'plami (zip)")
     ap.add_argument("--study", action="store_true", help="papkadagi natijalar — tadqiqot hisoboti")
     a = ap.parse_args(argv)
-    data = _load(a.src)
+    try:
+        data = _load(a.src)
+        if not isinstance(data, (dict, list)):
+            raise ValueError("result must be an object or array")
+    except (OSError, ValueError) as error:
+        ap.error(str(error))
     if a.zip:
         with open(a.out, "wb") as f:
             f.write(csv_bundle(data))

@@ -14,10 +14,12 @@ import importlib.util
 import json
 import os
 import re
+import tempfile
 import threading
 import time
 import uuid
 
+from lab.result_json import load_result
 from lab.model import normalize_link_params, parse_rate, validate_project, validate_scenario
 
 STUDY_LINK_FIELDS = ("bw", "delay", "loss", "queue", "qdisc")
@@ -76,7 +78,7 @@ class RunManager:
                 continue
             try:
                 with open(os.path.join(d, f)) as fh:
-                    r = json.load(fh)
+                    r = load_result(fh, f[:-5])
                 out.append({k: r.get(k) for k in ("run_id", "scenario_name", "engine", "engine_label", "created",
                                                    "duration", "wall_s", "status", "label", "study_id",
                                                    "study_param", "study_value", "study_index",
@@ -98,7 +100,7 @@ class RunManager:
         if not _SAFE.match(run_id or ""):
             raise ValueError("run_id noto'g'ri")
         with open(os.path.join(self._dir(project_name), run_id + ".json")) as f:
-            return json.load(f)
+            return load_result(f, run_id)
 
     def delete(self, project_name, run_id):
         if not _SAFE.match(run_id or ""):
@@ -115,10 +117,14 @@ class RunManager:
 
     def _save(self, project_name, result):
         p = os.path.join(self._dir(project_name), result["run_id"] + ".json")
-        tmp = p + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(result, f)
-        os.replace(tmp, p)
+        fd, tmp = tempfile.mkstemp(prefix="." + result["run_id"] + "-", suffix=".tmp", dir=os.path.dirname(p))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(result, f, allow_nan=False)
+            os.replace(tmp, p)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
     # ---------- ishga tushirish ----------
     def _prepare_inputs(self, project, scenario_name, engine):
@@ -365,6 +371,12 @@ class RunManager:
             res.update(extra)
         try:
             self._save(pname, res)
+        except Exception as error:
+            # A committed JSON remains authoritative if later indexing fails.
+            path = os.path.join(RESULTS_DIR, pname, run_id + ".json")
+            if not os.path.isfile(path):
+                res.update(status="error", error=f"{type(error).__name__}: {error}")
+            raise
         finally:
             self._pub(run_id, done=True, status=res["status"], error=res.get("error"))
             with self._lock:
