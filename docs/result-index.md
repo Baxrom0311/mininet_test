@@ -60,9 +60,41 @@ POST /api/runs/my_lab/reindex
 ```
 
 Javob: `scanned`, `updated`, `removed`, `invalid` sonlari. Endpoint mavjud
-token/origin himoyasidan foydalanadi. Buzilgan fayl tuzatilsa keyingi reconcile’da
-qayta indekslanadi. Buzilgan fayllar qayta tekshirilishi mumkin; invalid sonini
-ko‘rib fayllarni tuzatish kerak. GET result/export asl JSON ma’lumotini ishlatadi.
+token/origin himoyasidan foydalanadi. `invalid` joriy tekshiruvda topilgan buzilgan
+fayllarni, shu jumladan signaturasi o‘zgarmagan avvalgi xatolarni ham sanaydi.
+Majburiy reindex buzilgan fayllarning keshini ham chetlab o‘tib, qayta parse qiladi.
+GET result/export asl JSON ma’lumotini ishlatadi.
+
+### Buzilgan natijalar diagnostikasi
+
+```text
+GET /api/results/my_lab/invalid?limit=100&offset=0
+```
+
+Javob `total`, `limit`, `offset`, `files` maydonlaridan iborat. Har bir faylda
+`run_id`, `mtime_ns`, `size` (bayt) va ko‘pi bilan 500 belgili `error` bor.
+`files` run ID bo‘yicha tartiblanadi; count va sahifa bitta read snapshotdan olinadi.
+`limit` 1..1000 (default 100), `offset` 0..1000000 (default 0). Diapazon xatosi
+400, integerga aylantirib bo‘lmaydigan query 422 beradi. Mavjud token himoyasi
+amal qiladi. Alohida `/api/results` prefiksi run ID’si `invalid` bo‘lgan eski
+natijani olishga xalaqit bermaydi.
+
+Deterministik JSON/metadata xatosi SQLite’dagi alohida `invalid_results` jadvalida
+`(project, run_id)` va `(mtime_ns, size)` bilan saqlanadi. Ro‘yxat va diagnostika
+so‘rovlari o‘zgarmagan buzilgan JSON’ni, server qayta ishga tushganda ham, qayta
+o‘qimaydi. Fayl signaturasi o‘zgarsa qayta tekshiriladi; tuzatilgan natija
+indeksga qaytganda diagnostika tranzaksiya ichida tozalanadi. O‘chirilgan faylning
+diagnostikasi ham keyingi reconcile’da yo‘qoladi. Fayllarning o‘zi ko‘chirilmaydi
+yoki o‘chirilmaydi. Queued/running/cancelling worker metadata’si tashqaridan
+qo‘yilgan buzilgan fayl sabab olib tashlanmaydi.
+Bu fayl keyinchalik o‘chirilsa ham faqat diagnostika tozalanadi, faol worker
+metadata’si saqlanadi.
+
+Vaqtinchalik permission/read xatolari signatura keshiga kiritilmaydi: ruxsat
+tuzatilishi fayl hajmi yoki mtime’ini o‘zgartirmasligi mumkin. Ular reindex
+hisobotining `invalid` soniga kiradi, ammo diagnostika sahifasi faqat parse yoki
+metadata tekshiruvidan o‘tmagan fayllarning oxirgi qaydini ko‘rsatadi. Indeksga
+yozish xatosi buzilgan JSON sifatida yashirilmaydi; so‘rovga xato qaytariladi.
 
 Bu optimallashtirishda katalog/stat ishi hanuz **O(natijalar soni)**. Sahifalash
 response va SQL metadata o‘qishini chegaralaydi; million faylli katalog uchun O(1)

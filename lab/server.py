@@ -507,6 +507,10 @@ def create_app(driver_name="demo", token=None):
     def run_reindex(project: str):
         return runs.reindex(project)
 
+    @app.get("/api/results/{project}/invalid")
+    def invalid_results(project: str, limit: int = 100, offset: int = 0):
+        return runs.invalid_results(project, limit, offset)
+
     @app.get("/api/runs/{project}/{run_id}")
     def run_get(project: str, run_id: str):
         try:

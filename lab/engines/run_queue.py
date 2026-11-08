@@ -243,6 +243,11 @@ class QueuedRunManager(manager.RunManager):
     def reindex(self, project):
         return self.result_index.reconcile(project, force=True)
 
+    def invalid_results(self, project, limit=100, offset=0):
+        self.store.validate_invalid_page(limit, offset)
+        self.result_index.reconcile(project)
+        return self.store.invalid_page(project, limit, offset)
+
     def cancel(self, project, rid):
         with self.queue_lock:
             data = self.store.get(project, rid)
