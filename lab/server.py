@@ -300,6 +300,10 @@ def create_app(driver_name="demo", token=None):
         from lab.traffic import import_matrix
         return import_matrix(body.get("project"), body)
 
+    @app.post("/api/scenario/preflight")
+    def scenario_preflight(body: dict = Body(...)):
+        return runs.preflight(body.get("project"), body.get("scenario"), body.get("engine", "analytic"))
+
     @app.post("/api/runs")
     def run_start(body: dict = Body(...)):
         return runs.start(body.get("project") or {}, body.get("scenario"), body.get("engine", "analytic"))

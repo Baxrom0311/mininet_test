@@ -121,7 +121,7 @@ class RunManager:
         os.replace(tmp, p)
 
     # ---------- ishga tushirish ----------
-    def _prepare(self, project, scenario_name, engine):
+    def _prepare_inputs(self, project, scenario_name, engine):
         if not isinstance(project, dict) or not isinstance(scenario_name, str) or not isinstance(engine, str):
             raise ValueError("project: object; scenario/engine: string")
         project = copy.deepcopy(project)
@@ -143,12 +143,28 @@ class RunManager:
             errs = validate_scenario(project, sc)
         if errs:
             raise ValueError("; ".join(errs[:5]))
+        if engine not in ("analytic", "ns3", "mininet"):
+            raise ValueError(f"dvigatel '{engine}' noma'lum")
+        pname = project.get("name") or "untitled"
+        if not _SAFE.fullmatch(pname):
+            raise ValueError("loyiha nomi noto'g'ri")
+        return project, sc, pname
+
+    def preflight(self, project, scenario_name, engine):
+        from lab.engines.preflight import report
+        return report(self, project, scenario_name, engine)
+
+    def _prepare(self, project, scenario_name, engine):
+        project, sc, pname = self._prepare_inputs(project, scenario_name, engine)
+        from lab.engines.preflight import issues
+        errors = [item["message"] for item in issues(project, sc, engine) if item["severity"] == "error"]
+        if errors:
+            raise ValueError("; ".join(errors[:5]))
         eng = {e["id"]: e for e in self.engines()}.get(engine)
         if not eng:
             raise ValueError(f"dvigatel '{engine}' noma'lum")
         if not eng["available"]:
             raise ValueError(f"{eng['label']}: {eng['hint']}")
-        pname = project.get("name") or "untitled"
         self._dir(pname)
         return project, sc, pname
 

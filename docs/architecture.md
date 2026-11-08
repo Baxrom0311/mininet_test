@@ -158,7 +158,7 @@ UI yangi backend feature’larining barchasini hali tahrirlamaydi; API/JSON mavj
 | GET | `/api/info`, `/api/templates`, `/api/engines` | Imkoniyat va shablonlar |
 | GET | `/api/projects`, `/api/projects/{name}`, `/api/new` | Loyihalarni olish |
 | PUT / DELETE | `/api/projects/{name}` | Saqlash/o‘chirish |
-| POST | `/api/validate`, `/api/scenario/validate` | Validatsiya |
+| POST | `/api/validate`, `/api/scenario/validate`, `/api/scenario/preflight` | Validatsiya va dvigatel mosligi |
 | GET | `/api/net/status`, `/api/net/project` | Jonli tarmoq holati |
 | POST | `/api/net/start`, `/api/net/stop`, `/api/net/capture` | Tarmoq/capture boshqaruvi |
 | POST / DELETE | `/api/net/device/{name}`, `/api/net/link/{lid}` | Jonli element qo‘shish/o‘chirish |

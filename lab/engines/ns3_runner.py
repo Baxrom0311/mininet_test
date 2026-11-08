@@ -203,6 +203,12 @@ def main(inp_path, out_path):
     with open(inp_path) as f:
         inp = json.load(f)
     project, sc = inp["project"], inp["scenario"]
+    if "ns3_fast" in sc and type(sc["ns3_fast"]) is not bool:
+        raise ValueError("ns3_fast: boolean required")
+    from lab.engines.preflight import issues, ns3_options
+    blockers = [item["message"] for item in issues(project, sc, "ns3") if item["severity"] == "error"]
+    if blockers:
+        raise ValueError("; ".join(blockers))
     from lab.addressing import project_for_family
     version = sc.get("ip_version", 4)
     project = project_for_family(project, version)
@@ -227,11 +233,11 @@ def main(inp_path, out_path):
     # teng qoldiriladi (paket soni x1500/9000). Natija TAXMINIY: o'tkazuvchanlik deyarli bir xil,
     # paket darajasidagi kechikish/jitter va kichik navbatlarda yo'qotish farq qilishi mumkin.
     # Wi-Fi bo'lsa qo'llanmaydi (MSDU 2304 — fragmentatsiya bo'lardi).
-    fast = bool(sc.get("ns3_fast")) or os.environ.get("NETLAB_NS3_FAST") == "1"
-    if fast and any((l.get("params") or {}).get("medium") == "wifi" for l in project["links"].values()):
+    fast_options = ns3_options(project, sc)
+    fast = fast_options["fast_enabled"]
+    if fast_options["fast_disabled_by_wifi"]:
         emit(log="ns3_fast: Wi-Fi kabellari bor — tezkor rejim qo'llanmadi")
-        fast = False
-    mtu = 9000 if fast else 1500
+    mtu = fast_options["mtu"]
     if fast:
         emit(log=f"ns3_fast: MTU 9000 / MSS {mtu - (72 if version == 6 else 52)}, navbatlar bayt bo'yicha teng (taxminiy rejim)")
     ns.Config.SetDefault("ns3::TcpSocket::SegmentSize", ns.UintegerValue(mtu - (72 if version == 6 else 52)))
@@ -303,7 +309,7 @@ def main(inp_path, out_path):
     nl = cppyy.gbl.netlab
     from lab.engines.nodestats import L3_NS, RouteTracker, convergence
     stat_nodes = [n for n, d in devs.items() if d["type"] in L3_NS]
-    nl.Reserve(max(nd.GetId() for nd in nodes.values()))
+    nl.Reserve(max((nd.GetId() for nd in nodes.values()), default=0))
     for n in stat_nodes:
         (nl.Attach6 if version == 6 else nl.Attach)(nodes[n])
 
@@ -1065,7 +1071,8 @@ def main(inp_path, out_path):
                 applied.append({"t": now, "action": "roam", "device": sta, "from": prev_ap, "to": cur_ap})
                 emit(log=f"t={now:.0f}s: roaming {sta}: {prev_ap} -> {cur_ap}")
             roam_state[sta] = cur_ap
-        mon.CheckForLostPackets()
+        if mon:  # InstallAll returns null when there are no L3 nodes.
+            mon.CheckForLostPackets()
         for app in apps:
             if "mc_key" in app:         # multicast qabul qiluvchi: C++ sink hisoblagichlari
                 cur = [float(x) for x in nl.McGet(app["mc_key"], app["mc_gkey"])]
@@ -1100,7 +1107,7 @@ def main(inp_path, out_path):
         sample_nodes(dt)
         emit(progress=round(now / duration, 3))
 
-    if os.environ.get("NETLAB_NS3_DEBUG"):
+    if os.environ.get("NETLAB_NS3_DEBUG") and mon:
         for fid, st_ in mon.GetFlowStats():
             t5 = clf.FindFlow(fid)
             emit(log=f"flow {fid}: {t5.sourceAddress}:{t5.sourcePort} -> {t5.destinationAddress}:{t5.destinationPort} "
