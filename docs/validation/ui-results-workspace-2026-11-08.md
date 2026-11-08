@@ -39,8 +39,8 @@ Tarmoqda uzoq bajariladigan ish o‘rniga test worker progress chiqarib turadi;
 uning bekor qilinishi esa odatdagi queue/token/REST yo‘lidan o‘tadi.
 
 Backend regressiyasi: `lab.tests.smoke_demo` **56**, `lab.tests.smoke_report` **25**
-tekshiruv bilan o‘tdi. Ushbu Python muhitida ns-3 mavjud emasligi sababli demo
-smoke ichidagi ns-3 qismi o‘tkazib yuborilgan. Bu UI iteratsiyasida jonli Mininet,
+tekshiruv bilan o‘tdi. Demo smoke `NETLAB_SKIP_NS3=1` bilan ishga tushirilgani
+sababli undagi ns-3 qismi o‘tkazib yuborilgan. Bu UI iteratsiyasida jonli Mininet,
 FRR yoki mahalliy ns-3 qayta sinovi bajarilmadi.
 
 ## Ko‘rinish

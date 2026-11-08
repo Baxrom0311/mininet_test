@@ -4,6 +4,7 @@ import { create } from 'zustand'
 import { api } from './api'
 import { on } from './bus'
 import { storage } from './format'
+import { renameScenarioDevice } from './scenario'
 import { toast } from '@/components/ui/toast'
 import type { Device, DeviceType, Info, Link, LinkParams, LinkStats, Project, ScenarioEvent, Selection, Status } from './types'
 
@@ -196,8 +197,7 @@ export function renameDevice(oldName: string, newName: string) {
     p.devices[newName] = d; delete p.devices[oldName]
     for (const l of Object.values(p.links)) { if (l.a.dev === oldName) l.a.dev = newName; if (l.b.dev === oldName) l.b.dev = newName }
     for (const sc of Object.values(p.scenarios || {})) {
-      for (const a of sc.apps || []) { if (a.src === oldName) a.src = newName; if (a.dst === oldName) a.dst = newName }
-      for (const e of sc.events || []) if (e.device === oldName) e.device = newName
+      renameScenarioDevice(sc, oldName, newName)
     }
   })
   set((s) => ({ selection: { kind: 'device', id: newName }, wins: s.wins.map((w) => w.kind === 'device' && w.ref === oldName ? { ...w, ref: newName, id: 'dev:' + newName } : w) }))
