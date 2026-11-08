@@ -90,7 +90,12 @@ class RunStore:
     def _write(db, data, signature=None, table="runs", owner=None, updated=None):
         metadata = {k: data[k] for k in METADATA_KEYS if k in data}
         created = data.get("created") or 0
-        created = float(created) if isinstance(created, (int, float)) and math.isfinite(created) else 0
+        try:
+            created = float(created) if type(created) in (int, float) else 0
+            if not math.isfinite(created):
+                created = 0
+        except OverflowError:
+            created = 0
         metadata["created"] = created
         mtime, size = signature if signature is not None else (None, None)
         db.execute(f"INSERT INTO {table} VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project,id) DO UPDATE SET "

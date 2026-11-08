@@ -261,7 +261,8 @@ def main():
         cohorts = []
         for path in (args.baseline, args.candidate):
             with path.open() as stream:
-                data = json.load(stream)
+                from lab.result_json import load_json
+                data = load_json(stream)
             if not isinstance(data, list) or not all(isinstance(r, dict) for r in data):
                 raise ValueError("each input must be an experiment results.json array")
             cohorts.append(data)

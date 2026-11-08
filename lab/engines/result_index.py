@@ -6,6 +6,8 @@ from pathlib import Path
 import re
 import threading
 
+from lab.result_json import load_result
+
 
 class ResultIndex:
     def __init__(self, store, root):
@@ -41,7 +43,7 @@ class ResultIndex:
                         continue
                     try:
                         with open(entry.path) as stream:
-                            result = json.load(stream)
+                            result = load_result(stream, rid)
                         if not isinstance(result, dict) or result.get("run_id") != rid:
                             raise ValueError("run_id must match its result filename")
                         for key in ("status", "engine", "study_id", "experiment_id"):
