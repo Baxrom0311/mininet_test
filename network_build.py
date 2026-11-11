@@ -74,7 +74,7 @@ def _setup_qos_qdisc(intf, params):
     node.cmd(" ; ".join(cmds))
 
 
-def build_topology(topo):
+def build_topology(topo, controller_type="ryu", controller_ip="127.0.0.1", controller_port=None, of_protocol=None):
     """Mininet topologiya yaratish."""
     from mininet.net import Mininet
     from mininet.node import OVSSwitch, RemoteController
@@ -82,15 +82,22 @@ def build_topology(topo):
     from mininet.log import setLogLevel
     setLogLevel("info")
 
+    c_type = (controller_type or "ryu").lower()
+    if controller_port is None:
+        controller_port = CONTROLLER_PORT if c_type in ("ryu", "os-ken", "pox") else 6653
+
+    if of_protocol is None:
+        of_protocol = "OpenFlow10" if c_type == "pox" else "OpenFlow13"
+
     net = Mininet(controller=None, switch=OVSSwitch, link=TCLink,
                   autoSetMacs=True, autoStaticArp=True)
     net.addController("c0", controller=RemoteController,
-                      ip="127.0.0.1", port=CONTROLLER_PORT, protocols="OpenFlow13")
+                      ip=controller_ip, port=controller_port, protocols=of_protocol)
 
     switches = {}
     for sw_name in topo["switches"]:
         dpid = f"{int(sw_name[1:]):016x}"
-        switches[sw_name] = net.addSwitch(sw_name, dpid=dpid, protocols="OpenFlow13")
+        switches[sw_name] = net.addSwitch(sw_name, dpid=dpid, protocols=of_protocol)
 
     hosts = {}
     for h_name, h_info in topo["hosts"].items():

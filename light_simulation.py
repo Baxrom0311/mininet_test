@@ -90,6 +90,14 @@ Misollar:
         "l2_learn", "rip", "ospf", "isis", "eigrp", "bgp",
         "ecmp", "spf", "policy", "static", "hybrid"
     ], default="l2_learn")
+    parser.add_argument("--controller", choices=["ryu", "pox", "remote", "onos", "odl", "floodlight"],
+                        default="ryu", help="SDN kontroller turi: ryu, pox, remote, onos, odl, floodlight (default: ryu)")
+    parser.add_argument("--controller-ip", default="127.0.0.1",
+                        help="Masofaviy (remote) kontroller IP manzili (default: 127.0.0.1)")
+    parser.add_argument("--controller-port", type=int, default=None,
+                        help="Kontroller porti (default: ryu/pox=6633, onos/odl/remote=6653)")
+    parser.add_argument("--of-protocol", choices=["OpenFlow10", "OpenFlow13", "OpenFlow14", "OpenFlow15"],
+                        default=None, help="OpenFlow versiyasi (default: pox uchun OpenFlow10, qolganlar uchun OpenFlow13)")
     parser.add_argument("--duration", type=int, default=180)
     parser.add_argument("--seed", type=int, default=42,
                         help="RNG urug'i (reproducibility). Barcha modul global "
@@ -153,18 +161,21 @@ Misollar:
     try:
         n_sw = len(topo["switches"])
         n_h = len(topo["hosts"])
+        eff_port = args.controller_port or (6633 if args.controller in ("ryu", "pox") else 6653)
         print(f"\n{'='*55}")
         print(f"  REAL INTERNET SIMULATION v2")
-        print(f"  Topology: {args.topology} ({n_sw} sw, {n_h} hosts)")
-        print(f"  Routing:  {args.routing}")
+        print(f"  Topology:   {args.topology} ({n_sw} sw, {n_h} hosts)")
+        print(f"  Routing:    {args.routing}")
+        print(f"  Controller: {args.controller.upper()} ({args.controller_ip}:{eff_port})")
         print("  Routing label: theoretical model; real forwarding: L2 learning")
-        print(f"  Duration: {args.duration}s ({args.duration/60:.1f} min)")
+        print(f"  Duration:   {args.duration}s ({args.duration/60:.1f} min)")
         print(f"{'='*55}\n")
 
-        ctrl_proc = start_controller()
+        ctrl_proc = start_controller(controller_type=args.controller, ip=args.controller_ip, port=args.controller_port)
 
         print(f"\n[Network] {args.topology} topologiya yaratilmoqda...")
-        net = build_topology(topo)
+        net = build_topology(topo, controller_type=args.controller, controller_ip=args.controller_ip,
+                             controller_port=args.controller_port, of_protocol=args.of_protocol)
         net.start()
 
         print("[Network] Switch'lar ulanmoqda...")

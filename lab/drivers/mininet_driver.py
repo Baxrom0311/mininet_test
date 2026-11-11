@@ -187,6 +187,29 @@ def controller_cmd():
     return _CTRL_CMD
 
 
+def find_pox():
+    """POX skripti (pox.py) yo'lini aniqlaydi."""
+    env_dir = os.environ.get("POX_DIR") or os.environ.get("POX_PATH")
+    if env_dir:
+        cand = os.path.join(env_dir, "pox.py") if not env_dir.endswith("pox.py") else env_dir
+        if os.path.isfile(cand):
+            return os.path.abspath(cand)
+    cands = [
+        os.path.expanduser("~/pox/pox.py"),
+        "/home/user/pox/pox.py",
+        "/opt/pox/pox.py",
+        "/usr/local/pox/pox.py",
+        os.path.abspath("pox/pox.py"),
+    ]
+    for c in cands:
+        if os.path.isfile(c):
+            return c
+    which_pox = shutil.which("pox.py") or shutil.which("pox")
+    if which_pox:
+        return which_pox
+    return None
+
+
 def _read_net_dev(pid):
     """/proc/<pid>/net/dev -> {ifname: (rx_bytes, rx_pkts, rx_drop, tx_bytes, tx_pkts, tx_drop)}"""
     out = {}
@@ -468,7 +491,8 @@ class MininetDriver(BaseDriver):
             "ovs": bool(_which("ovs-vsctl")),
             "frr": os.path.exists(os.path.join(FRR_BIN, "zebra")),
             "p4": bool(_which("simple_switch")),
-            "sdn": bool(controller_cmd()),
+            "sdn": bool(controller_cmd() or find_pox()),
+            "pox": bool(find_pox()),
             "p4c": bool(_which("p4c-bm2-ss", "p4c")),
             "tcpdump": bool(_which("tcpdump")),
             "ethtool": bool(_which("ethtool")),
@@ -496,11 +520,22 @@ class MininetDriver(BaseDriver):
             raise DriverError("FRR router bor, lekin FRRouting o'rnatilmagan (install_lab.sh --frr)")
         if "p4switch" in types and not caps["p4"]:
             raise DriverError("P4 switch bor, lekin BMv2 o'rnatilmagan (install_lab.sh --p4)")
-        if project.get("controllers") and not caps["sdn"]:
+        if project.get("controllers"):
             needs = [n for n, d in project["devices"].items()
                      if d["type"] == "sdnrouter" or (d.get("config") or {}).get("mode") == "sdn"]
             if needs:
-                raise DriverError("SDN qurilmalar bor, lekin os-ken/ryu o'rnatilmagan")
+                needs_ryu = any(
+                    (c.get("type") or "ryu").lower() in ("ryu", "os-ken")
+                    for c in project["controllers"].values()
+                )
+                needs_pox = any(
+                    (c.get("type") or "").lower() == "pox"
+                    for c in project["controllers"].values()
+                )
+                if needs_ryu and not controller_cmd():
+                    raise DriverError("SDN qurilmalar bor, lekin os-ken/ryu o'rnatilmagan")
+                if needs_pox and not find_pox():
+                    raise DriverError("POX kontrolleri tanlangan, lekin pox.py topilmadi (~/pox yoki POX_DIR)")
 
     # ─────────────────────────── start / stop ───────────────────────────
     def start(self, project):
@@ -1429,31 +1464,86 @@ exit 0
     def _ctrl_start(self, cname):
         from mininet.node import RemoteController
         c = self.project["controllers"][cname]
+        ctype = (c.get("type") or "ryu").lower()
+        cip = c.get("ip") or "127.0.0.1"
+        cport = c["port"]
         d = os.path.join(RUN_DIR, "sdn", cname)
         os.makedirs(d, exist_ok=True)
-        with open(os.path.join(d, "app.py"), "w") as f:
-            f.write(c.get("code", ""))
-        self._write_ctrl_configs()
-        mgr = controller_cmd()
-        if not mgr:
-            raise DriverError("osken-manager/ryu-manager topilmadi")
-        logf = open(os.path.join(d, "controller.log"), "ab")
-        env = dict(os.environ, NETLAB_CONFIG=os.path.join(d, "config.json"))
-        p = subprocess.Popen([*mgr, "--ofp-listen-host", "127.0.0.1",
-                              "--ofp-tcp-listen-port", str(c["port"]), os.path.join(d, "app.py")],
-                             stdout=logf, stderr=subprocess.STDOUT, env=env, cwd=d,
-                             start_new_session=True)
-        logf.close()
-        self._ctrl_procs[cname] = p
-        if not _wait_port(c["port"], 15):
-            self.bus.log("error", f"Kontroller '{cname}' {c['port']}-portda ochilmadi:\n"
-                                  f"{self.controller_log(cname)[-600:]}")
-        if cname not in self._ctrl_objs and self.net is not None:
-            # net.addController — net.stop() uni ham to'xtatadi. Switchlar
-            # unga net.start() orqali emas, _start_device'da tanlab ulanadi.
-            self._ctrl_objs[cname] = self.net.addController(
-                f"c_{cname}", controller=RemoteController, ip="127.0.0.1", port=c["port"])
-        self.bus.log("ok", f"Kontroller '{cname}' :{c['port']} ishga tushdi")
+
+        if ctype in ("remote", "onos", "odl", "opendaylight", "floodlight"):
+            label = ctype.upper() if ctype != "odl" else "OpenDaylight"
+            import socket
+            is_open = False
+            try:
+                s = socket.socket()
+                s.settimeout(2.0)
+                s.connect((cip, cport))
+                s.close()
+                is_open = True
+            except OSError:
+                is_open = False
+
+            if is_open:
+                self.bus.log("ok", f"Masofaviy {label} kontroller '{cname}' ({cip}:{cport}) ulandi")
+            else:
+                self.bus.log("warn", f"Masofaviy {label} kontroller '{cname}' ({cip}:{cport}) ga ulanib bo'lmadi — kontroller ishga tushirilganini tekshiring")
+
+            if cname not in self._ctrl_objs and self.net is not None:
+                self._ctrl_objs[cname] = self.net.addController(
+                    f"c_{cname}", controller=RemoteController, ip=cip, port=cport)
+            return
+
+        elif ctype == "pox":
+            pox_bin = find_pox()
+            if not pox_bin:
+                raise DriverError(f"POX topilmadi (~/pox yoki POX_DIR). Kontroller '{cname}' ishga tushmadi")
+            modules = c.get("modules") or "forwarding.l2_learning"
+            code = c.get("code")
+            if code and code.strip():
+                with open(os.path.join(d, "app.py"), "w") as f:
+                    f.write(code)
+                env = dict(os.environ, PYTHONPATH=f"{d}:{os.environ.get('PYTHONPATH', '')}")
+                app_args = ["openflow.of_01", f"--port={cport}", "app"]
+            else:
+                env = dict(os.environ)
+                app_args = ["openflow.of_01", f"--port={cport}", *modules.split()]
+
+            logf = open(os.path.join(d, "controller.log"), "ab")
+            p = subprocess.Popen([sys.executable, pox_bin, *app_args],
+                                 stdout=logf, stderr=subprocess.STDOUT, env=env, cwd=d,
+                                 start_new_session=True)
+            logf.close()
+            self._ctrl_procs[cname] = p
+            if not _wait_port(cport, 15):
+                self.bus.log("error", f"POX kontroller '{cname}' {cport}-portda ochilmadi:\n"
+                                      f"{self.controller_log(cname)[-600:]}")
+            if cname not in self._ctrl_objs and self.net is not None:
+                self._ctrl_objs[cname] = self.net.addController(
+                    f"c_{cname}", controller=RemoteController, ip="127.0.0.1", port=cport)
+            self.bus.log("ok", f"POX kontroller '{cname}' :{cport} ishga tushdi")
+
+        else:
+            with open(os.path.join(d, "app.py"), "w") as f:
+                f.write(c.get("code", ""))
+            self._write_ctrl_configs()
+            mgr = controller_cmd()
+            if not mgr:
+                raise DriverError("osken-manager/ryu-manager topilmadi")
+            logf = open(os.path.join(d, "controller.log"), "ab")
+            env = dict(os.environ, NETLAB_CONFIG=os.path.join(d, "config.json"))
+            p = subprocess.Popen([*mgr, "--ofp-listen-host", "127.0.0.1",
+                                  "--ofp-tcp-listen-port", str(cport), os.path.join(d, "app.py")],
+                                 stdout=logf, stderr=subprocess.STDOUT, env=env, cwd=d,
+                                 start_new_session=True)
+            logf.close()
+            self._ctrl_procs[cname] = p
+            if not _wait_port(cport, 15):
+                self.bus.log("error", f"Kontroller '{cname}' {cport}-portda ochilmadi:\n"
+                                      f"{self.controller_log(cname)[-600:]}")
+            if cname not in self._ctrl_objs and self.net is not None:
+                self._ctrl_objs[cname] = self.net.addController(
+                    f"c_{cname}", controller=RemoteController, ip="127.0.0.1", port=cport)
+            self.bus.log("ok", f"Kontroller '{cname}' :{cport} ishga tushdi")
 
     def controller_restart(self, project, cname):
         with self.lock:

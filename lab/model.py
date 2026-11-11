@@ -322,6 +322,7 @@ def _validate_project(p):
     for sta, n in wifi_sta.items():
         if n > 1:
             errors.append(f"{sta}: bitta qurilma faqat bitta Wi-Fi AP'ga ulanadi")
+    ALLOWED_CONTROLLER_TYPES = {"ryu", "os-ken", "pox", "remote", "onos", "odl", "opendaylight", "floodlight"}
     controller_ports = {}
     for cname, c in (p.get("controllers") or {}).items():
         if not NAME_RE.fullmatch(cname):
@@ -329,10 +330,24 @@ def _validate_project(p):
         port = c.get("port")
         if not isinstance(port, int) or not (1024 <= port <= 65535):
             errors.append(f"kontroller '{cname}': port 1024..65535")
-        elif port in controller_ports:
-            errors.append(f"kontroller '{cname}': port {port} '{controller_ports[port]}' bilan takrorlangan")
+        ctype = (c.get("type") or "ryu").lower()
+        if ctype not in ALLOWED_CONTROLLER_TYPES:
+            errors.append(f"kontroller '{cname}': noma'lum tur '{ctype}' (ryu, pox, remote, onos, odl, floodlight)")
+        cip = c.get("ip")
+        if cip is not None:
+            if not isinstance(cip, str):
+                errors.append(f"kontroller '{cname}': IP manzil satr bo'lishi kerak")
+            else:
+                try:
+                    ipaddress.ip_address(cip)
+                except ValueError:
+                    errors.append(f"kontroller '{cname}': noto'g'ri IP manzil '{cip}'")
+        effective_ip = cip or "127.0.0.1"
+        addr_key = (effective_ip, port)
+        if addr_key in controller_ports:
+            errors.append(f"kontroller '{cname}': port {port} '{controller_ports[addr_key]}' bilan takrorlangan")
         else:
-            controller_ports[port] = cname
+            controller_ports[addr_key] = cname
     for pname in (p.get("p4_programs") or {}):
         if not NAME_RE.fullmatch(pname) and not re.fullmatch(r"[a-z][a-z0-9_]{0,23}", pname):
             errors.append(f"P4 dastur '{pname}': noto'g'ri nom")

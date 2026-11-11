@@ -119,6 +119,18 @@ python3 light_simulation.py --dataset-only
 
 # Trafik yoki impairment o'chirish
 sudo python3 light_simulation.py --no-traffic --no-impairments
+
+# SDN Kontroller tanlash:
+# 1) Ryu / os-ken (default, OpenFlow 1.3)
+sudo python3 light_simulation.py --controller ryu
+
+# 2) POX (OpenFlow 1.0, ~/pox yoki POX_DIR)
+sudo python3 light_simulation.py --controller pox
+
+# 3) Masofaviy / Tashqi kontroller (ONOS, OpenDaylight, Floodlight yoki Remote)
+sudo python3 light_simulation.py --controller onos --controller-ip 127.0.0.1 --controller-port 6653
+sudo python3 light_simulation.py --controller odl --controller-ip 127.0.0.1 --controller-port 6653
+sudo python3 light_simulation.py --controller remote --controller-ip 192.168.1.100 --controller-port 6633
 ```
 
 ### Topologiya vizualizatsiya

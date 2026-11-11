@@ -169,34 +169,33 @@ def _render_controller_app():
             + _CONTROLLER_APP_BODY)
 
 
-def start_controller():
-    import socket
-    with open("/tmp/transport_monitor.py", "w") as f:
-        f.write(_render_controller_app())
-    with open("/tmp/run_controller.py", "w") as f:
-        f.write(f'''#!/usr/bin/env python3
-import sys
-sys.path.insert(0, "/tmp")
-from os_ken import cfg
-from os_ken.base.app_manager import AppManager
-from os_ken.lib import hub
-cfg.CONF(["--ofp-listen-host", "127.0.0.1", "--ofp-tcp-listen-port", "{CONTROLLER_PORT}"])
-app_mgr = AppManager.get_instance()
-app_mgr.load_apps(["transport_monitor"])
-contexts = app_mgr.create_contexts()
-services = app_mgr.instantiate_apps(**contexts)
-hub.joinall(services)
-''')
-    print("[Controller] os-ken ishga tushirilmoqda...")
-    proc = subprocess.Popen(["python3", "/tmp/run_controller.py"],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+def find_pox():
+    """POX skripti (pox.py) yo'lini aniqlaydi:
+    POX_DIR / POX_PATH muhit o'zgaruvchilari, ~/pox, /home/user/pox, /opt/pox, PATH yoki joriy katalog."""
+    import shutil
+    env_dir = os.environ.get("POX_DIR") or os.environ.get("POX_PATH")
+    if env_dir:
+        cand = os.path.join(env_dir, "pox.py") if not env_dir.endswith("pox.py") else env_dir
+        if os.path.isfile(cand):
+            return os.path.abspath(cand)
+    cands = [
+        os.path.expanduser("~/pox/pox.py"),
+        "/home/user/pox/pox.py",
+        "/opt/pox/pox.py",
+        "/usr/local/pox/pox.py",
+        os.path.abspath("pox/pox.py"),
+    ]
+    for c in cands:
+        if os.path.isfile(c):
+            return c
+    which_pox = shutil.which("pox.py") or shutil.which("pox")
+    if which_pox:
+        return which_pox
+    return None
 
-    # stdout=PIPE bo'lsa-yu, hech kim uni o'qimasa, uzoq ishlaydigan
-    # controller yetarlicha log chiqarsa OS pipe bufferi to'lib qoladi va
-    # controller yozishda bloklanib qoladi (klassik pipe deadlock). Shu
-    # sababli doimiy "drain" thread ishga tushiriladi — chiqishni fon
-    # rejimida o'qib, diskka (DATA_DIR/stats/controller.log) yozadi va
-    # xatolik diagnostikasi uchun oxirgi qatorlarni xotirada saqlaydi.
+
+def _drain_proc(proc, port, name="Controller", ip="127.0.0.1"):
+    import socket
     log_path = os.path.join(DATA_DIR, "stats", "controller.log")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     tail = collections.deque(maxlen=200)
@@ -217,15 +216,108 @@ hub.joinall(services)
     deadline = time.time() + 30
     while time.time() < deadline:
         try:
-            s = socket.socket(); s.settimeout(1)
-            s.connect(("127.0.0.1", CONTROLLER_PORT)); s.close()
-            print("[Controller] Tayyor!")
+            s = socket.socket()
+            s.settimeout(1)
+            s.connect((ip, port))
+            s.close()
+            print(f"[{name}] Tayyor ({ip}:{port})!")
             return proc
         except (ConnectionRefusedError, socket.timeout, OSError):
             time.sleep(1)
             if proc.poll() is not None:
                 out = b"".join(tail).decode(errors="replace")
-                print(f"XATO: Controller o'chdi!\n{out[-500:]}")
+                print(f"XATO: {name} o'chdi!\n{out[-500:]}")
                 sys.exit(1)
-    print("XATO: Controller 30s ichida tayyor bo'lmadi")
-    proc.terminate(); sys.exit(1)
+    print(f"XATO: {name} 30s ichida tayyor bo'lmadi")
+    proc.terminate()
+    sys.exit(1)
+
+
+def start_controller(controller_type="ryu", ip="127.0.0.1", port=None):
+    """Tanlangan SDN kontrollerni ishga tushiradi yoki masofaviy kontroller holatini tekshiradi.
+
+    Qo'llab-quvvatlanadigan controller_type turlari:
+      - 'ryu' / 'os-ken': Ryu yoki os-ken OpenFlow 1.3 ilovasi (default port: config.CONTROLLER_PORT yoki 6633)
+      - 'pox': POX OpenFlow 1.0 kontrolleri (default port: 6633)
+      - 'remote' / 'onos' / 'odl' / 'floodlight': Tashqi kontroller (default port: 6653)
+    """
+    import socket
+    c_type = (controller_type or "ryu").lower()
+    if port is None:
+        if c_type in ("ryu", "os-ken", "pox"):
+            port = CONTROLLER_PORT
+        else:
+            port = 6653
+
+    # Masofaviy / tashqi kontrollerlar (ONOS, OpenDaylight, Floodlight, Remote)
+    if c_type in ("remote", "onos", "odl", "opendaylight", "floodlight"):
+        label = c_type.upper() if c_type != "odl" else "OpenDaylight"
+        print(f"[Controller] Masofaviy {label} kontroller ({ip}:{port}) ga ulanish tekshirilmoqda...")
+        s = socket.socket()
+        try:
+            s.settimeout(2.5)
+            s.connect((ip, port))
+            print(f"[Controller] Masofaviy {label} kontroller ({ip}:{port}) tayyor va faol!")
+        except (ConnectionRefusedError, socket.timeout, OSError) as e:
+            print(f"[!] OGOHLANTIRISH: Masofaviy {label} kontroller ({ip}:{port}) ga ulanib bo'lmadi: {e}")
+            if c_type == "onos":
+                print("    ONOS'ni Docker orqali ishga tushirish uchun:")
+                print("      docker run -d --name onos -p 6653:6653 -p 8181:8181 onosproject/onos:latest")
+            elif c_type in ("odl", "opendaylight"):
+                print("    OpenDaylight'ni Docker orqali ishga tushirish uchun:")
+                print("      docker run -d --name odl -p 6653:6653 -p 8181:8181 opendaylight/odl:latest")
+            elif c_type == "floodlight":
+                print("    Floodlight'ni Docker orqali ishga tushirish uchun:")
+                print("      docker run -d --name floodlight -p 6653:6653 -p 8080:8080 floodlight/floodlight")
+            else:
+                print("    Iltimos, tashqi kontroller ishlayotganini va IP/port to'g'riligini tekshiring.")
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+        return None
+
+    # POX kontroller
+    if c_type == "pox":
+        pox_path = find_pox()
+        if not pox_path:
+            raise RuntimeError(
+                "POX kontrolleri topilmadi!\n"
+                "POX'ni o'rnatish uchun quyidagi buyruqni bajaring:\n"
+                "  git clone -b gar-experimental https://github.com/noxrepo/pox.git ~/pox\n"
+                "yoki POX_DIR muhit o'zgaruvchisini o'rnating."
+            )
+        print(f"[Controller] POX ishga tushirilmoqda ({pox_path}, port={port})...")
+        cmd = [sys.executable, pox_path, "openflow.of_01", f"--port={port}", "forwarding.l2_learning"]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        _drain_proc(proc, port, "POX", ip=ip)
+        return proc
+
+    # Ryu / os-ken kontroller (default)
+    with open("/tmp/transport_monitor.py", "w") as f:
+        f.write(_render_controller_app())
+    with open("/tmp/run_controller.py", "w") as f:
+        f.write(f'''#!/usr/bin/env python3
+import sys
+sys.path.insert(0, "/tmp")
+try:
+    from os_ken import cfg
+    from os_ken.base.app_manager import AppManager
+    from os_ken.lib import hub
+except ImportError:
+    from ryu import cfg
+    from ryu.base.app_manager import AppManager
+    from ryu.lib import hub
+cfg.CONF(["--ofp-listen-host", "{ip}", "--ofp-tcp-listen-port", "{port}"])
+app_mgr = AppManager.get_instance()
+app_mgr.load_apps(["transport_monitor"])
+contexts = app_mgr.create_contexts()
+services = app_mgr.instantiate_apps(**contexts)
+hub.joinall(services)
+''')
+    print(f"[Controller] Ryu/os-ken ishga tushirilmoqda (port={port})...")
+    proc = subprocess.Popen(["python3", "/tmp/run_controller.py"],
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    _drain_proc(proc, port, "Ryu/os-ken", ip=ip)
+    return proc

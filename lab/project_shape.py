@@ -128,7 +128,7 @@ def validate_shape(project):
         s.mapping(link.get("params"), f"{path}.params", optional=True)
         s.booleans(link, ("up",), path)
     for name, controller in s.objects(p, "controllers", "project"):
-        s.strings(controller, ("code",), f"controllers.{name}")
+        s.strings(controller, ("code", "type", "ip", "modules"), f"controllers.{name}")
     programs = s.mapping(p.get("p4_programs"), "p4_programs", optional=True)
     for name, source in programs.items():
         if not isinstance(source, str):
@@ -191,5 +191,5 @@ def project_for_execution(project):
                 if params.get(key) in (None, ""):
                     params.pop(key, None)
     for controller in p.get("controllers", {}).values():
-        _omit_null(controller, ("code",))
+        _omit_null(controller, ("code", "type", "ip", "modules"))
     return p
