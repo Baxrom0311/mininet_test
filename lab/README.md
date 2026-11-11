@@ -182,6 +182,9 @@ npm run build     # tiplar tekshiruvi + lab/web-react ga yig'ish (commit qiling)
 Natijalar oynasidagi yangi tahlil bo‘limlari, eksport, mobil ko‘rinish va brauzer
 tekshiruvlari: [Natijalar oynasi qo‘llanmasi](../docs/ui-results-workspace.md).
 
+VoIP/HTTP/FTP/multicast, DSCP, MTBF/MTTR, preflight va tadqiqotlar:
+[Ssenariy muharriri qo‘llanmasi](../docs/ui-scenario-editor.md).
+
 Tuzilma: `src/lib/` — API, WebSocket hodisalari, zustand store, Wi-Fi modeli;
 `src/components/ui/` — shadcn komponentlari; `src/features/` — kanvas, panellar va
 oynalar (qurilma, P4, SDN, ssenariy, natijalar); `src/components/charts.tsx` —
@@ -235,6 +238,7 @@ NetLab'da ham xuddi shunday:
    - **UDP** — qat'iy tezlik (video, VoIP);
    - **TCP** — bor sig'imni oladi (fayl uzatish);
    - **Ping** — RTT o'lchovi.
+   - **VoIP, HTTP, FTP, Multicast** — turga mos kodek, hajm, yo‘nalish va guruh sozlamalari.
 
    **Vaqtli hodisalar** ham qo'shish mumkin: kabel uzilishi yoki tiklanishi, kabel parametrlarining o'zgarishi.
 2. **Dvigatel**ni tanlab, **Ishga tushirish** tugmasini bosing.

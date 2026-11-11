@@ -10,7 +10,7 @@ async function req<T>(method: string, url: string, body?: unknown, signal?: Abor
 }
 export const api = {
   get: <T = any>(u: string, signal?: AbortSignal) => req<T>('GET', u, undefined, signal),
-  post: <T = any>(u: string, b: unknown = {}) => req<T>('POST', u, b),
+  post: <T = any>(u: string, b: unknown = {}, signal?: AbortSignal) => req<T>('POST', u, b, signal),
   put: <T = any>(u: string, b: unknown) => req<T>('PUT', u, b),
   patch: <T = any>(u: string, b: unknown) => req<T>('PATCH', u, b),
   del: <T = any>(u: string) => req<T>('DELETE', u),

@@ -7,8 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit -p . && vite build",
     "typecheck": "tsc --noEmit -p .",
-    "test": "tsc --target ES2020 --module ESNext --moduleResolution bundler --skipLibCheck --outDir .test-build src/lib/results.ts src/lib/chartSampling.ts src/lib/format.ts && node --test tests/*.test.mjs",
-    "test:browser": "node tests/results.browser.mjs"
+    "test": "tsc --target ES2020 --module ESNext --moduleResolution bundler --skipLibCheck --outDir .test-build src/lib/results.ts src/lib/chartSampling.ts src/lib/format.ts src/lib/scenario.ts && node --test tests/*.test.mjs",
+    "test:browser": "node tests/results.browser.mjs",
+    "test:scenario": "node tests/scenario.browser.mjs"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "1.1.2",
