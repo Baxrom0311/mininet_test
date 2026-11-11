@@ -53,6 +53,13 @@ class OriginTests(unittest.TestCase):
             main()
         self.assertGreater(len(run.call_args.args[0].state.token), 20)
 
+    def test_cli_no_token_disables_token(self):
+        from lab.netlab import main
+        with patch.object(sys, "argv", ["netlab", "--driver", "demo", "--no-token"]), patch("uvicorn.run") as run, \
+                contextlib.redirect_stdout(io.StringIO()):
+            main()
+        self.assertIsNone(run.call_args.args[0].state.token)
+
 
 class RunTests(unittest.TestCase):
     def test_ten_simultaneous_starts_have_ten_results(self):

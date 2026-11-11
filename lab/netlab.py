@@ -27,7 +27,9 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--token", default=None,
-                    help="Kirish tokeni. 127.0.0.1 dan boshqa manzilda avtomatik yaratiladi")
+                    help="Kirish tokeni. Standart: avtomatik yaratiladi")
+    ap.add_argument("--no-token", action="store_true",
+                    help="Token talab qilmaslik (to'g'ridan-to'g'ri kirish)")
     ap.add_argument("--open", action="store_true", help="brauzerda ochish")
     ap.add_argument("--window", action="store_true", help="pywebview oynasida ochish (studio kabi)")
     args = ap.parse_args()
@@ -43,8 +45,10 @@ def main():
         print("XATO: real driver root talab qiladi: sudo python3 -m lab.netlab --driver real")
         sys.exit(1)
 
-    # Localhost also needs authentication: a browser can reach local services.
-    token = args.token or secrets.token_urlsafe(18)
+    if args.no_token or args.token == "":
+        token = None
+    else:
+        token = args.token or secrets.token_urlsafe(18)
 
     import uvicorn
     from lab.server import create_app
