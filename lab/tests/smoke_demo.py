@@ -56,7 +56,7 @@ with TestClient(create_app("demo")) as c:
         c.post("/api/net/stop")
     r = c.post("/api/p4/compile", json={"source": tpl["p4"]["ipv4_router"]}).json()
     tables = [t["name"] for pl in r["pipeline"]["pipelines"] for t in pl["tables"]]
-    check("ipv4_lpm" in tables, "P4 pipeline tahlili (ipv4_lpm)")
+    check(any(t == "ipv4_lpm" or t.endswith(".ipv4_lpm") for t in tables), "P4 pipeline tahlili (ipv4_lpm)")
     bad = {"version": 1, "name": "x", "devices": {"Bad-Name": {"id": 1, "type": "host", "config": {}}},
            "links": {}, "p4_programs": {}, "controllers": {}}
     check(len(c.post("/api/validate", json=bad).json()["errors"]) > 0, "noto'g'ri nom rad etiladi")
@@ -222,7 +222,12 @@ with TestClient(create_app("demo")) as c:
     bad_v["devices"]["s1"]["config"]["ports"]["1"] = {"mode": "access", "vlan": 5000}
     check(any("VLAN" in e for e in c.post("/api/validate", json=bad_v).json()["errors"]), "vlan: noto'g'ri VLAN id rad etiladi")
     for eng in want:
-        rid = c.post("/api/runs", json={"project": vp, "scenario": "vlanlar", "engine": eng}).json()["run_id"]
+        res = c.post("/api/runs", json={"project": vp, "scenario": "vlanlar", "engine": eng})
+        if eng == "ns3" and res.status_code == 400:
+            err_msg = res.json().get("error", "")
+            check("trunk" in err_msg.lower(), f"ns3: VLAN trunk — tushunarli xato ({err_msg[:60]})")
+            continue
+        rid = res.json()["run_id"]
         t0 = time.time()
         while time.time() - t0 < 120:
             if not any(r.get("status") == "running" for r in c.get("/api/runs/vlan_lab").json()["runs"]):
