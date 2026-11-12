@@ -4,7 +4,7 @@ export interface LinkParams { bw: number; delay: string; jitter: string; loss: n
 export interface Endpoint { dev: string; port: number }
 export interface Link { a: Endpoint; b: Endpoint; params: LinkParams; up?: boolean }
 export interface Device { id: number; type: DeviceType; x: number; y: number; config: Record<string, any> }
-export interface ScenarioApp { id: string; type: 'udp' | 'tcp' | 'ping' | 'voip' | 'http' | 'ftp' | 'mcast'; src: string; dst: string | string[]; receivers?: string[]; group?: string; rate?: string; size?: number; start?: number; stop?: number; label?: string; interval?: number; dst_ip?: string; bytes?: number; codec?: 'g711' | 'g729'; page?: string; think?: number; file?: string; direction?: 'download' | 'upload'; dscp?: number; dport?: number }
+export interface ScenarioApp { id: string; type: 'udp' | 'tcp' | 'ping' | 'voip' | 'http' | 'ftp' | 'video' | 'http3' | 'mcast'; src: string; dst: string | string[]; receivers?: string[]; group?: string; rate?: string; size?: number; start?: number; stop?: number; label?: string; interval?: number; dst_ip?: string; bytes?: number; codec?: 'g711' | 'g729'; page?: string; think?: number; file?: string; direction?: 'download' | 'upload'; dscp?: number; dport?: number; preset?: string; target_buffer?: number; streams?: number; zero_rtt?: boolean }
 export interface ScenarioEvent { t: number; action: 'link_down' | 'link_up' | 'link_params' | 'move' | 'roam'; link?: string; params?: Record<string, any>; device?: string; x?: number; y?: number; duration?: number; from?: string; to?: string }
 export interface FailureGroup { mtbf_s: number; mttr_s: number; targets: 'all' | string[] }
 export interface Scenario { duration: number; apps: ScenarioApp[]; events: ScenarioEvent[]; notes?: string; seed?: number; rng_run?: number; sample?: number; ns3_fast?: boolean; ip_version?: 4 | 6; failures?: { seed?: number; distribution?: 'fixed' | 'exponential'; links?: FailureGroup; devices?: FailureGroup } }
@@ -54,8 +54,39 @@ export interface RunResult {
   run_id: string; scenario_name: string; engine: string; engine_label?: string; created: number; duration: number; wall_s?: number
   status: string; error?: string; label?: string; flows: Record<string, FlowResult>; links?: Record<string, LinkPoint[]>
   nodes?: Record<string, NodePoint[]>; route_events?: RouteEvent[]; convergence?: Convergence[]
-  /** ilova modellari xulosasi (voip: avg_mos/min_mos/quality, http: pages/avg_page_s, ftp: transfer_s) */
-  apps?: Record<string, { type: 'voip' | 'http' | 'ftp' | 'mcast'; [k: string]: any }>
+  /** ilova modellari xulosasi (voip: avg_mos/min_mos/quality, http: pages/avg_page_s, ftp: transfer_s, video: avg_bitrate/stalls/rebuffering/qoe, http3) */
+  apps?: Record<string, { type: 'voip' | 'http' | 'ftp' | 'mcast' | 'video' | 'http3'; [k: string]: any }>
+  sla?: {
+    compliance_pct?: number
+    total_violations?: number
+    total_evaluations?: number
+    rule_name?: string
+    thresholds?: Record<string, any>
+    violations?: {
+      timestamp?: number
+      t?: number
+      stream_id?: string
+      flow?: string
+      rule_name?: string
+      metric?: string
+      measured_value?: number
+      threshold_value?: number
+      severity?: 'warning' | 'critical' | string
+      message?: string
+    }[]
+    recent_violations?: {
+      timestamp?: number
+      t?: number
+      stream_id?: string
+      flow?: string
+      rule_name?: string
+      metric?: string
+      measured_value?: number
+      threshold_value?: number
+      severity?: 'warning' | 'critical' | string
+      message?: string
+    }[]
+  }
   availability?: { mean_flow_availability?: number; min_flow_availability?: number; flows?: Record<string, { type?: string; availability_pct?: number; downtime_s?: number; outages?: unknown[] }> }
   reproducibility?: { project?: Project }
   events?: ScenarioEvent[]; notes?: string[]

@@ -128,7 +128,9 @@ def create_app(driver_name="demo", token=None):
         app_models = {"types": list(APP_TYPES) + list(A.MODEL_TYPES),
                       "codecs": {k: {"label": v["label"], "payload": v["payload"]} for k, v in A.CODECS.items()},
                       "defaults": {"voip": {"codec": "g711"}, "http": {"page": "500KB", "think": 5},
-                                   "ftp": {"file": "10MB", "direction": "download"}}}
+                                   "ftp": {"file": "10MB", "direction": "download"},
+                                   "video": {"quality": "720p", "target_buffer": 20.0},
+                                   "http3": {"streams": 4, "rate": "4Mbps"}}}
         return {**driver.info(), "device_types": DEVICE_TYPES, "frr_daemons": FRR_DAEMONS, "wifi": wifi_model,
                 "app_models": app_models, "project_version": PROJECT_VERSION, "status": driver.status()}
 
@@ -498,6 +500,37 @@ def create_app(driver_name="demo", token=None):
         from lab.report import survivability_report
         return _html(survivability_report(survivability(body)), "survivability.html")
 
+    @app.post("/api/analysis/sla")
+    def analyze_sla(body: dict = Body(...)):
+        """SLA (Service Level Agreement) muvofiqlik tahlili."""
+        from lab.apps import evaluate_sla
+
+        run_obj = body.get("run")
+        if run_obj is None:
+            project = body.get("project")
+            run_id = body.get("run_id")
+            if not project or not run_id:
+                raise HTTPException(400, "project va run_id yoki run obyekti berilishi kerak")
+            try:
+                run_obj = runs.get(project, run_id)
+            except FileNotFoundError:
+                raise HTTPException(404, "natija topilmadi")
+
+        if not isinstance(run_obj, dict):
+            raise HTTPException(400, "run obyekti noto'g'ri formatda")
+
+        sla_spec = body.get("sla") or body.get("sla_spec") or body.get("spec") or body.get("rules")
+        if sla_spec is None:
+            candidate_keys = {"min_throughput_bps", "min_throughput", "max_delay_ms", "max_delay",
+                              "max_jitter_ms", "max_jitter", "max_loss_pct", "max_loss", "min_mos",
+                              "target_compliance_pct"}
+            if any(k in body for k in candidate_keys):
+                sla_spec = {k: body[k] for k in candidate_keys if k in body}
+            else:
+                sla_spec = {}
+
+        return evaluate_sla(run_obj, sla_spec)
+
     @app.get("/api/runs/{project}")
     def run_list(project: str, limit: int | None = None, offset: int = 0, status: str | None = None,
                  engine: str | None = None, study_id: str | None = None, experiment_id: str | None = None):
@@ -545,6 +578,18 @@ def create_app(driver_name="demo", token=None):
         from lab.report import run_report
         return _html(run_report(_run_or_404(project, run_id)), f"{run_id}.html")
 
+    @app.get("/api/runs/{project}/{id}/report.tex")
+    def run_report_tex(project: str, id: str):
+        from lab.report_latex import generate_run_latex
+        return Response(generate_run_latex(_run_or_404(project, id)), media_type="application/x-tex",
+                        headers={"Content-Disposition": f'attachment; filename="{id}.tex"'})
+
+    @app.get("/api/runs/{project}/{run_id}/report.tex", include_in_schema=False)
+    def run_report_tex_alias(project: str, run_id: str):
+        from lab.report_latex import generate_run_latex
+        return Response(generate_run_latex(_run_or_404(project, run_id)), media_type="application/x-tex",
+                        headers={"Content-Disposition": f'attachment; filename="{run_id}.tex"'})
+
     @app.get("/api/runs/{project}/{run_id}/window")
     def run_window(project: str, run_id: str, start_s: float | None = None, end_s: float | None = None):
         from lab.analysis_windows import analyze
@@ -564,6 +609,51 @@ def create_app(driver_name="demo", token=None):
         if not isinstance(ids, list) or not (1 <= len(ids) <= 20):
             raise ValueError("run_ids: 1..20 ta natija")
         return _html(compare_report([_run_or_404(project, rid) for rid in ids]), "solishtirish.html")
+
+    @app.post("/api/reports/latex")
+    def report_latex(body: dict = Body(...)):
+        from lab.report_latex import generate_run_latex, generate_comparison_latex
+        if not isinstance(body, dict):
+            raise ValueError("so'rov tanasi lug'at bo'lishi kerak")
+
+        # Direct run payload
+        if "run" in body and isinstance(body["run"], dict):
+            run = body["run"]
+            fname = f"{run.get('run_id', 'report')}.tex"
+            return Response(generate_run_latex(run), media_type="application/x-tex",
+                            headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+        # Direct runs array
+        if "runs" in body and isinstance(body["runs"], list):
+            target_runs = body["runs"]
+            if not target_runs:
+                raise ValueError("runs: kamida bitta natija kerak")
+            if len(target_runs) == 1:
+                return Response(generate_run_latex(target_runs[0]), media_type="application/x-tex",
+                                headers={"Content-Disposition": f'attachment; filename="{target_runs[0].get("run_id", "report")}.tex"'})
+            return Response(generate_comparison_latex(target_runs), media_type="application/x-tex",
+                            headers={"Content-Disposition": 'attachment; filename="solishtirish.tex"'})
+
+        # Project and run_ids or run_id or id
+        project = body.get("project")
+        ids = body.get("run_ids")
+        if ids is None and "run_id" in body:
+            ids = [body["run_id"]]
+        if ids is None and "id" in body:
+            ids = [body["id"]]
+        if not isinstance(ids, list) or not (1 <= len(ids) <= 20):
+            raise ValueError("run_ids: 1..20 ta natija")
+
+        target_runs = [_run_or_404(project, rid) for rid in ids]
+        if len(target_runs) == 1:
+            doc = generate_run_latex(target_runs[0])
+            fname = f"{ids[0]}.tex"
+        else:
+            doc = generate_comparison_latex(target_runs)
+            fname = "solishtirish.tex"
+
+        return Response(doc, media_type="application/x-tex",
+                        headers={"Content-Disposition": f'attachment; filename="{fname}"'})
 
     @app.get("/api/studies/{project}/{study_id}/report.html")
     def study_report_html(project: str, study_id: str):

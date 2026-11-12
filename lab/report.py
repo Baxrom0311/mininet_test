@@ -25,6 +25,7 @@ from lab.report_inputs import report_runs, validate_run
 from lab.report_export import _csv, csv_bundle, write_csv, write_csv_bundle, write_json, write_results
 from lab.analysis_windows import finite
 from lab.report_sampling import sample_series
+from lab.report_latex import generate_run_latex, generate_comparison_latex
 
 # UI bilan bir xil dataviz palitrasi (lab/ui/src/index.css: --s1..--s6, --seq-lo/hi)
 PAL_LIGHT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#6250d6"]
@@ -694,6 +695,7 @@ def main(argv=None):
     ap.add_argument("src", help="natija .json, natijalar papkasi yoki survivability .json")
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--zip", action="store_true", help="CSV to'plami (zip)")
+    ap.add_argument("--latex", "--tex", action="store_true", help="LaTeX ilmiy hisoboti (.tex)")
     ap.add_argument("--study", action="store_true", help="papkadagi natijalar — tadqiqot hisoboti")
     a = ap.parse_args(argv)
     try:
@@ -702,6 +704,12 @@ def main(argv=None):
             raise ValueError("result must be an object or array")
         if a.zip:
             _write_report(a.out, lambda stream: write_csv_bundle(data, stream))
+        elif a.latex or a.out.endswith(".tex"):
+            if isinstance(data, list):
+                doc = generate_comparison_latex(data)
+            else:
+                doc = generate_run_latex(data)
+            _write_report(a.out, lambda stream: stream.write(doc.encode("utf-8")))
         else:
             if isinstance(data, list):
                 doc = study_report(data) if a.study else compare_report(data)
