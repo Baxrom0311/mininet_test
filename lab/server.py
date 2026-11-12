@@ -1020,6 +1020,63 @@ def create_app(driver_name="demo", token=None):
         else:
             raise HTTPException(400, f"Noma'lum amal '{action}'. Ruxsat etilgan: 'evaluate', 'validate', 'add'")
 
+    # ───────────── P4 INT (In-Band Network Telemetry) Endpoints ─────────────
+    @app.get("/api/telemetry/p4/int/reports")
+    def p4_int_reports(limit: int = 50, flow_id: Optional[str] = None):
+        from lab.telemetry.int_collector import int_telemetry_collector
+        safe_limit = max(1, min(int(limit), 500))
+        return {
+            "reports": int_telemetry_collector.get_reports(limit=safe_limit, flow_id=flow_id)
+        }
+
+    @app.post("/api/telemetry/p4/int/simulate")
+    def p4_int_simulate(body: dict = Body(...)):
+        from lab.telemetry.int_collector import int_simulator
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        path = body.get("path") or ["s1", "s2", "s3"]
+        if not isinstance(path, list) or len(path) == 0:
+            raise HTTPException(400, "'path' massiv bo'lishi va kamida 1 ta switchni o'z ichiga olishi shart")
+        flow_id = str(body.get("flow_id", "flow-p4-tcp"))
+        base_lat = float(body.get("base_hop_latency_us", 12.0))
+        burst_sw = body.get("burst_switch")
+        burst_pkts = int(body.get("burst_size_pkts", 0))
+        load_pct = float(body.get("traffic_load_pct", 30.0))
+
+        header, report = int_simulator.simulate_path(
+            path=path,
+            flow_id=flow_id,
+            base_hop_latency_us=base_lat,
+            burst_switch=burst_sw,
+            burst_size_pkts=burst_pkts,
+            traffic_load_pct=load_pct,
+        )
+        return {
+            "ok": True,
+            "header": header.to_dict(),
+            "report": report.to_dict(),
+        }
+
+    @app.get("/api/telemetry/p4/int/bottlenecks")
+    def p4_int_bottlenecks():
+        from lab.telemetry.int_collector import int_telemetry_collector
+        return int_telemetry_collector.get_bottleneck_analysis()
+
+    @app.post("/api/telemetry/p4/int/decode")
+    def p4_int_decode(body: dict = Body(...)):
+        from lab.telemetry.int_collector import INTHeader
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        hex_data = body.get("hex")
+        if not hex_data:
+            raise HTTPException(400, "'hex' qatori berilishi kerak")
+        try:
+            raw = bytes.fromhex(hex_data.replace(" ", "").replace("0x", ""))
+            hdr = INTHeader.decode(raw)
+            return {"ok": True, "header": hdr.to_dict()}
+        except Exception as e:
+            raise HTTPException(400, f"INT dekodlashda xatolik: {e}")
+
     @app.websocket("/ws/telemetry")
     async def ws_telemetry(ws: WebSocket):
         if not same_origin(ws.headers.get("origin"), ws.url):

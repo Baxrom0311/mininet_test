@@ -21,6 +21,15 @@ from lab.telemetry.opnet_workloads import (
 )
 from lab.telemetry.queue_tracker import BufferbloatAssessment, QueueStats, QueueTracker
 from lab.telemetry.tcp_info_collector import TCPInfoCollector, TCPInfoSample
+from lab.telemetry.int_collector import (
+    INTHopMetadata,
+    INTHeader,
+    INTReport,
+    INTTelemetryCollector,
+    INTSimulator,
+    int_telemetry_collector,
+    int_simulator,
+)
 
 __all__ = [
     "TCPInfoCollector",
@@ -46,4 +55,11 @@ __all__ = [
     "telemetry_manager",
     "StreamHistory",
     "hex_dump_format",
+    "INTHopMetadata",
+    "INTHeader",
+    "INTReport",
+    "INTTelemetryCollector",
+    "INTSimulator",
+    "int_telemetry_collector",
+    "int_simulator",
 ]

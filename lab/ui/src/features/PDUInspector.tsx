@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react'
 import {
+  Activity,
   AlertTriangle,
+  ArrowRight,
+  BarChart3,
   Binary,
   Check,
   CheckCircle2,
+  Clock,
   Copy,
+  Flame,
   Layers,
   Network,
   ShieldCheck,
+  Zap,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -63,7 +69,7 @@ export interface PDUInspectionResponse {
 }
 
 export function PDUInspectorWindow({ win }: { win: Win }) {
-  const [tab, setTab] = useState<'osi' | 'details' | 'hex'>('osi')
+  const [tab, setTab] = useState<'osi' | 'details' | 'hex' | 'p4int'>('osi')
   const [osiDirection, setOsiDirection] = useState<'in' | 'out' | 'both'>('in')
   const [selectedLayer, setSelectedLayer] = useState<string>('l3')
   const [activeStepIdx, setActiveStepIdx] = useState<number | null>(null)
@@ -71,6 +77,38 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
   const [hexMode, setHexMode] = useState<'in' | 'out'>('in')
   const [data, setData] = useState<PDUInspectionResponse | null>(null)
   const [copied, setCopied] = useState(false)
+  const [intReport, setIntReport] = useState<any>(null)
+  const [intLoading, setIntLoading] = useState(false)
+  const [burstSwitch, setBurstSwitch] = useState<string>('s2')
+
+  const runINTSimulation = async (burst = false) => {
+    setIntLoading(true)
+    try {
+      const res = await api.post<{ ok: boolean; header: any; report: any }>('/api/telemetry/p4/int/simulate', {
+        path: ['s1', 's2', 's3', 's4'],
+        flow_id: `${pkt.src_ip || '10.0.1.10'} -> ${pkt.dst_ip || '10.0.2.20'}`,
+        base_hop_latency_us: 12.0,
+        burst_switch: burst ? burstSwitch : undefined,
+        burst_size_pkts: burst ? 70 : 0,
+        traffic_load_pct: 35.0,
+      })
+      if (res.ok) {
+        setIntReport(res.report)
+        toast(burst ? "P4 INT mikro-portlash simulyatsiya qilindi" : "P4 INT oqimi o'lchandi", 'ok')
+      }
+    } catch (e: any) {
+      toast(`P4 INT xatolik: ${e.message}`, 'error')
+    } finally {
+      setIntLoading(false)
+    }
+  }
+
+  // P4 INT tabiga o'tganda agar hisobot yo'q bo'lsa avtomatik simulyatsiya qilish
+  useEffect(() => {
+    if (tab === 'p4int' && !intReport && !intLoading) {
+      runINTSimulation(false)
+    }
+  }, [tab])
 
   const pkt = win.arg || {}
   const proto = (pkt.proto || 'TCP').toUpperCase()
@@ -298,6 +336,7 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
               { value: 'osi', label: '7-Qatlamli OSI Modeli' },
               { value: 'details', label: 'PDU Sarlavhalari (Headers)' },
               { value: 'hex', label: 'Wireshark Hex / ASCII' },
+              { value: 'p4int', label: 'P4 INT Telemetriya' },
             ]}
           />
 
@@ -733,6 +772,174 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
                   {currentHex}
                 </pre>
               </div>
+            </div>
+          )}
+
+          {/* TAB 4: P4-16 IN-BAND NETWORK TELEMETRY (INT v2.1) */}
+          {tab === 'p4int' && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+                <div className="flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-cyan-400" />
+                  <span className="text-sm font-bold text-foreground">
+                    P4-16 In-Band Network Telemetry (INT v2.1)
+                  </span>
+                  <Badge variant="outline" className="border-cyan-500/30 text-cyan-400 font-mono text-[11px]">
+                    Hop-by-Hop Dataplane
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={burstSwitch}
+                    onChange={(e) => setBurstSwitch(e.target.value)}
+                    className="h-7 rounded border border-border bg-card px-2 text-xs font-mono text-foreground"
+                  >
+                    <option value="s1">Burchni s1 da yaratish</option>
+                    <option value="s2">Burchni s2 da yaratish</option>
+                    <option value="s3">Burchni s3 da yaratish</option>
+                    <option value="s4">Burchni s4 da yaratish</option>
+                  </select>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={intLoading}
+                    onClick={() => runINTSimulation(false)}
+                  >
+                    <Clock className="mr-1 h-3 w-3 text-emerald-400" /> Normal O'lchash
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="destructive"
+                    disabled={intLoading}
+                    onClick={() => runINTSimulation(true)}
+                  >
+                    <Flame className="mr-1 h-3 w-3 text-red-400" /> Mikro-Portlash Yaratish
+                  </Button>
+                </div>
+              </div>
+
+              {/* Xulosa metrikalar kartasi */}
+              {intReport && (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <Card className="border-cyan-500/20 bg-cyan-950/20 p-2.5">
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <Clock className="h-3 w-3 text-cyan-400" /> Umumiy Kechikish (E2E)
+                    </div>
+                    <div className="mt-1 font-mono text-lg font-bold text-cyan-300">
+                      {intReport.end_to_end_latency_us} <span className="text-xs font-normal">µs</span>
+                    </div>
+                  </Card>
+                  <Card className="border-border bg-card/40 p-2.5">
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <Layers className="h-3 w-3 text-primary" /> O'tilgan Hoplar
+                    </div>
+                    <div className="mt-1 font-mono text-lg font-bold text-foreground">
+                      {intReport.total_hops} <span className="text-xs font-normal">switch</span>
+                    </div>
+                  </Card>
+                  <Card className="border-border bg-card/40 p-2.5">
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <BarChart3 className="h-3 w-3 text-amber-400" /> Max Navbat Hajmi
+                    </div>
+                    <div className="mt-1 font-mono text-lg font-bold text-amber-300">
+                      {intReport.max_queue_depth_pkts} <span className="text-xs font-normal">paket</span>
+                    </div>
+                  </Card>
+                  <Card className={cn(
+                    "p-2.5 border",
+                    intReport.microburst_detected
+                      ? "border-red-500/30 bg-red-950/20"
+                      : "border-emerald-500/20 bg-emerald-950/20"
+                  )}>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <Zap className="h-3 w-3" /> Tarmoq Holati
+                    </div>
+                    <div className="mt-1 font-mono text-xs font-bold flex items-center gap-1.5">
+                      {intReport.microburst_detected ? (
+                        <span className="text-red-400">🔥 Mikro-Portlash ({intReport.bottleneck_switch})</span>
+                      ) : (
+                        <span className="text-emerald-400">✓ Optimal Oqim</span>
+                      )}
+                    </div>
+                  </Card>
+                </div>
+              )}
+
+              {/* Hop-by-Hop Vizual Yo'nalish */}
+              {intReport && intReport.hops && (
+                <div className="space-y-3">
+                  <div className="text-xs font-semibold text-muted-foreground uppercase flex items-center gap-1.5">
+                    <ArrowRight className="h-4 w-4 text-primary" /> P4 Switchlar Zanjiri (Hop-by-Hop Telemetry Headers)
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {intReport.hops.map((h: any, idx: number) => {
+                      const isHot = h.queue_occupancy_pkts > 40 || h.hop_latency_us > 50
+                      const qPct = Math.min(100, Math.round((h.queue_occupancy_pkts / 80) * 100))
+                      return (
+                        <div
+                          key={h.switch_id + idx}
+                          className={cn(
+                            "relative flex flex-col justify-between rounded-lg border p-3 transition-all",
+                            isHot
+                              ? "border-red-500/40 bg-red-950/15 shadow-red-900/10"
+                              : "border-border bg-card/60"
+                          )}
+                        >
+                          <div className="flex items-center justify-between border-b pb-2">
+                            <div className="flex items-center gap-1.5 font-bold font-mono text-sm">
+                              <span className="flex h-5 w-5 items-center justify-center rounded bg-primary/20 text-[11px] text-primary">
+                                {idx + 1}
+                              </span>
+                              <span className="text-foreground">{h.switch_id.toUpperCase()}</span>
+                            </div>
+                            <div className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground">
+                              <span>p{h.ingress_port}</span>
+                              <ArrowRight className="h-3 w-3" />
+                              <span>p{h.egress_port}</span>
+                            </div>
+                          </div>
+
+                          <div className="my-2 space-y-1.5 text-xs font-mono">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Hop Latency:</span>
+                              <span className={cn("font-bold", isHot ? "text-red-400" : "text-emerald-400")}>
+                                {h.hop_latency_us} µs
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Navbat:</span>
+                              <span className="text-foreground">{h.queue_occupancy_pkts} pkt ({Math.round(h.queue_occupancy_bytes / 1024)} KB)</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">Port bandligi:</span>
+                              <span className="text-foreground">{h.tx_utilization_pct}%</span>
+                            </div>
+
+                            {/* Navbat progress bari */}
+                            <div className="mt-1 h-1.5 w-full rounded-full bg-border overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full transition-all duration-300",
+                                  qPct > 60 ? "bg-red-500" : qPct > 30 ? "bg-amber-500" : "bg-emerald-500"
+                                )}
+                                style={{ width: `${qPct}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="border-t pt-1.5 flex items-center justify-between text-[10px] font-mono text-muted-foreground">
+                            <span>QID: {h.queue_id}</span>
+                            {isHot && (
+                              <span className="text-red-400 font-bold animate-pulse">! Congestion</span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
