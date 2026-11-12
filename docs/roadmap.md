@@ -210,7 +210,7 @@ Hozirgi tizimdagi nazariy L2 cheklovini to'liq yengib o'tish:
 | **Faza 4** | **Step-by-Step Simulation Mode** | • Topologiya kanvasida paket animatsiyasi (Canvas/SVG)<br/>• Play / Pause / Step-by-Step boshqaruv paneli<br/>• Tushib qolgan paketlarning qizil animatsiyasi | Foydalanuvchi paketni har bir hop bo'ylab to'xtatib-to'xtatib harakatlantira oladi | ✅ **Yakunlandi** |
 | **Faza 5** | **Haqiqiy Data-Plane (FIB & FRR)** | • Root simulyatorni haqiqiy FRR bilan birlashtirish<br/>• Dinamik marshrut konvergentsiyasi o'lchovi<br/>• Navbatlar va bufferbloat telemetriyasi | Tarmoq simulyatsiyasida real OSPF/BGP paketlari harakatlanadi, L2-only cheklovi yo'qoladi | ✅ **Yakunlandi** |
 | **Faza 6** | **OPNET Workload & Analitika** | • HTTP/3, Adaptive Video, VoIP MOS dvigateli<br/>• A/B testlar taqqoslash doskasi<br/>• PDF / LaTeX avtomatik hisobot eksporti | To'liq OPNET/Cisco darajasidagi yakuniy platforma | ✅ **Yakunlandi** |
-| **Faza 7** | **Tarmoq Xavfsizligi & Stateful Firewall** | • `lab/security/conntrack_engine.py` (TCP state tracking)<br/>• `lab/security/attack_simulator.py` (SYN flood, UDP reflection, Slowloris, ARP MitM)<br/>• Xavfsizlik qoidalari & IDS ogohlantirishlari API va UI | Conntrack holatlari, hujum anomaliyalari va filtr qoidalari real vaqtda kuzatiladi | 🚀 **Jarayonda** |
+| **Faza 7** | **Tarmoq Xavfsizligi & Stateful Firewall** | • `lab/security/conntrack_engine.py` (TCP state tracking)<br/>• `lab/security/attack_simulator.py` (SYN flood, UDP reflection, Slowloris, ARP MitM)<br/>• Xavfsizlik qoidalari & IDS ogohlantirishlari API va UI | Conntrack holatlari, hujum anomaliyalari va filtr qoidalari real vaqtda kuzatiladi | ✅ **Yakunlandi** |
 | **Faza 8** | **P4-16 In-Band Telemetry (INT)** | • `lab/telemetry/int_collector.py` (INT header parser)<br/>• Hop-by-hop latency va switch queue tracking<br/>• UI PDU Inspector INT tab integratsiyasi | Paket har bir switchdan o'tganda mikrosekund kechikish va bufer hajmi qayd etiladi | 📅 **Rejalashtirilgan** |
 | **Faza 9** | **Multi-Cloud Overlay & SD-WAN** | • `lab/overlay/vxlan_evpn.py` va `lab/overlay/wireguard_vpn.py`<br/>• Overlay/Underlay topologiya generatori<br/>• Dynamic application-aware path selection | VXLAN/EVPN va shifrlangan WireGuard tunnellari orqali xavfsiz va samarali uzatish | 📅 **Rejalashtirilgan** |
 | **Faza 10** | **Digital Twin & Auto-Grader** | • `lab/twin/what_if_analyzer.py` ssenariy solveri<br/>• `lab/education/grader.py` (NetAcad lab avtomatik baholash)<br/>• UI Lab Task & Scoring paneli | Talaba laboratoriya topshiriqlarini avtomatik tekshiruvchi va "What-If" tahlil tizimi | 📅 **Rejalashtirilgan** |
@@ -220,11 +220,13 @@ Hozirgi tizimdagi nazariy L2 cheklovini to'liq yengib o'tish:
 
 ## 4. Xulosa va Erishilgan Natijalar
 
-Barcha 6 faza to'liq muvaffaqiyatli amalga oshirildi va ishlab chiqildi:
+Platformaning dastlabki barcha 6 fazasi va qo'shimcha Faza 7 to'liq muvaffaqiyatli amalga oshirildi va ishlab chiqildi:
 1. **L4 Telemetriya Yadrosi**: Linux `tcp_info`, Netlink, eBPF drop/retransmit kuzatuvchisi va pure-Python DPI dissector to'liq integratsiya qilindi.
 2. **L4 Observatory UI**: CWND, RTT, Jitter, Delivery rate, soket buferlarini jonli vizualizatsiya qiluvchi reaktiv panel yaratildi.
 3. **Cisco-Grade PDU Inspector**: OSI 1–7 kiruvchi va chiquvchi qatlamlar taqqoslanishi, 8 bosqichli qurilma qayta ishlash logi (Device Processing Log), PDU sarlavhalari va Wireshark uslubidagi Hex/ASCII dump taqdim etildi.
 4. **Step-by-Step Simulation Controller**: Play/Pause, Step-Forward, 0.5x/1x/2x tezlik boshqaruvi, paket konvertlari va tushib qolish animatsiyalari qo'shildi.
 5. **Haqiqiy Data-Plane & Queues**: FRRouting (OSPF, BGP, IS-IS) orqali FIB integratsiyasi, apparat navbatlari (FIFO, RED, CoDel, Token Bucket) va bufferbloat kuzatuvi joriy etildi.
 6. **OPNET Workloads & Ilmiy LaTeX Hisobot**: DASH/HLS adaptiv video oqimi (ITU-T P.1203 QoE), HTTP/3 QUIC 0-RTT simpleksatsiyasi, SLA Muvofiqlik Dvigateli hamda IEEE/ACM talablariga mos LaTeX hisobot generatori ishlab chiqildi.
+7. **Tarmoq Xavfsizligi, Stateful Firewall & Kibernetik Hujumlar**: Linux `conntrack` holatlari dvigateli, stateful firewall inspektori, 4 turdagi hujum simulyatori (SYN Flood, UDP Reflection, Slowloris HTTP, ARP Poisoning MitM) hamda Frontend `SecurityStudio.tsx` to'liq ishga tushirildi.
+
 
