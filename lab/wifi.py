@@ -81,24 +81,34 @@ def channels_overlap(c1, c2):
 def estimate(distance_m, cfg):
     """Masofa va AP sozlamasi -> {rssi, snr, mcs, phy_mbps, thr_mbps, ok}."""
     d = max(float(distance_m), 1.0)
-    pl = REF_LOSS[cfg["band"]] + 10 * EXPONENT * math.log10(d)
-    rssi = cfg["tx_power"] - pl
-    noise = -174 + 10 * math.log10(cfg["width"] * 1e6) + 7
+    band = 2.4 if float(cfg.get("band", 5)) < 4 else 5
+    width = int(cfg.get("width", 20))
+    if width not in WIDTH_MULT:
+        width = 20
+    tx_power = float(cfg.get("tx_power", 20.0))
+    std = cfg.get("standard", "80211ax")
+    if std not in MCS:
+        std = "80211ax"
+    pl = REF_LOSS[band] + 10 * EXPONENT * math.log10(d)
+    rssi = tx_power - pl
+    noise = -174 + 10 * math.log10(width * 1e6) + 7
     snr = rssi - noise
-    table = MCS[cfg["standard"]]
+    table = MCS[std]
     mcs = -1
     for i, (thr, _r) in enumerate(table):
         if snr >= thr:
             mcs = i
     ok = rssi >= MIN_RSSI and mcs >= 0
-    phy = table[mcs][1] * WIDTH_MULT[cfg["width"]] if ok else 0.0
+    phy = table[mcs][1] * WIDTH_MULT[width] if ok else 0.0
     return {"distance_m": round(d, 1), "rssi_dbm": round(rssi, 1), "snr_db": round(snr, 1), "mcs": mcs if ok else None,
-            "phy_mbps": round(phy, 1), "thr_mbps": round(phy * EFFICIENCY[cfg["standard"]], 1), "ok": ok}
+            "phy_mbps": round(phy, 1), "thr_mbps": round(phy * EFFICIENCY.get(std, 0.8), 1), "ok": ok}
 
 
 def max_range_m(cfg):
     """RSSI = MIN_RSSI bo'ladigan masofa (aloqa chegarasi)."""
-    return 10 ** ((cfg["tx_power"] - MIN_RSSI - REF_LOSS[cfg["band"]]) / (10 * EXPONENT))
+    band = 2.4 if float(cfg.get("band", 5)) < 4 else 5
+    tx_power = float(cfg.get("tx_power", 20.0))
+    return 10 ** ((tx_power - MIN_RSSI - REF_LOSS[band]) / (10 * EXPONENT))
 
 
 def meters_per_px(project):
@@ -117,13 +127,18 @@ def ess_key(name, dev):
 
 def link_estimate(project, lid):
     """Wi-Fi kabeli (params.medium == 'wifi') uchun taxmin; oddiy kabel bo'lsa None."""
-    l = project["links"].get(lid)
+    l = (project.get("links") or {}).get(lid)
     if not l or (l.get("params") or {}).get("medium") != "wifi":
         return None
-    a, b = project["devices"][l["a"]["dev"]], project["devices"][l["b"]["dev"]]
-    ap, sta = (a, b) if a["type"] == "wifiap" else (b, a)
+    devs = project.get("devices") or {}
+    if l["a"]["dev"] not in devs or l["b"]["dev"] not in devs:
+        return None
+    a, b = devs[l["a"]["dev"]], devs[l["b"]["dev"]]
+    if a.get("type") != "wifiap" and b.get("type") != "wifiap":
+        return None
+    ap, sta = (a, b) if a.get("type") == "wifiap" else (b, a)
     dist = math.hypot(a.get("x", 0) - b.get("x", 0), a.get("y", 0) - b.get("y", 0)) * meters_per_px(project)
     est = estimate(dist, ap_config(ap))
-    est["ap"] = l["a"]["dev"] if a["type"] == "wifiap" else l["b"]["dev"]
-    est["sta"] = l["b"]["dev"] if a["type"] == "wifiap" else l["a"]["dev"]
+    est["ap"] = l["a"]["dev"] if a.get("type") == "wifiap" else l["b"]["dev"]
+    est["sta"] = l["b"]["dev"] if a.get("type") == "wifiap" else l["a"]["dev"]
     return est

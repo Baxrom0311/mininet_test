@@ -365,6 +365,34 @@ def generate_frr_conf(router_name, config=None):
         lines.append(f" spf-interval {isc.get('spf_interval', 1)}")
         lines.append("!")
 
+    # RIP jarayoni
+    rip_cfg = cfg.get("rip")
+    if (rip_cfg or "ripd" in daemons) and "router rip" not in (cfg.get("startup") or ""):
+        from lab.model import rip_timers
+        lines.append("router rip")
+        lines.append(" version 2")
+        lines.append(" no validate-source")
+        if cfg.get("rip_timers"):
+            tm = rip_timers({"config": cfg})
+            lines.append(f" timers basic {tm['update']} {tm['timeout']} {tm['garbage']}")
+        nets = (rip_cfg or {}).get("networks")
+        if nets:
+            for n in nets:
+                lines.append(f" network {n}")
+        else:
+            for ifn, ic in sorted(interfaces.items()):
+                ip_val = (ic or {}).get("ip")
+                if ip_val and str(ip_val).lower() != "dhcp":
+                    try:
+                        net_obj = ipaddress.ip_interface(ip_val).network
+                        if net_obj.version == 4:
+                            lines.append(f" network {net_obj}")
+                    except ValueError:
+                        pass
+        for red in (rip_cfg or {}).get("redistribute") or []:
+            lines.append(f" redistribute {red}")
+        lines.append("!")
+
     # Custom startup
     startup = (cfg.get("startup") or "").strip()
     if startup:

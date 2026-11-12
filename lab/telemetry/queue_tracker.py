@@ -321,8 +321,16 @@ class QueueTracker:
             else:
                 recommendation = f"Interfeys {dev} navbatida yuqori kechikish ({delay_ms:.1f}ms). Parametrlarni optimallashtiring."
         else:
-            if clean_kind in ("codel", "fq_codel", "cake"):
+            if clean_kind in ("codel", "fq_codel"):
                 recommendation = f"{clean_kind.upper()} ({dev}) minimal kechikish bilan optimal ishlamoqda."
+            elif clean_kind == "cake":
+                if dropping or early_drops > 0:
+                    recommendation = (
+                        f"CAKE ({dev}) da Cobalt AQM faol boshqaruvda ({early_drops} unforced drops, "
+                        f"{delay_ms:.1f}ms kechikish) va adolatli taqsimot (Fair Queueing) bilan optimal ishlamoqda."
+                    )
+                else:
+                    recommendation = f"CAKE ({dev}) minimal kechikish ({delay_ms:.1f}ms) va adolatli taqsimot (Fair Queueing) bilan optimal ishlamoqda."
             else:
                 recommendation = f"Navbat holati me'yorida ({delay_ms:.1f}ms kechikish)."
 
@@ -640,7 +648,7 @@ class QueueTracker:
                 extra_stats["cake_unforced_drops"] = extra_stats.get("cake_unforced_drops", 0) + u_sum
 
             # forced drops (buffer limit drop tracking)
-            m_forced = re.findall(r"(?:min\s+|max\s+)?forced dropped:?\s*(\d+)", l_str)
+            m_forced = re.findall(r"(?:min\s+|max\s+)?(?<!un)forced dropped:?\s*(\d+)", l_str)
             if m_forced:
                 f_sum = sum(int(x) for x in m_forced)
                 extra_stats["cake_forced_drops"] = extra_stats.get("cake_forced_drops", 0) + f_sum

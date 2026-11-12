@@ -56,7 +56,7 @@ class Net:
                     for d in self.devs.values()
                     for ic in ((d.get("config") or {}).get("interfaces") or {}).values()
                     if ic.get("ip") and ic["ip"] != "dhcp"}
-        self.ip_version = 6 if versions == {6} else 4
+        self.ip_version = ip_version if ip_version is not None else (6 if versions == {6} else 4)
         self._stp = None
         self._lag = None
         self.flow_key = None     # bond hash kaliti (analitik: (manba, manzil, ilova)); None — manba qurilma
@@ -552,7 +552,10 @@ class DemoDriver(BaseDriver):
             self._require_running()
             for port, (lid, _p, _pp) in list(link_ports(self.project, name).items()):
                 self.project["links"].pop(lid, None)
+                self._traffic.pop(lid, None)
             self.project["devices"].pop(name, None)
+            self._arp.pop(name, None)
+            self._fdb.pop(name, None)
         return {"ok": True}
 
     def add_link(self, project, link_id):
@@ -562,6 +565,7 @@ class DemoDriver(BaseDriver):
         with self.lock:
             self._require_running()
             self.project["links"].pop(link_id, None)
+            self._traffic.pop(link_id, None)
         return {"ok": True}
 
     def update_link(self, link_id, params=None, up=None):
@@ -647,6 +651,16 @@ class DemoDriver(BaseDriver):
                              "rows": [[ip, m, i, "REACHABLE"] for ip, (m, i) in arp.items()]})
                 if t == "router":
                     secs.append({"title": "FRR: show ip route", "kind": "text", "text": self._show_ip_route(n, name)})
+                    if "ospfd" in (cfg.get("daemons") or []):
+                        ospf_rows = []
+                        for port, ifn, myip, nd, nip, _path in n.adjacency(name):
+                            if "ospfd" in n.dyn_daemons(nd):
+                                rid = (n.devs[nd].get("config") or {}).get("ospf", {}).get("router_id") or f"1.1.0.{n.devs[nd]['id']}"
+                                ospf_rows.append([rid, "Full", str(nip.ip), ifn])
+                        if ospf_rows:
+                            secs.append({"title": "OSPF neighbors (model)", "kind": "table",
+                                         "columns": ["Neighbor ID", "State", "Address", "Interface"],
+                                         "rows": ospf_rows})
                     if (d.get("config") or {}).get("vrrp"):
                         from lab.vrrp import model_rows
                         secs.append({"title": "VRRP (show vrrp)", "kind": "table",
@@ -744,12 +758,13 @@ class DemoDriver(BaseDriver):
         if cmd == "exit":
             sh.on_exit()
             return ""
-        if line in ("ip a", "ip addr", "ifconfig", "show interface brief", "show int brief"):
+        if line in ("ip a", "ip addr", "ifconfig", "show interface brief", "show int brief",
+                    "show ip interface brief", "show ip int brief"):
             rows = []
             for port, ifn, ipi in n.ifaces(name):
                 rows.append(f"{ifn:<14} {str(ipi) if ipi else 'unassigned':<20} {device_mac(d['id'], port)}")
             return ("\n".join(rows) or "(interfeys yo'q — kabel ulang)") + "\n"
-        if line in ("ip r", "ip route", "route -n"):
+        if line in ("ip r", "ip route", "route -n", "show route", "show ip routes"):
             out = []
             for net, via, ifn, proto in n.routes(name):
                 out.append(f"{net}{' via ' + str(via) if via else ''} dev {ifn} proto {proto}")
@@ -758,6 +773,17 @@ class DemoDriver(BaseDriver):
             from lab.isis import neighbors
             return "Neighbor  Interface  State  Level (model)\n" + "\n".join(
                 "  ".join(r[k] for k in ("neighbor", "interface", "state", "level")) for r in neighbors(n, name)) + "\n"
+        if line.startswith(("show ip ospf neighbor", "show ospf neighbor")):
+            if "ospfd" not in (d.get("config") or {}).get("daemons", []):
+                return "% OSPF sozlanmagan\n"
+            rows = []
+            for port, ifn, myip, nd, nip, _path in n.adjacency(name):
+                if "ospfd" in n.dyn_daemons(nd):
+                    rid = (n.devs[nd].get("config") or {}).get("ospf", {}).get("router_id") or f"1.1.0.{n.devs[nd]['id']}"
+                    rows.append(f"{rid:<15} 1   Full/DR         00:00:39 {str(nip.ip):<15} {ifn}:{str(myip.ip)}")
+            if not rows:
+                return "Neighbor ID     Pri State           Dead Time Address         Interface\n(qo'shni yo'q)\n"
+            return "Neighbor ID     Pri State           Dead Time Address         Interface\n" + "\n".join(rows) + "\n"
         if line.startswith("show ip route"):
             return self._show_ip_route(n, name) + "\n"
         if line.startswith("show vrrp"):
@@ -859,7 +885,10 @@ class DemoDriver(BaseDriver):
                     break
                 n = Net(copy.deepcopy(self.project), ip_version=dst.version)
             sent += 1
-            src_ip = n.ip_of(name)
+            r_lk = n.lookup(name, dst)
+            src_ip = next((ipi for _p, ifn, ipi in n.ifaces(name) if r_lk and ifn == r_lk[2] and ipi), None) if r_lk else None
+            if not src_ip:
+                src_ip = n.ip_of(name)
             ok, why, hops, links, d1 = n.forward(name, dst)
             if ok and src_ip:
                 from lab.firewall import check_roundtrip
@@ -975,6 +1004,11 @@ class DemoDriver(BaseDriver):
                 "pipeline": outline}
 
     def p4_runtime(self, name, commands):
+        with self.lock:
+            self._require_running()
+            d = (self.project.get("devices") or {}).get(name)
+            if not d or d.get("type") != "p4switch":
+                raise DriverError(f"{name} P4 switch emas")
         lines = [l for l in commands.splitlines() if l.strip()]
         return {"ok": True, "output": "\n".join(f"RuntimeCmd: {l}\n[demo] qabul qilindi" for l in lines)}
 
@@ -988,7 +1022,9 @@ class DemoDriver(BaseDriver):
     def frr_running_config(self, name):
         with self.lock:
             self._require_running()
-            d = self.project["devices"][name]
+            d = (self.project.get("devices") or {}).get(name)
+            if not d or d.get("type") != "router":
+                raise DriverError(f"{name} FRR router emas")
             n = Net(self.project)
             cfg = d.get("config") or {}
             lines = [f"hostname {name}", "!"]

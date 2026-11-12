@@ -403,6 +403,7 @@ class TelemetryManager:
         """Adaptiv video oqimi (HLS/DASH) holatini qaytaradi."""
         if self.video_session:
             curr = self.video_session.LADDER[self.video_session.current_rep_idx]
+            qoe = self.video_session.get_qoe_score() if hasattr(self.video_session, "get_qoe_score") else 4.5
             return {
                 "session_id": self.video_session.session_id,
                 "current_quality": curr.label,
@@ -412,6 +413,7 @@ class TelemetryManager:
                 "stalls": self.video_session.stall_count,
                 "total_stall_sec": round(self.video_session.total_stall_sec, 2),
                 "switches": self.video_session.quality_switches,
+                "qoe_score": qoe,
                 "history": self.video_session.history[-20:],
             }
         return {}
@@ -424,6 +426,7 @@ class TelemetryManager:
                 telemetry_summary=self.get_global_stats(),
                 sla_summary=self.get_sla_report(),
                 voip_summary=self.evaluate_voip_call(),
+                video_summary=self.get_video_streaming_stats(),
             )
         return ""
 

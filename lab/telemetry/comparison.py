@@ -136,6 +136,80 @@ class TelemetryComparator:
         }
 
     @classmethod
+    def _model_algorithm_metrics(
+        cls,
+        algo: str,
+        bottleneck_bps: float,
+        base_rtt_ms: float,
+        loss_pct: float,
+        buffer_size_pkts: int,
+    ) -> Dict[str, Any]:
+        """Turli xil TCP tiqilinch nazorati algoritmlari (CUBIC, BBR, Reno) uchun analitik metrikalar."""
+        algo = (algo or "cubic").lower().strip()
+        eff_bottleneck = max(1000.0, float(bottleneck_bps or 20_000_000.0))
+        eff_rtt_ms = max(0.1, float(base_rtt_ms or 30.0))
+        eff_loss = max(0.0, min(100.0, float(loss_pct if loss_pct is not None else 1.0)))
+        eff_buffer = max(1, int(buffer_size_pkts or 200))
+        p = max(0.0001, eff_loss / 100.0)
+
+        # BDP (Bandwidth-Delay Product)
+        bdp_bytes = (eff_bottleneck * (eff_rtt_ms / 1000.0)) / 8.0
+        bdp_packets = max(10, int(bdp_bytes / 1460))
+
+        if algo == "bbr":
+            # BBR model (BtlBw and RTprop):
+            # Tasodifiy paket yo'qotishga sezgir emas (20% gacha barqaror)
+            if eff_loss < 20.0:
+                rate = eff_bottleneck * 0.94
+            else:
+                rate = eff_bottleneck * max(0.05, 1.0 - (eff_loss / 100.0))
+
+            # BBR navbatda minimal paket ushlaydi (~1.15-1.25 BDP), Bufferbloat hosil qilmaydi
+            q_delay_ms = (bdp_packets * 0.20 * 1460 * 8 / eff_bottleneck) * 1000.0
+            rtt = eff_rtt_ms + q_delay_ms
+            jitter = max(0.5, q_delay_ms * 0.2)
+            retrans = int(rate * 5.0 * (eff_loss / 100.0) / (1460 * 8))
+            cwnd = max(10, int((rate * (rtt / 1000.0)) / (1460 * 8)))
+            ca_state = "open"
+
+        elif algo in ("reno", "newreno"):
+            # Reno AIMD model: Mathis formulasi bilan cheklanadi
+            mathis_bps = (1.22 * 1460 * 8) / ((eff_rtt_ms / 1000.0) * math.sqrt(p))
+            rate = min(eff_bottleneck * 0.88, mathis_bps)
+            # Fills buffer until drop (DropTail bufferbloat)
+            q_delay_ms = (eff_buffer * 1460 * 8 / eff_bottleneck) * 1000.0
+            rtt = eff_rtt_ms + q_delay_ms * 0.75
+            jitter = max(1.0, q_delay_ms * 0.4)
+            retrans = int(rate * 5.0 * p / (1460 * 8))
+            cwnd = max(10, int((rate * (rtt / 1000.0)) / (1460 * 8)))
+            ca_state = "recovery" if eff_loss > 0 else "open"
+
+        else:
+            # Default CUBIC model (RFC 8312):
+            # CUBIC oynasi C*(t-K)^3 bo'yicha tezroq tiklanadi, beta=0.7
+            mathis_bps = (1.22 * 1460 * 8) / ((eff_rtt_ms / 1000.0) * math.sqrt(p))
+            rate = min(eff_bottleneck * 0.95, mathis_bps * 1.15)
+            # Navbat buferini to'ldirishga moyil
+            q_delay_ms = (eff_buffer * 1460 * 8 / eff_bottleneck) * 1000.0
+            rtt = eff_rtt_ms + q_delay_ms * 0.70
+            jitter = max(0.8, q_delay_ms * 0.35)
+            retrans = int(rate * 5.0 * p / (1460 * 8))
+            cwnd = max(10, int((rate * (rtt / 1000.0)) / (1460 * 8)))
+            ca_state = "recovery" if eff_loss > 0 else "open"
+
+        return {
+            "stream_id": f"sim_{algo}",
+            "congestion_algo": algo,
+            "delivery_rate_bps": round(rate, 2),
+            "rtt_ms": round(rtt, 2),
+            "rttvar_ms": round(jitter, 2),
+            "total_retrans": max(0, retrans),
+            "cwnd": cwnd,
+            "bytes_acked": int(rate * 5.0 / 8.0),
+            "ca_state": ca_state,
+        }
+
+    @classmethod
     def compare_algorithms(
         cls,
         algo_a: str = "cubic",
@@ -145,76 +219,34 @@ class TelemetryComparator:
         loss_pct: float = 1.0,
         buffer_size_pkts: int = 200,
     ) -> Dict[str, Any]:
-        """Matematik va simulyatsiya modeli orqali CUBIC va BBR algoritmlarini turli tarmoq sharoitlarida solishtirish."""
-        algo_a = algo_a.lower()
-        algo_b = algo_b.lower()
+        """Matematik va simulyatsiya modeli orqali turli TCP algoritmlarini (CUBIC, BBR, Reno) solishtirish."""
+        clean_a = (algo_a or "cubic").lower().strip()
+        clean_b = (algo_b or "bbr").lower().strip()
+        eff_bottleneck = max(1000.0, float(bottleneck_bps or 20_000_000.0))
+        eff_rtt_ms = max(0.1, float(base_rtt_ms or 30.0))
+        eff_loss = max(0.0, min(100.0, float(loss_pct if loss_pct is not None else 1.0)))
+        eff_buffer = max(1, int(buffer_size_pkts or 200))
 
-        # BDP (Bandwidth-Delay Product) in bytes
-        bdp_bytes = (bottleneck_bps * (base_rtt_ms / 1000.0)) / 8.0
-        bdp_packets = max(10, int(bdp_bytes / 1460))
+        bdp_bytes = (eff_bottleneck * (eff_rtt_ms / 1000.0)) / 8.0
 
-        # 1. CUBIC model:
-        # CUBIC tiqilinch holatida buferni to'ldiradi (Bufferbloat). Navbat kechikishi bufer o'lchamiga bog'liq.
-        # Agar yo'qotish bo'lsa (p > 0), Mathis formulasi / CUBIC throughput modeli:
-        p = max(0.0001, loss_pct / 100.0)
-        # Mathis limit: Throughput <= (1.22 * MSS) / (RTT * sqrt(p))
-        mathis_bps = (1.22 * 1460 * 8) / ((base_rtt_ms / 1000.0) * math.sqrt(p))
-        cubic_rate = min(bottleneck_bps * 0.95, mathis_bps)
-        # CUBIC navbat buferini to'ldirishga moyil (Queue delay ~ buffer_size * 1460 * 8 / bottleneck_bps)
-        queue_delay_cubic_ms = (buffer_size_pkts * 1460 * 8 / bottleneck_bps) * 1000.0
-        cubic_rtt = base_rtt_ms + queue_delay_cubic_ms * 0.7  # O'rtacha 70% to'la
-        cubic_jitter = queue_delay_cubic_ms * 0.35
-        cubic_retrans = int(cubic_rate * 5.0 * p / (1460 * 8))
+        stream_a = cls._model_algorithm_metrics(clean_a, eff_bottleneck, eff_rtt_ms, eff_loss, eff_buffer)
+        stream_b = cls._model_algorithm_metrics(clean_b, eff_bottleneck, eff_rtt_ms, eff_loss, eff_buffer)
 
-        # 2. BBR model (Bottleneck Bandwidth and Round-trip propagation time):
-        # BBR navbatda paket yig'ilishining oldini oladi (pacing_rate = BtlBw), minimum RTT ni kuzatadi.
-        # Tasodifiy paket yo'qotishga sezgir emas (20% gacha barqaror).
-        if loss_pct < 20.0:
-            bbr_rate = bottleneck_bps * 0.93  # Kanalni to'liq egallaydi
-        else:
-            bbr_rate = bottleneck_bps * max(0.1, 1.0 - (loss_pct / 100.0))
-
-        # BBR navbatda faqat ~1.25 BDP gacha saqlaydi, kechikish ancha past
-        queue_delay_bbr_ms = (bdp_packets * 0.25 * 1460 * 8 / bottleneck_bps) * 1000.0
-        bbr_rtt = base_rtt_ms + queue_delay_bbr_ms
-        bbr_jitter = queue_delay_bbr_ms * 0.2
-        bbr_retrans = int(bbr_rate * 5.0 * (loss_pct / 100.0) / (1460 * 8))
-
-        # Mock oqimlar yaratamiz va compare_streams ga beramiz
-        stream_a = {
-            "stream_id": f"sim_{algo_a}",
-            "congestion_algo": algo_a,
-            "delivery_rate_bps": cubic_rate,
-            "rtt_ms": cubic_rtt,
-            "rttvar_ms": cubic_jitter,
-            "total_retrans": cubic_retrans,
-            "cwnd": int((cubic_rate * (cubic_rtt / 1000.0)) / (1460 * 8)),
-            "bytes_acked": int(cubic_rate * 5.0 / 8.0),
-        }
-
-        stream_b = {
-            "stream_id": f"sim_{algo_b}",
-            "congestion_algo": algo_b,
-            "delivery_rate_bps": bbr_rate,
-            "rtt_ms": bbr_rtt,
-            "rttvar_ms": bbr_jitter,
-            "total_retrans": bbr_retrans,
-            "cwnd": int((bbr_rate * (bbr_rtt / 1000.0)) / (1460 * 8)),
-            "bytes_acked": int(bbr_rate * 5.0 / 8.0),
-        }
+        label_a = f"{clean_a.upper()} ({'Model-Based' if clean_a == 'bbr' else 'Loss-Based'})"
+        label_b = f"{clean_b.upper()} ({'Model-Based' if clean_b == 'bbr' else 'Loss-Based'})"
 
         res = cls.compare_streams(
             stream_a,
             stream_b,
-            label_a=f"{algo_a.upper()} (Standart)",
-            label_b=f"{algo_b.upper()} (Model-Based)",
+            label_a=label_a,
+            label_b=label_b,
         )
 
         res["simulation_parameters"] = {
-            "bottleneck_bandwidth_bps": bottleneck_bps,
-            "base_rtt_ms": base_rtt_ms,
-            "packet_loss_pct": loss_pct,
-            "buffer_size_packets": buffer_size_pkts,
+            "bottleneck_bandwidth_bps": eff_bottleneck,
+            "base_rtt_ms": eff_rtt_ms,
+            "packet_loss_pct": eff_loss,
+            "buffer_size_packets": eff_buffer,
             "bdp_bytes": int(bdp_bytes),
         }
 
@@ -228,77 +260,86 @@ class TelemetryComparator:
         link_bps: float = 10_000_000.0,
         load_pct: float = 120.0,
     ) -> Dict[str, Any]:
-        """FIFO/DropTail va FQ-CoDel/AQM navbat algoritmlarini solishtirish."""
-        # Yuklama 100% dan oshganda FIFO buferni to'ldirib, bufferbloat keltirib chiqaradi.
-        is_overloaded = load_pct > 100.0
+        """FIFO/DropTail va FQ-CoDel/CAKE/AQM navbat algoritmlarini solishtirish."""
+        eff_link_bps = max(1000.0, float(link_bps or 10_000_000.0))
+        eff_load_pct = max(1.0, float(load_pct if load_pct is not None else 100.0))
+        is_overloaded = eff_load_pct > 100.0
+        clean_b = (qdisc_b or "fq_codel").lower().strip()
 
         if is_overloaded:
             fifo_queue_depth_pkts = 200
-            fifo_sojourn_time_ms = (fifo_queue_depth_pkts * 1500 * 8 / link_bps) * 1000.0
-            fifo_drops = int((load_pct - 100.0) * 10)
+            fifo_sojourn_time_ms = (fifo_queue_depth_pkts * 1500 * 8 / eff_link_bps) * 1000.0
+            fifo_drops = int((eff_load_pct - 100.0) * 10)
             fifo_bloat = True
 
-            # FQ-CoDel Target sojourn time ~ 5ms, Interval ~ 100ms
-            codel_queue_depth_pkts = 15
-            codel_sojourn_time_ms = 5.2
-            codel_drops = int(fifo_drops * 0.8)  # AQM orqali oldindan tashlash
-            codel_bloat = False
+            # AQM Target sojourn time (CAKE ~3.2ms, FQ-CoDel ~5.2ms)
+            if clean_b == "cake":
+                aqm_queue_depth_pkts = 10
+                aqm_sojourn_time_ms = 3.2
+                aqm_drops = int(fifo_drops * 0.70)
+            else:
+                aqm_queue_depth_pkts = 15
+                aqm_sojourn_time_ms = 5.2
+                aqm_drops = int(fifo_drops * 0.80)
+            aqm_bloat = False
         else:
             fifo_queue_depth_pkts = 5
             fifo_sojourn_time_ms = 2.0
             fifo_drops = 0
             fifo_bloat = False
 
-            codel_queue_depth_pkts = 4
-            codel_sojourn_time_ms = 1.8
-            codel_drops = 0
-            codel_bloat = False
+            aqm_queue_depth_pkts = 4
+            aqm_sojourn_time_ms = 1.8 if clean_b != "cake" else 1.2
+            aqm_drops = 0
+            aqm_bloat = False
 
         rtt_base = 20.0
         rtt_fifo = rtt_base + fifo_sojourn_time_ms
-        rtt_codel = rtt_base + codel_sojourn_time_ms
+        rtt_aqm = rtt_base + aqm_sojourn_time_ms
 
         mos_fifo = VoIPMOSCalculator.calculate(
             delay_ms=rtt_fifo / 2.0,
             jitter_ms=fifo_sojourn_time_ms * 0.3,
             loss_pct=min(20.0, fifo_drops * 0.1),
         )
-        mos_codel = VoIPMOSCalculator.calculate(
-            delay_ms=rtt_codel / 2.0,
-            jitter_ms=codel_sojourn_time_ms * 0.1,
-            loss_pct=min(5.0, codel_drops * 0.05),
+        mos_aqm = VoIPMOSCalculator.calculate(
+            delay_ms=rtt_aqm / 2.0,
+            jitter_ms=aqm_sojourn_time_ms * 0.1,
+            loss_pct=min(5.0, aqm_drops * 0.05),
+        )
+
+        reduction_pct = round(
+            (1.0 - (aqm_sojourn_time_ms / max(0.1, fifo_sojourn_time_ms))) * 100.0, 1
         )
 
         return {
             "qdisc_a": qdisc_a,
             "qdisc_b": qdisc_b,
-            "link_bandwidth_bps": link_bps,
-            "load_pct": load_pct,
+            "link_bandwidth_bps": eff_link_bps,
+            "load_pct": eff_load_pct,
             "comparison": {
                 "sojourn_time_ms": {
                     "baseline": round(fifo_sojourn_time_ms, 2),
-                    "candidate": round(codel_sojourn_time_ms, 2),
-                    "delta_ms": round(codel_sojourn_time_ms - fifo_sojourn_time_ms, 2),
-                    "reduction_pct": round(
-                        (1.0 - (codel_sojourn_time_ms / max(0.1, fifo_sojourn_time_ms))) * 100.0, 1
-                    ),
+                    "candidate": round(aqm_sojourn_time_ms, 2),
+                    "delta_ms": round(aqm_sojourn_time_ms - fifo_sojourn_time_ms, 2),
+                    "reduction_pct": reduction_pct,
                 },
                 "total_rtt_ms": {
                     "baseline": round(rtt_fifo, 2),
-                    "candidate": round(rtt_codel, 2),
+                    "candidate": round(rtt_aqm, 2),
                 },
                 "bufferbloat_detected": {
                     "baseline": fifo_bloat,
-                    "candidate": codel_bloat,
+                    "candidate": aqm_bloat,
                 },
                 "voip_mos": {
                     "baseline": mos_fifo.mos,
-                    "candidate": mos_codel.mos,
-                    "delta": round(mos_codel.mos - mos_fifo.mos, 2),
+                    "candidate": mos_aqm.mos,
+                    "delta": round(mos_aqm.mos - mos_fifo.mos, 2),
                 },
             },
             "recommendation": (
-                f"{qdisc_b.upper()} navbat kechikishini {round((1.0 - (codel_sojourn_time_ms / max(0.1, fifo_sojourn_time_ms))) * 100.0)}% ga qisqartirdi "
-                f"va Bufferbloat holatining oldini oldi. Interaktiv oqimlar (VoIP) uchun MOS {mos_fifo.mos} dan {mos_codel.mos} ga yaxshilandi."
+                f"{qdisc_b.upper()} navbat kechikishini {round(reduction_pct)}% ga qisqartirdi "
+                f"va Bufferbloat holatining oldini oldi. Interaktiv oqimlar (VoIP) uchun MOS {mos_fifo.mos} dan {mos_aqm.mos} ga yaxshilandi."
             ),
         }

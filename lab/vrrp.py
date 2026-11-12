@@ -250,6 +250,8 @@ def frr_config(dev):
 def macvlan_name(e):
     """Router namespace ichidagi macvlan nomi (FRR vrrpd uni VRRP MAC bo'yicha topadi)."""
     _d, port, _v = parse_ifname(e["iface"])
+    if _v:
+        return f"vrrp4-{port}_{_v}-{int(e['vrid'])}"[:15]
     return f"vrrp4-{port}-{int(e['vrid'])}"
 
 

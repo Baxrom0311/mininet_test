@@ -215,8 +215,9 @@ def find_pox():
 def _read_net_dev(pid):
     """/proc/<pid>/net/dev -> {ifname: (rx_bytes, rx_pkts, rx_drop, tx_bytes, tx_pkts, tx_drop)}"""
     out = {}
+    path = f"/proc/{pid}/net/dev" if pid else "/proc/self/net/dev"
     try:
-        with open(f"/proc/{pid}/net/dev") as f:
+        with open(path) as f:
             lines = f.readlines()[2:]
     except OSError:
         return out
@@ -231,8 +232,9 @@ def _read_net_dev(pid):
 
 
 def _netns_id(pid):
+    path = f"/proc/{pid}/ns/net" if pid else "/proc/self/ns/net"
     try:
-        return os.readlink(f"/proc/{pid}/ns/net")
+        return os.readlink(path)
     except OSError:
         return None
 
@@ -243,7 +245,7 @@ def _read_qdisc(pid):
     root qdisc qlen/drops (HTB bolalarini ham qamraydi)."""
     out = {}
     argv = ["tc", "-s", "-j", "qdisc", "show"]
-    if _netns_id(pid) != _netns_id(os.getpid()):
+    if pid and _netns_id(pid) != _netns_id(os.getpid()):
         argv = ["mnexec", "-a", str(pid)] + argv
     try:
         r = subprocess.run(argv, capture_output=True, text=True, timeout=5)
@@ -270,7 +272,7 @@ class QdiscSampler:
         self._by_ns = {}
 
     def read(self, pid):
-        ns = _netns_id(pid)
+        ns = _netns_id(pid) if pid else _netns_id(os.getpid())
         if ns not in self._by_ns:
             self._by_ns[ns] = _read_qdisc(pid)
         return self._by_ns[ns]
@@ -1207,8 +1209,11 @@ exit 0
         ok = True
         if p.get("medium") == "wifi":
             est = wifi_link_estimate(self.project, lid)
-            opts.update(bw=max(est["thr_mbps"], 0.1), delay="1ms", jitter="0.5ms", loss=None)
-            ok = est["ok"]
+            if est:
+                opts.update(bw=max(est["thr_mbps"], 0.1), delay="1ms", jitter="0.5ms", loss=None)
+                ok = est["ok"]
+            else:
+                ok = False
         if self._datapath == "user":
             opts["txo"] = False      # TCIntf.config har safar `ethtool -K tx on` qiladi — userspace OVS'da TCP buziladi
         qd = p.get("qdisc") or "fifo"
@@ -1296,11 +1301,13 @@ exit 0
         if l and link:
             for side, intf in (("a", link.intf1), ("b", link.intf2)):
                 dev = l[side]["dev"]
-                t = self.project["devices"][dev]["type"]
-                if t in ("switch", "sdnrouter", "wifiap"):
-                    _run(["ovs-vsctl", "--if-exists", "del-port", dev, intf.name])
-                elif t == "p4switch":
-                    self._p4_cli(dev, f"port_remove {l[side]['port']}")
+                d = self.project["devices"].get(dev)
+                if d:
+                    t = d["type"]
+                    if t in ("switch", "sdnrouter", "wifiap"):
+                        _run(["ovs-vsctl", "--if-exists", "del-port", dev, intf.name])
+                    elif t == "p4switch":
+                        self._p4_cli(dev, f"port_remove {l[side]['port']}")
             self.net.delLink(link)
         self.project["links"].pop(link_id, None)
         if l:
