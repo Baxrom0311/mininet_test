@@ -37,22 +37,46 @@ TCP_STATES = {
 }
 
 RATE_MULTIPLIERS = {
+    "b": 1.0,
     "bps": 1.0,
+    "k": 1e3,
+    "kb": 1e3,
     "kbps": 1e3,
+    "kb/s": 8e3,
+    "kib": 1024.0,
     "kibps": 1024.0,
+    "m": 1e6,
+    "mb": 1e6,
     "mbps": 1e6,
+    "mb/s": 8e6,
+    "mib": 1024.0 * 1024.0,
     "mibps": 1024.0 * 1024.0,
+    "g": 1e9,
+    "gb": 1e9,
     "gbps": 1e9,
+    "gb/s": 8e9,
+    "gib": 1024.0 * 1024.0 * 1024.0,
     "gibps": 1024.0 * 1024.0 * 1024.0,
+    "t": 1e12,
+    "tb": 1e12,
+    "tbps": 1e12,
+    "tib": 1024.0 * 1024.0 * 1024.0 * 1024.0,
+    "tibps": 1024.0 * 1024.0 * 1024.0 * 1024.0,
 }
 
 
 def parse_rate_string(s: str) -> float:
-    """Masalan '125Mbps', '10.5Kbps', '1.2Gbps' ni bit/sekundga o'tkazadi."""
-    m = re.match(r"^([\d.]+)\s*([a-zA-Z]+)?$", s.strip())
+    """Masalan '125Mbps', '10.5Kbps', '1.2Gbps', '2388648bps', '30.6Mbps' ni bit/sekundga o'tkazadi."""
+    s = s.strip()
+    if not s:
+        return 0.0
+    m = re.match(r"^([\d.]+)\s*([a-zA-Z/]+)?$", s)
     if not m:
         return 0.0
-    val = float(m.group(1))
+    try:
+        val = float(m.group(1))
+    except ValueError:
+        return 0.0
     unit = (m.group(2) or "bps").lower()
     return val * RATE_MULTIPLIERS.get(unit, 1.0)
 
@@ -90,12 +114,17 @@ class TCPInfoSample:
     total_retrans: int = 0
     bytes_acked: int = 0
     bytes_received: int = 0
+    bytes_sent: int = 0
     delivery_rate_bps: float = 0.0
     pacing_rate_bps: float = 0.0
-    ca_state: str = "open"
+    send_rate_bps: float = 0.0
+    ca_state: str = "open"  # open, disorder, cwr, recovery, loss
     congestion_algo: str = "cubic"
     mss: int = 1460
     rcv_space: int = 65535
+    snd_wnd: int = 65535
+    rcv_wnd: int = 65535
+    min_rtt_ms: Optional[float] = None
     node: str = "localhost"
     timestamp: float = field(default_factory=time.time)
 
@@ -128,13 +157,19 @@ class TCPInfoSample:
             "retrans_total": self.total_retrans,
             "total_retrans": self.total_retrans,
             "bytes_acked": self.bytes_acked,
+            "goodput_bytes": self.bytes_acked,
             "bytes_received": self.bytes_received,
+            "bytes_sent": self.bytes_sent,
             "delivery_rate_bps": self.delivery_rate_bps,
             "pacing_rate_bps": self.pacing_rate_bps,
+            "send_rate_bps": self.send_rate_bps,
             "ca_state": self.ca_state,
             "congestion_algo": self.congestion_algo,
             "mss": self.mss,
             "rcv_space": self.rcv_space,
+            "snd_wnd": self.snd_wnd,
+            "rcv_wnd": self.rcv_wnd,
+            "min_rtt_ms": self.min_rtt_ms,
             "timestamp": self.timestamp,
         }
 
@@ -166,12 +201,17 @@ class TCPInfoCollector:
                 "FIN-WAIT-2", "TIME-WAIT", "CLOSE", "CLOSE-WAIT", "LAST-ACK", "LISTEN", "CLOSING"
             )
             if state in known_states:
+                # ss ustunlari:
+                # Agar Netid bo'lsa: Netid State Recv-Q Send-Q Local Peer [Info...]
+                # Agar Netid bo'lmasa: State Recv-Q Send-Q Local Peer [Info...]
                 if len(parts) >= 5:
                     local_addr = parts[3]
                     peer_addr = parts[4]
+                    line_remainder = parts[5:]
                 elif len(parts) >= 4:
                     local_addr = parts[2]
                     peer_addr = parts[3]
+                    line_remainder = parts[4:]
                 else:
                     i += 1
                     continue
@@ -179,12 +219,13 @@ class TCPInfoCollector:
                 src_ip, src_port = self._split_addr_port(local_addr)
                 dst_ip, dst_port = self._split_addr_port(peer_addr)
 
+                # Qo'shimcha satrlar (tab yoki probel bilan boshlangan satrlar)
                 extra_lines = []
                 while i + 1 < len(lines) and (lines[i + 1].startswith("\t") or lines[i + 1].startswith(" ")):
                     i += 1
                     extra_lines.append(lines[i].strip())
 
-                info_blob = " ".join(extra_lines)
+                info_blob = " ".join(line_remainder + extra_lines)
                 sample = self._parse_blob_to_sample(
                     blob=info_blob,
                     node=node,
@@ -214,10 +255,20 @@ class TCPInfoCollector:
             ip, port_s = addr.rsplit(":", 1)
         else:
             return addr, 0
-        try:
-            port = int(port_s)
-        except ValueError:
+
+        # Scope identifierni tozalash (masalan fe80::1%eth0)
+        if "%" in ip:
+            ip = ip.split("%", 1)[0]
+
+        # Port raqamini o'qish
+        if port_s == "*":
             port = 0
+        else:
+            try:
+                port = int(port_s)
+            except ValueError:
+                # Agar servis nomi bo'lsa (masalan http, https)
+                port = {"http": 80, "https": 443, "ssh": 22, "dns": 53}.get(port_s.lower(), 0)
         return ip, port
 
     @classmethod
@@ -267,6 +318,11 @@ class TCPInfoCollector:
             if m_rtt.group(2):
                 sample.rttvar_ms = float(m_rtt.group(2))
 
+        # Min RTT
+        m_minrtt = re.search(r"\bminrtt:([\d.]+)\b", blob)
+        if m_minrtt:
+            sample.min_rtt_ms = float(m_minrtt.group(1))
+
         # Retransmits
         m_ret = re.search(r"\bretrans:(\d+)(?:/(\d+))?\b", blob)
         if m_ret:
@@ -276,25 +332,37 @@ class TCPInfoCollector:
             else:
                 sample.total_retrans = sample.retrans
 
-        # Delivery rate
-        m_rate = re.search(r"\bdelivery_rate\s+([\d.]+[a-zA-Z]+)\b", blob)
+        # Delivery rate (Goodput)
+        m_rate = re.search(r"\bdelivery_rate(?:\s+|:)([\d.]+\s*[a-zA-Z/]*)\b", blob)
         if m_rate:
             sample.delivery_rate_bps = parse_rate_string(m_rate.group(1))
 
         # Pacing rate
-        m_pace = re.search(r"\bpacing_rate\s+([\d.]+[a-zA-Z]+)\b", blob)
+        m_pace = re.search(r"\bpacing_rate(?:\s+|:)([\d.]+\s*[a-zA-Z/]*)\b", blob)
         if m_pace:
             sample.pacing_rate_bps = parse_rate_string(m_pace.group(1))
 
-        # Bytes acked
-        m_bytes_acked = re.search(r"\bbytes_acked:(\d+)\b", blob)
+        # Send rate
+        m_send = re.search(r"\bsend(?:\s+|:)([\d.]+\s*[a-zA-Z/]*)\b", blob)
+        if m_send:
+            sample.send_rate_bps = parse_rate_string(m_send.group(1))
+            if sample.delivery_rate_bps == 0.0:
+                sample.delivery_rate_bps = sample.send_rate_bps
+
+        # Bytes acked (Goodput bytes)
+        m_bytes_acked = re.search(r"\bbytes_acked(?::|\s+|=)(\d+)\b", blob)
         if m_bytes_acked:
             sample.bytes_acked = int(m_bytes_acked.group(1))
 
         # Bytes received
-        m_bytes_rcv = re.search(r"\bbytes_received:(\d+)\b", blob)
+        m_bytes_rcv = re.search(r"\bbytes_received(?::|\s+|=)(\d+)\b", blob)
         if m_bytes_rcv:
             sample.bytes_received = int(m_bytes_rcv.group(1))
+
+        # Bytes sent
+        m_bytes_sent = re.search(r"\bbytes_sent(?::|\s+|=)(\d+)\b", blob)
+        if m_bytes_sent:
+            sample.bytes_sent = int(m_bytes_sent.group(1))
 
         # MSS
         m_mss = re.search(r"\bmss:(\d+)\b", blob)
@@ -306,27 +374,36 @@ class TCPInfoCollector:
         if m_rcv:
             sample.rcv_space = int(m_rcv.group(1))
 
-        # CA State
-        for ca in ("open", "disorder", "cwr", "recovery", "loss"):
-            if re.search(rf"\b{ca}\b", blob, re.IGNORECASE):
-                sample.ca_state = ca.lower()
+        # SND_WND / RCV_WND
+        m_snd_wnd = re.search(r"\bsnd_wnd:(\d+)\b", blob)
+        if m_snd_wnd:
+            sample.snd_wnd = int(m_snd_wnd.group(1))
+        m_rcv_wnd = re.search(r"\brcv_wnd:(\d+)\b", blob)
+        if m_rcv_wnd:
+            sample.rcv_wnd = int(m_rcv_wnd.group(1))
+
+        # Congestion State (Open, Disorder, CWR, Recovery, Loss)
+        # Non-open holatlarni oldin qidiramiz
+        ca_found = None
+        for ca in ("disorder", "cwr", "recovery", "loss", "open"):
+            pattern = rf"\b(?:ca_state[:=])?{ca}\b|\btcp_ca_{ca}\b"
+            if re.search(pattern, blob, re.IGNORECASE):
+                ca_found = ca.lower()
                 break
+        sample.ca_state = ca_found if ca_found else "open"
 
         return sample
 
-    def collect_from_proc_tcp(self, path: str = "/proc/net/tcp", node: str = "localhost") -> List[Dict[str, Any]]:
-        """`/proc/net/tcp` faylini o'qib TCP oqimlarini chiqaradi (fallback mexanizmi)."""
-        if not os.path.exists(path):
-            return []
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                content = f.read()
-        except OSError:
-            return []
-
-        streams: List[Dict[str, Any]] = []
+    @classmethod
+    def parse_proc_tcp_content(
+        cls, content: str, node: str = "localhost", now: Optional[float] = None
+    ) -> List[TCPInfoSample]:
+        """/proc/net/tcp yoki /proc/net/tcp6 matnini tahlil qilib TCPInfoSample namunalarini qaytaradi."""
+        samples: List[TCPInfoSample] = []
         lines = content.strip().splitlines()
-        now = time.time()
+        if not lines:
+            return []
+        ts = now if now is not None else time.time()
         for line in lines[1:]:
             parts = line.split()
             if len(parts) < 10:
@@ -339,13 +416,60 @@ class TCPInfoCollector:
             if ":" not in local_hex or ":" not in peer_hex:
                 continue
 
-            lip_hex, lport_hex = local_hex.split(":")
-            pip_hex, pport_hex = peer_hex.split(":")
+            lip_hex, lport_hex = local_hex.split(":", 1)
+            pip_hex, pport_hex = peer_hex.split(":", 1)
 
             src_ip = hex_to_ip(lip_hex)
-            src_port = int(lport_hex, 16)
+            try:
+                src_port = int(lport_hex, 16)
+            except ValueError:
+                src_port = 0
+
             dst_ip = hex_to_ip(pip_hex)
-            dst_port = int(pport_hex, 16)
+            try:
+                dst_port = int(pport_hex, 16)
+            except ValueError:
+                dst_port = 0
+
+            # Retransmissions (parts[6])
+            retrans = 0
+            if len(parts) > 6:
+                try:
+                    retrans = int(parts[6], 16)
+                except ValueError:
+                    try:
+                        retrans = int(parts[6])
+                    except ValueError:
+                        retrans = 0
+
+            # RTO (parts[12])
+            rto_ms = 200.0
+            if len(parts) > 12:
+                try:
+                    rto_jiffies = int(parts[12])
+                    rto_ms = float(rto_jiffies * 10.0) if rto_jiffies > 0 else 200.0
+                except ValueError:
+                    pass
+
+            # CWND (parts[15])
+            cwnd = 10
+            if len(parts) > 15:
+                try:
+                    cwnd_val = int(parts[15])
+                    if cwnd_val > 0:
+                        cwnd = cwnd_val
+                except ValueError:
+                    pass
+
+            # SSTHRESH (parts[16])
+            ssthresh = None
+            if len(parts) > 16:
+                try:
+                    ssthresh_val = int(parts[16])
+                    if 0 < ssthresh_val < 0x7FFFFFFF:
+                        ssthresh = ssthresh_val
+                except ValueError:
+                    pass
 
             sample = TCPInfoSample(
                 src_ip=src_ip,
@@ -353,11 +477,34 @@ class TCPInfoCollector:
                 dst_ip=dst_ip,
                 dst_port=dst_port,
                 state=state,
+                snd_cwnd=cwnd,
+                snd_ssthresh=ssthresh,
+                retrans=retrans,
+                total_retrans=retrans,
+                rtt_ms=round(rto_ms / 10.0, 2),
                 node=node,
-                timestamp=now,
+                timestamp=ts,
             )
-            streams.append(sample.to_dict())
-        return streams
+            samples.append(sample)
+        return samples
+
+    def collect_from_proc_tcp(self, path: str = "/proc/net/tcp", node: str = "localhost") -> List[Dict[str, Any]]:
+        """`/proc/net/tcp` faylini o'qib TCP oqimlarini chiqaradi (fallback mexanizmi)."""
+        samples: List[TCPInfoSample] = []
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    samples.extend(self.parse_proc_tcp_content(f.read(), node=node))
+            except OSError:
+                pass
+        # IPv6 /proc/net/tcp6 ham mavjud bo'lsa, o'qish
+        if path == "/proc/net/tcp" and os.path.exists("/proc/net/tcp6"):
+            try:
+                with open("/proc/net/tcp6", "r", encoding="utf-8") as f:
+                    samples.extend(self.parse_proc_tcp_content(f.read(), node=node))
+            except OSError:
+                pass
+        return [s.to_dict() for s in samples]
 
     def collect_live_node(self, node_name: str, node_obj: Any = None) -> List[Dict[str, Any]]:
         """Mininet tugunidan (namespace ichida) jonli `ss` natijalarini oladi."""
@@ -422,8 +569,10 @@ class TCPInfoCollector:
             total_retrans=total_retrans,
             bytes_acked=step * 14600,
             bytes_received=step * 29200,
+            bytes_sent=step * 14600 + 4000,
             delivery_rate_bps=round(delivery_rate, 1),
             pacing_rate_bps=round(delivery_rate * 1.2, 1),
+            send_rate_bps=round(delivery_rate, 1),
             ca_state=ca_state,
             congestion_algo=algo,
             node=node,
@@ -480,8 +629,10 @@ class TCPInfoCollector:
             total_retrans=int(t // 25) * 3 + retrans,
             bytes_acked=int(t * 125000),
             bytes_received=int(t * 850000),
+            bytes_sent=int(t * 125000) + 2000,
             delivery_rate_bps=round(delivery_rate, 1),
             pacing_rate_bps=round(delivery_rate * 1.2, 1),
+            send_rate_bps=round(delivery_rate, 1),
             ca_state=ca_state,
             congestion_algo=algo,
             node=node,

@@ -18,6 +18,17 @@ export const canvasApi: CanvasApi = { fit: () => {} }
 export let hiddenProtos = new Set<string>()
 export const setHiddenProtos = (s: Set<string>) => { hiddenProtos = s }
 
+interface ActivePacket {
+  el: SVGElement
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  angle: number
+  t0: number
+  p: any
+}
+
 export function Canvas() {
   const project = useStore((s) => s.project)
   const selection = useStore((s) => s.selection)
@@ -39,7 +50,7 @@ export function Canvas() {
   const [simSpeed, setSimSpeed] = useState<number>(1)
   const simPausedRef = useRef(simPaused); simPausedRef.current = simPaused
   const simSpeedRef = useRef(simSpeed); simSpeedRef.current = simSpeed
-  const activePktsRef = useRef<{ el: SVGCircleElement; x1: number; y1: number; x2: number; y2: number; t0: number }[]>([])
+  const activePktsRef = useRef<ActivePacket[]>([])
 
   // ---- kabel geometriyasi (parallel kabellar ajratiladi) ----
   const geom = useMemo(() => {
@@ -60,9 +71,33 @@ export function Canvas() {
   }, [project.links, project.devices])
   const geomRef = useRef(geom); geomRef.current = geom
 
+  // Qadamma-qadam simulyatsiya oldinga yurishi (Step Forward)
+  const stepForward = useCallback(() => {
+    if (!simPausedRef.current) return
+    const now = performance.now()
+    const duration = 520 / (simSpeedRef.current || 1)
+    const stepAmount = duration * 0.15
+
+    const active = activePktsRef.current
+    for (let i = active.length - 1; i >= 0; i--) {
+      const a = active[i]
+      a.t0 -= stepAmount
+      const t = (now - a.t0) / duration
+      if (t >= 1) {
+        a.el.remove()
+        active.splice(i, 1)
+        continue
+      }
+      const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+      const cx = a.x1 + (a.x2 - a.x1) * e
+      const cy = a.y1 + (a.y2 - a.y1) * e
+      a.el.setAttribute('transform', `translate(${cx}, ${cy}) rotate(${a.angle})`)
+    }
+  }, [])
+
   // ---- paket animatsiyasi (React'dan tashqarida, rAF) ----
   useEffect(() => {
-    const active: { el: SVGCircleElement; x1: number; y1: number; x2: number; y2: number; t0: number }[] = []
+    const active: ActivePacket[] = []
     activePktsRef.current = active
     let lastNow = performance.now()
     let raf = 0
@@ -74,8 +109,9 @@ export function Canvas() {
           const t = (now - a.t0) / duration
           if (t >= 1) { a.el.remove(); active.splice(i, 1); continue }
           const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
-          a.el.setAttribute('cx', String(a.x1 + (a.x2 - a.x1) * e))
-          a.el.setAttribute('cy', String(a.y1 + (a.y2 - a.y1) * e))
+          const cx = a.x1 + (a.x2 - a.x1) * e
+          const cy = a.y1 + (a.y2 - a.y1) * e
+          a.el.setAttribute('transform', `translate(${cx}, ${cy}) rotate(${a.angle})`)
         }
       } else {
         const elapsed = now - lastNow
@@ -85,22 +121,88 @@ export function Canvas() {
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
+
     const off = on('ev:packet', (p: { link: string; dir: string; proto: string; dropped?: boolean; summary?: string }) => {
       if (!useStore.getState().status.running || document.hidden || active.length > 260 || hiddenProtos.has(p.proto)) return
       const g = geomRef.current[p.link]; const layer = pktRef.current
       if (!g || !layer) return
-      const fwd = p.dir !== 'ba', col = p.dropped ? '#ef4444' : (PROTO_COLORS[p.proto] || PROTO_COLORS.other)
-      const el = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-      el.setAttribute('r', p.dropped ? '6' : '4.5')
-      el.setAttribute('fill', col)
-      el.setAttribute('style', `filter: drop-shadow(0 0 5px ${col}); cursor: pointer; pointer-events: auto;`)
-      el.onclick = (e) => {
-        e.stopPropagation()
-        openWin('pdu', `pkt-${Date.now()}`, { arg: p, w: 760, h: 540 })
+      const fwd = p.dir !== 'ba'
+      const x1 = fwd ? g.x1 : g.x2, y1 = fwd ? g.y1 : g.y2
+      const x2 = fwd ? g.x2 : g.x1, y2 = fwd ? g.y2 : g.y1
+      const angle = Math.atan2(y2 - y1, x2 - x1) * (180 / Math.PI)
+      const col = p.dropped ? '#ef4444' : (PROTO_COLORS[p.proto] || PROTO_COLORS.other)
+
+      if (p.dropped) {
+        // Paket yo'qotilishi (Packet Drop Badge) animatsiyasi
+        const mx = (x1 + x2) / 2, my = (y1 + y2) / 2
+        createDropBadge(layer, mx, my, p)
+        return
       }
-      layer.appendChild(el)
-      active.push({ el, x1: fwd ? g.x1 : g.x2, y1: fwd ? g.y1 : g.y2, x2: fwd ? g.x2 : g.x1, y2: fwd ? g.y2 : g.y1, t0: performance.now() })
+
+      // Cisco Packet Tracer uslubidagi paket konverti (Envelope)
+      const gEl = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+      gEl.setAttribute('class', 'packet-envelope')
+      gEl.setAttribute('style', 'cursor: pointer; pointer-events: auto;')
+
+      // Konvert asosiy tanasi
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+      rect.setAttribute('x', '-12')
+      rect.setAttribute('y', '-8')
+      rect.setAttribute('width', '24')
+      rect.setAttribute('height', '16')
+      rect.setAttribute('rx', '2.5')
+      rect.setAttribute('fill', col)
+      rect.setAttribute('stroke', '#ffffff')
+      rect.setAttribute('stroke-width', '0.9')
+      rect.setAttribute('stroke-opacity', '0.75')
+      rect.setAttribute('style', `filter: drop-shadow(0 2px 5px ${col});`)
+      gEl.appendChild(rect)
+
+      // Konvert ustki qopqog'i (Flap chizig'i)
+      const flap = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      flap.setAttribute('d', 'M-11,-7 L0,1 L11,-7')
+      flap.setAttribute('fill', 'none')
+      flap.setAttribute('stroke', '#ffffff')
+      flap.setAttribute('stroke-width', '1')
+      flap.setAttribute('stroke-opacity', '0.85')
+      gEl.appendChild(flap)
+
+      // Pastki burchak chiziqlari
+      const fold = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      fold.setAttribute('d', 'M-11,7 L-3,1 M11,7 L3,1')
+      fold.setAttribute('fill', 'none')
+      fold.setAttribute('stroke', '#ffffff')
+      fold.setAttribute('stroke-width', '0.75')
+      fold.setAttribute('stroke-opacity', '0.4')
+      gEl.appendChild(fold)
+
+      // Protokol yorlig'i
+      const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+      txt.setAttribute('x', '0')
+      txt.setAttribute('y', '5')
+      txt.setAttribute('text-anchor', 'middle')
+      txt.setAttribute('fill', '#ffffff')
+      txt.setAttribute('font-size', '6.5')
+      txt.setAttribute('font-weight', 'bold')
+      txt.setAttribute('font-family', 'monospace')
+      txt.setAttribute('style', 'pointer-events: none; user-select: none;')
+      txt.textContent = (p.proto || 'PKT').slice(0, 4)
+      gEl.appendChild(txt)
+
+      const titleEl = document.createElementNS('http://www.w3.org/2000/svg', 'title')
+      titleEl.textContent = `${p.proto}: ${p.summary || `${p.proto} Packet`} (PDU Inspektori uchun bosing)`
+      gEl.appendChild(titleEl)
+
+      gEl.onclick = (e) => {
+        e.stopPropagation()
+        openWin('pdu', `pkt-${Date.now()}`, { arg: p, w: 820, h: 580 })
+      }
+
+      gEl.setAttribute('transform', `translate(${x1}, ${y1}) rotate(${angle})`)
+      layer.appendChild(gEl)
+      active.push({ el: gEl, x1, y1, x2, y2, angle, t0: performance.now(), p })
     })
+
     return () => { cancelAnimationFrame(raf); off() }
   }, [])
 
@@ -299,8 +401,20 @@ export function Canvas() {
         <span>{scale.label}</span>
       </div>
 
-      {/* Cisco / OPNET Simulation Controller: Play / Pause / Step / Speed */}
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-lg border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur">
+      {/* Cisco Simulation Controller: Play / Pause / Step / Speed */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-lg border bg-card/90 px-3 py-1.5 shadow-xl backdrop-blur select-none">
+        <div className="flex items-center gap-1.5 mr-1">
+          <span
+            className={cn(
+              "inline-block h-2 w-2 rounded-full",
+              simPaused ? "bg-amber-400" : "bg-emerald-400 animate-pulse"
+            )}
+          />
+          <span className="text-[10.5px] font-medium text-muted-foreground hidden sm:inline">
+            {simPaused ? "Pauzada" : "Simulyatsiya"}
+          </span>
+        </div>
+
         <Button
           variant="ghost"
           size="icon"
@@ -308,20 +422,20 @@ export function Canvas() {
           onClick={() => setSimPaused(!simPaused)}
           title={simPaused ? "Davom ettirish (Play)" : "To'xtatish (Pause)"}
         >
-          {simPaused ? <Play className="h-4 w-4 text-primary fill-primary" /> : <Pause className="h-4 w-4" />}
+          {simPaused ? <Play className="h-4 w-4 text-emerald-400 fill-emerald-400" /> : <Pause className="h-4 w-4" />}
         </Button>
+
         <Button
           variant="ghost"
           size="icon"
           className="h-7 w-7"
           disabled={!simPaused}
-          onClick={() => {
-            for (const a of activePktsRef.current) a.t0 -= 100
-          }}
-          title="Qadamma-qadam (Step Forward)"
+          onClick={stepForward}
+          title="Qadamma-qadam oldinga (Step Forward)"
         >
           <SkipForward className="h-4 w-4" />
         </Button>
+
         <div className="mx-1 h-4 w-px bg-border" />
         <span className="text-[11px] font-medium text-muted-foreground">Tezlik:</span>
         {[0.5, 1, 2].map((sp) => (
@@ -345,4 +459,98 @@ export function Canvas() {
       </div>
     </div>
   )
+}
+
+function createDropBadge(layer: SVGElement, x: number, y: number, p: any) {
+  const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
+  g.setAttribute('class', 'packet-drop-badge')
+  g.setAttribute('transform', `translate(${x}, ${y})`)
+  g.setAttribute('style', 'cursor: pointer; pointer-events: auto;')
+
+  // Qizil to'lqin halqasi (Ripple ring animation)
+  const ripple = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+  ripple.setAttribute('r', '8')
+  ripple.setAttribute('fill', 'none')
+  ripple.setAttribute('stroke', '#ef4444')
+  ripple.setAttribute('stroke-width', '2')
+
+  const animR = document.createElementNS('http://www.w3.org/2000/svg', 'animate')
+  animR.setAttribute('attributeName', 'r')
+  animR.setAttribute('values', '6;24')
+  animR.setAttribute('dur', '1.2s')
+  animR.setAttribute('repeatCount', 'indefinite')
+  ripple.appendChild(animR)
+
+  const animOp = document.createElementNS('http://www.w3.org/2000/svg', 'animate')
+  animOp.setAttribute('attributeName', 'opacity')
+  animOp.setAttribute('values', '1;0')
+  animOp.setAttribute('dur', '1.2s')
+  animOp.setAttribute('repeatCount', 'indefinite')
+  ripple.appendChild(animOp)
+  g.appendChild(ripple)
+
+  // Asosiy qizil nishon doirasi
+  const badge = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+  badge.setAttribute('r', '9')
+  badge.setAttribute('fill', '#ef4444')
+  badge.setAttribute('stroke', '#ffffff')
+  badge.setAttribute('stroke-width', '1.5')
+  badge.setAttribute('style', 'filter: drop-shadow(0 0 6px #ef4444);')
+  g.appendChild(badge)
+
+  // Oq '✕' belgisi
+  const cross = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+  cross.setAttribute('x', '0')
+  cross.setAttribute('y', '3.5')
+  cross.setAttribute('text-anchor', 'middle')
+  cross.setAttribute('fill', '#ffffff')
+  cross.setAttribute('font-size', '10')
+  cross.setAttribute('font-weight', 'bold')
+  cross.setAttribute('font-family', 'sans-serif')
+  cross.setAttribute('style', 'pointer-events: none; user-select: none;')
+  cross.textContent = '✕'
+  g.appendChild(cross)
+
+  // DROP yorliq plakati
+  const pill = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+  pill.setAttribute('x', '-22')
+  pill.setAttribute('y', '-22')
+  pill.setAttribute('width', '44')
+  pill.setAttribute('height', '14')
+  pill.setAttribute('rx', '3')
+  pill.setAttribute('fill', '#dc2626')
+  pill.setAttribute('stroke', '#ffffff')
+  pill.setAttribute('stroke-width', '0.8')
+  g.appendChild(pill)
+
+  const pillText = document.createElementNS('http://www.w3.org/2000/svg', 'text')
+  pillText.setAttribute('x', '0')
+  pillText.setAttribute('y', '-12')
+  pillText.setAttribute('text-anchor', 'middle')
+  pillText.setAttribute('fill', '#ffffff')
+  pillText.setAttribute('font-size', '8')
+  pillText.setAttribute('font-weight', 'bold')
+  pillText.setAttribute('font-family', 'monospace')
+  pillText.setAttribute('style', 'pointer-events: none; user-select: none;')
+  pillText.textContent = '✕ DROP'
+  g.appendChild(pillText)
+
+  // Tooltip
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'title')
+  title.textContent = `Paket Yo'qotildi (Drop): ${p.proto} · Queue Overflow / Bufferbloat (PDU Inspektori uchun bosing)`
+  g.appendChild(title)
+
+  g.onclick = (e) => {
+    e.stopPropagation()
+    openWin('pdu', `pkt-drop-${Date.now()}`, { arg: { ...p, dropped: true }, w: 820, h: 580 })
+  }
+
+  layer.appendChild(g)
+
+  // 2.2 soniyadan so'ng asta-sekin yo'qolish
+  setTimeout(() => {
+    g.style.transition = 'opacity 0.4s'
+    g.style.opacity = '0'
+    setTimeout(() => g.remove(), 400)
+  }, 2200)
 }

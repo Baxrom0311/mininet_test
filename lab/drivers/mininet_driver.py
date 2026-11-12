@@ -1368,6 +1368,9 @@ exit 0
         etc, run = self._frr_dirs(name)
         os.makedirs(etc, exist_ok=True)
         os.makedirs(run, exist_ok=True)
+        # Linux kernel IP forwarding ni yoqish
+        node.cmd("sysctl -qw net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 "
+                 "net.ipv4.conf.all.rp_filter=0 net.ipv4.conf.default.rp_filter=0 2>/dev/null")
         daemons = ["zebra", "staticd"] + [x for x in cfg.get("daemons", []) if x in FRR_DAEMONS]
         if os.path.exists(os.path.join(FRR_BIN, "mgmtd")):
             # FRR 10+: ripd/staticd/... sozlamalari mgmtd orqali o'tadi — usiz vtysh
@@ -1379,7 +1382,13 @@ exit 0
             with open(os.path.join(etc, f"{dm}.conf"), "w") as f:
                 f.write(f"hostname {name}\n")
         with open(os.path.join(etc, "vtysh.conf"), "w") as f:
-            f.write("! NetLab\n")
+            f.write("service integrated-vtysh-config\n! NetLab\n")
+        try:
+            with open(os.path.join(etc, "daemons"), "w") as f:
+                for dm_name in ("zebra", "bgpd", "ospfd", "ospf6d", "ripd", "ripngd", "isisd", "pimd", "ldpd", "bfdd", "staticd"):
+                    f.write(f"{dm_name}={'yes' if dm_name in daemons else 'no'}\n")
+        except OSError:
+            pass
         try:
             for p in (etc, run, *[os.path.join(etc, f) for f in os.listdir(etc)]):
                 shutil.chown(p, "frr", "frr")
@@ -1407,6 +1416,17 @@ exit 0
             out = node.cmd(f"vtysh -N {name} -f {path} 2>&1")
             if "error" in out.lower() or "unknown command" in out.lower():
                 self.bus.log("warn", f"startup-config: {out.strip()[-500:]}", name)
+        if "ospfd" in daemons:
+            from lab.ospf import frr_config as ospf_frr_config
+            ospf_conf = ospf_frr_config(self.project, name)
+            if ospf_conf and ("router ospf" not in startup or cfg.get("ospf")):
+                path = os.path.join(etc, "ospf-netlab.conf")
+                with open(path, "w") as f:
+                    f.write(ospf_conf)
+                time.sleep(0.3)
+                out = node.cmd(f"vtysh -N {name} -f {path} 2>&1")
+                if "error" in out.lower() or "unknown command" in out.lower():
+                    self.bus.log("warn", f"ospf config: {out.strip()[-400:]}", name)
         if "ripd" in daemons and cfg.get("rip_timers"):
             tm = rip_timers(d)
             time.sleep(0.3)
@@ -1440,6 +1460,16 @@ exit 0
                 self.bus.log("warn", f"pim config: {out.strip()[-300:]}", name)
         if cfg.get("vrrp"):
             self._vrrp_apply(name, d)
+
+        # Integrated frr.conf generatsiya qilish
+        from network_build import generate_frr_conf
+        frr_full = generate_frr_conf(name, {**cfg, "daemons": daemons})
+        try:
+            with open(os.path.join(etc, "frr.conf"), "w") as f:
+                f.write(frr_full)
+        except OSError:
+            pass
+
         self.bus.log("ok", f"FRR ishga tushdi: {', '.join(daemons)}", name)
 
     def _vrrp_apply(self, name, d):
@@ -1478,6 +1508,40 @@ exit 0
             while lines and (not lines[0].strip() or lines[0].startswith(("Building", "Current configuration"))):
                 lines.pop(0)
             return "\n".join(lines).strip()
+
+    def get_fib_routes(self, name):
+        """Node'ning Linux kernel FIB marshrutlar jadvalini qaytaradi."""
+        with self.lock:
+            self._require_running()
+            node = self.net.get(name)
+            from network_build import get_linux_fib_routes
+            return get_linux_fib_routes(node)
+
+    def verify_fib_route(self, name, prefix, expected_via=None, expected_dev=None, expected_proto=None):
+        """Linux kernel FIB da marshrut mavjudligini tekshiradi."""
+        with self.lock:
+            self._require_running()
+            node = self.net.get(name)
+            from network_build import verify_fib_route
+            return verify_fib_route(node, prefix, expected_via=expected_via,
+                                    expected_dev=expected_dev, expected_proto=expected_proto)
+
+    def get_frr_neighbors(self, name, proto="ospf"):
+        """Router'ning dinamik marshrutlash qo'shnilari holatini qaytaradi."""
+        with self.lock:
+            self._require_running()
+            node = self.net.get(name)
+            from network_build import get_frr_neighbors
+            return get_frr_neighbors(node, proto=proto)
+
+    def wait_for_convergence(self, routers=None, proto="ospf", timeout=45.0, interval=0.5):
+        """Routerlar marshrutlash konvergensiyasini kutadi."""
+        from network_build import wait_for_frr_convergence
+        if routers is None:
+            routers = [n for n, d in self.project.get("devices", {}).items() if d.get("type") == "router"]
+        nodes = [self.net.get(r) for r in routers]
+        return wait_for_frr_convergence(nodes, proto=proto, timeout=timeout, interval=interval)
+
 
     # ─────────────────────────── SDN kontrollerlar ───────────────────────────
     def _write_ctrl_configs(self):

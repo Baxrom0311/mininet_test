@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import {
+  AlertTriangle,
   Binary,
   Check,
+  CheckCircle2,
   Copy,
   Layers,
   Network,
@@ -18,7 +20,7 @@ import { type Win } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import { WindowFrame } from './WindowFrame'
 
-interface LayerData {
+export interface LayerData {
   name?: string
   port?: string
   media?: string
@@ -42,9 +44,12 @@ interface LayerData {
   window?: number | null
   app?: string
   summary?: string
+  session_id?: string
+  encoding?: string
+  encryption?: string
 }
 
-interface PDUInspectionResponse {
+export interface PDUInspectionResponse {
   device: string
   device_type: string
   timestamp: number
@@ -54,12 +59,16 @@ interface PDUInspectionResponse {
   out_layers: Record<string, LayerData>
   device_logs: string[]
   hex_dump: string
+  out_hex_dump?: string
 }
 
 export function PDUInspectorWindow({ win }: { win: Win }) {
   const [tab, setTab] = useState<'osi' | 'details' | 'hex'>('osi')
   const [osiDirection, setOsiDirection] = useState<'in' | 'out' | 'both'>('in')
   const [selectedLayer, setSelectedLayer] = useState<string>('l3')
+  const [activeStepIdx, setActiveStepIdx] = useState<number | null>(null)
+  const [pduDetailsMode, setPduDetailsMode] = useState<'out' | 'in'>('out')
+  const [hexMode, setHexMode] = useState<'in' | 'out'>('in')
   const [data, setData] = useState<PDUInspectionResponse | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -67,6 +76,7 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
   const proto = (pkt.proto || 'TCP').toUpperCase()
   const summary = pkt.summary || `${proto} Packet`
   const link = pkt.link || 'eth0'
+  const isDropped = Boolean(pkt.dropped)
 
   // Backend orqali real PDU dekonstruksiyasi va Cisco Processing Logini olish
   useEffect(() => {
@@ -89,43 +99,185 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
     }
   }, [pkt])
 
-  // Fallback / default data agar backend hali yuklanmagan bo'lsa
-  const inLayers: Record<string, LayerData> = data?.in_layers || {
-    l1: { name: 'Layer 1: Physical (Jismoniy)', port: `${link} (Rx)`, media: 'Ethernet 100Base-TX / Full-Duplex', status: 'UP' },
-    l2: { name: 'Layer 2: Data Link (Kanal)', src_mac: '00:11:22:33:44:55', dst_mac: '00:aa:bb:cc:dd:ee', ethertype: proto === 'ARP' ? '0x0806 (ARP)' : '0x0800 (IPv4)' },
-    l3: { name: 'Layer 3: Network (Tarmoq)', src_ip: '10.0.1.10', dst_ip: '10.0.2.20', ttl: 64, protocol: proto, checksum: '0x4a2b (Valid)', total_len: 60 },
-    l4: { name: 'Layer 4: Transport', proto, src_port: 45678, dst_port: 80, seq: 1000, ack: 501, flags: ['ACK', 'PSH'], window: 64240 },
-    l7: { name: 'Layer 7: Application (Ilova)', app: proto, summary },
+  // Kiruvchi 7-qatlamli OSI modeli
+  const inLayers: Record<string, LayerData> = {
+    l1: {
+      name: 'Layer 1: Physical (Jismoniy)',
+      port: `${link} (Inbound Rx)`,
+      media: 'Ethernet 100Base-TX / Full-Duplex',
+      status: 'UP / Line Protocol Active',
+      ...(data?.in_layers?.l1 || {}),
+    },
+    l2: {
+      name: 'Layer 2: Data Link (Kanal)',
+      src_mac: data?.in_layers?.l2?.src_mac || '00:11:22:33:44:55',
+      dst_mac: data?.in_layers?.l2?.dst_mac || '00:aa:bb:cc:dd:ee',
+      ethertype: proto === 'ARP' ? '0x0806 (ARP)' : '0x0800 (IPv4)',
+      status: 'Frame Check Sequence (FCS) Valid',
+      ...(data?.in_layers?.l2 || {}),
+    },
+    l3: {
+      name: 'Layer 3: Network (Tarmoq)',
+      src_ip: data?.in_layers?.l3?.src_ip || '10.0.1.10',
+      dst_ip: data?.in_layers?.l3?.dst_ip || '10.0.2.20',
+      ttl: data?.in_layers?.l3?.ttl ?? 64,
+      protocol: `${proto} (Proto ${proto === 'TCP' ? 6 : proto === 'UDP' ? 17 : 1})`,
+      checksum: '0x4a2b (Valid)',
+      total_len: 60,
+      ...(data?.in_layers?.l3 || {}),
+    },
+    l4: {
+      name: 'Layer 4: Transport',
+      proto,
+      src_port: data?.in_layers?.l4?.src_port ?? 45678,
+      dst_port: data?.in_layers?.l4?.dst_port ?? (proto === 'TCP' ? 80 : 53),
+      seq: proto === 'TCP' ? data?.in_layers?.l4?.seq ?? 1000 : null,
+      ack: proto === 'TCP' ? data?.in_layers?.l4?.ack ?? 501 : null,
+      flags: proto === 'TCP' ? data?.in_layers?.l4?.flags ?? ['ACK', 'PSH'] : [],
+      window: proto === 'TCP' ? data?.in_layers?.l4?.window ?? 64240 : null,
+      ...(data?.in_layers?.l4 || {}),
+    },
+    l5: {
+      name: 'Layer 5: Session (Sessiya)',
+      session_id: 'TCP Socket (ESTABLISHED)',
+      status: 'Aktiv dupleks sessiya',
+      ...(data?.in_layers?.l5 || {}),
+    },
+    l6: {
+      name: 'Layer 6: Presentation (Taqdimot)',
+      encoding: 'ASCII / Binary Stream',
+      encryption: 'Plaintext (Unencrypted)',
+      ...(data?.in_layers?.l6 || {}),
+    },
+    l7: {
+      name: 'Layer 7: Application (Ilova)',
+      app: proto === 'TCP' ? 'HTTP/1.1' : proto,
+      summary,
+      ...(data?.in_layers?.l7 || {}),
+    },
   }
 
-  const outLayers: Record<string, LayerData> = data?.out_layers || {
-    l1: { name: 'Layer 1: Physical (Chiquvchi)', port: 'eth1 (Tx)', media: 'Ethernet 100Base-TX / Full-Duplex', status: 'Transmitting' },
-    l2: { name: 'Layer 2: Data Link (Kanal)', src_mac: '00:1c:73:00:00:01', dst_mac: '00:50:56:c0:00:08', ethertype: proto === 'ARP' ? '0x0806 (ARP)' : '0x0800 (IPv4)' },
-    l3: { name: 'Layer 3: Network (Tarmoq)', src_ip: '10.0.1.10', dst_ip: '10.0.2.20', ttl: 63, protocol: proto, checksum: '0x5b3c (Recalculated)', total_len: 60 },
-    l4: { name: 'Layer 4: Transport', proto, src_port: 45678, dst_port: 80, seq: 1000, ack: 501, flags: ['ACK', 'PSH'], window: 64240 },
-    l7: { name: 'Layer 7: Application (Ilova)', app: proto, summary },
+  // Chiquvchi 7-qatlamli OSI modeli (Router orqali qayta inkapsulyatsiya qilingan)
+  const outLayers: Record<string, LayerData> = {
+    l1: {
+      name: 'Layer 1: Physical (Chiquvchi)',
+      port: 'eth1 (Outbound Tx)',
+      media: 'Ethernet 100Base-TX / Full-Duplex',
+      status: 'Transmitting / Port Queue Ready',
+      ...(data?.out_layers?.l1 || {}),
+    },
+    l2: {
+      name: 'Layer 2: Data Link (Chiquvchi Freym)',
+      src_mac: '00:1c:73:00:00:01 (Router R1 eth1)',
+      dst_mac: '00:50:56:c0:00:08 (Next-Hop Host MAC)',
+      ethertype: proto === 'ARP' ? '0x0806 (ARP)' : '0x0800 (IPv4)',
+      status: 'Frame Check Sequence (FCS) Recalculated',
+      ...(data?.out_layers?.l2 || {}),
+    },
+    l3: {
+      name: 'Layer 3: Network (Tarmoq)',
+      src_ip: inLayers.l3.src_ip,
+      dst_ip: inLayers.l3.dst_ip,
+      ttl: Math.max(1, (inLayers.l3.ttl || 64) - 1),
+      protocol: inLayers.l3.protocol,
+      checksum: '0x5b3c (Recalculated)',
+      total_len: inLayers.l3.total_len || 60,
+      ...(data?.out_layers?.l3 || {}),
+    },
+    l4: {
+      name: 'Layer 4: Transport',
+      ...inLayers.l4,
+      ...(data?.out_layers?.l4 || {}),
+    },
+    l5: {
+      name: 'Layer 5: Session (Sessiya)',
+      ...inLayers.l5,
+      ...(data?.out_layers?.l5 || {}),
+    },
+    l6: {
+      name: 'Layer 6: Presentation (Taqdimot)',
+      ...inLayers.l6,
+      ...(data?.out_layers?.l6 || {}),
+    },
+    l7: {
+      name: 'Layer 7: Application (Ilova)',
+      ...inLayers.l7,
+      ...(data?.out_layers?.l7 || {}),
+    },
   }
 
-  const deviceLogs = data?.device_logs || [
-    `1. Freym '${link}' portiga to'liq yetib keldi.`,
-    `2. Layer 2: Freym sarlavhasi o'qildi. Maqsad MAC qurilma MAC manziliga mos keldi va qabul qilindi.`,
-    `3. Layer 3: ${proto} paketi ochildi. TTL=64 > 1, IP nazorat yig'indisi to'g'ri.`,
-    `4. Marshrutlash (FIB lookup): Maqsad IP uchun marshrutlar jadvalidan mos Next-Hop aniqlandi (Interfeys: eth1).`,
-    `5. TTL dekrementi: TTL qiymati 64 dan 63 ga tushirildi, IP checksum qayta hisoblandi.`,
-    `6. ARP jadvali: Next-Hop IP uchun yangi maqsad MAC manzili aniqlandi.`,
-    `7. Layer 2: Yangi sarlavha (yangi Src/Dst MAC) bilan qayta inkapsulyatsiya qilindi.`,
-    `8. Chiqish: Freym chiquvchi 'eth1' porti navbatiga qo'yildi.`,
+  // Cisco uslubidagi Device Processing Log (FIB lookup, TTL decrement, Checksum recalc, ARP next-hop resolution)
+  const deviceProcessingSteps = [
+    {
+      title: '1. Port qabuli (Physical Ingress)',
+      badge: 'INGRESS',
+      layer: 'l1',
+      desc: `Freym '${link}' interfeysiga to'liq yetib keldi. Jismoniy signal va liniya kodi (100Base-TX) normal.`,
+    },
+    {
+      title: '2. Layer 2 Freym tekshiruvi & FCS',
+      badge: 'L2 FCS OK',
+      layer: 'l2',
+      desc: `Freym nazorat yig'indisi (FCS) to'g'ri. Maqsad MAC (${inLayers.l2.dst_mac}) qurilma interfeysi MAC manziliga mos keldi va qabul qilindi.`,
+    },
+    {
+      title: '3. Layer 3 Sarlavha tekshiruvi',
+      badge: 'L3 VERIFY',
+      layer: 'l3',
+      desc: `IPv4 sarlavhasi tekshirildi. Version=4, IHL=20B, IP nazorat yig'indisi (${inLayers.l3.checksum}) to'g'ri. Kiruvchi TTL=${inLayers.l3.ttl} > 1.`,
+    },
+    {
+      title: '4. Marshrutlash va FIB lookup (Routing Table)',
+      badge: 'FIB MATCH',
+      layer: 'l3',
+      desc: `FIB (Forwarding Information Base) jadvalidan maqsad IP (${inLayers.l3.dst_ip}) uchun Longest Prefix Match (LPM) qidirildi. Next-Hop IP: 10.0.2.1, chiqish interfeysi: 'eth1'.`,
+    },
+    {
+      title: '5. TTL dekrementi va Checksum qayta hisoblash',
+      badge: 'TTL -1',
+      layer: 'l3',
+      desc: `RFC 791 qoidasiga ko'ra TTL qiymati ${inLayers.l3.ttl} dan ${outLayers.l3.ttl} ga tushirildi. RFC 1624 inkremental formulasi orqali IP checksum ${inLayers.l3.checksum} dan ${outLayers.l3.checksum} ga yangilandi.`,
+    },
+    {
+      title: '6. ARP Next-Hop MAC aniqlash (ARP Resolution)',
+      badge: 'ARP RESOLVED',
+      layer: 'l2',
+      desc: `Next-Hop IP (10.0.2.1) uchun ARP jadvali (ARP Cache) tekshirildi. Maqsad uskuna MAC manzili aniqlandi: '${outLayers.l2.dst_mac}'.`,
+    },
+    {
+      title: '7. Layer 2 Qayta inkapsulyatsiya (Encapsulation)',
+      badge: 'L2 ENCAP',
+      layer: 'l2',
+      desc: `Yangi Ethernet II freym sarlavhasi qurildi: Src MAC='${outLayers.l2.src_mac}', Dst MAC='${outLayers.l2.dst_mac}', EtherType=0x0800. FCS qayta hisoblandi.`,
+    },
+    {
+      title: '8. Chiqish navbati (Egress Queuing)',
+      badge: 'EGRESS',
+      layer: 'l1',
+      desc: `Yangi freym chiquvchi 'eth1' portining Tx FIFO navbatiga qo'yildi va uzatishga tayyorlandi.`,
+    },
   ]
 
-  const hexDump = data?.hex_dump || `0000   00 aa bb cc dd ee 00 11  22 33 44 55 08 00 45 00   |..........3DU..E.|
-0010   00 3c 00 65 40 00 40 06  3d 41 0a 00 01 0a 0a 00   |.<.e@.@.=A......|
+  const hexIn =
+    data?.hex_dump ||
+    `0000   00 aa bb cc dd ee 00 11  22 33 44 55 08 00 45 00   |..........3DU..E.|
+0010   00 3c 00 65 40 00 40 06  4a 2b 0a 00 01 0a 0a 00   |.<.e@.@.J+......|
 0020   02 14 b2 6e 00 50 00 00  03 e8 00 00 01 f5 50 18   |...n.P........P.|
 0030   fa f0 00 00 00 00 4e 45  54 4c 41 42 5f 4c 34       |......NETLAB_L4|`
 
+  const hexOut =
+    data?.out_hex_dump ||
+    `0000   00 50 56 c0 00 08 00 1c  73 00 00 01 08 00 45 00   |.PV.....s.....E.|
+0010   00 3c 00 65 40 00 3f 06  5b 3c 0a 00 01 0a 0a 00   |.<.e@.?.[\<......|
+0020   02 14 b2 6e 00 50 00 00  03 e8 00 00 01 f5 50 18   |...n.P........P.|
+0030   fa f0 00 00 00 00 4e 45  54 4c 41 42 5f 4c 34       |......NETLAB_L4|`
+
+  const currentHex = hexMode === 'out' ? hexOut : hexIn
+
   const copyHex = () => {
-    navigator.clipboard.writeText(hexDump)
+    navigator.clipboard.writeText(currentHex)
     setCopied(true)
-    toast("Hex dump nusxalandi", 'ok')
+    toast('Hex dump nusxalandi', 'ok')
     setTimeout(() => setCopied(false), 2000)
   }
 
@@ -134,25 +286,34 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
       win={win}
       icon={<Layers className="text-primary" />}
       title="Cisco / OPNET PDU Inspektori"
-      sub={`OSI 1–7 Qatlamlar Tahlili · ${proto} · ${clock(pkt.ts || Date.now() / 1000)}`}
+      sub={`OSI 1–7 Qatlamlar Taqqoslashi · ${proto} · ${clock(pkt.ts || Date.now() / 1000)}`}
     >
       <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background/50">
         {/* Yuqori boshqaruv paneli */}
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-card/40 px-3 py-2">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-card/40 px-3 py-2 shadow-sm">
           <Segmented
             value={tab}
             onChange={setTab}
             items={[
-              { value: 'osi', label: 'OSI Modeli (1-7)' },
-              { value: 'details', label: 'PDU Sarlavhalari' },
-              { value: 'hex', label: 'Hex / ASCII Dump' },
+              { value: 'osi', label: '7-Qatlamli OSI Modeli' },
+              { value: 'details', label: 'PDU Sarlavhalari (Headers)' },
+              { value: 'hex', label: 'Wireshark Hex / ASCII' },
             ]}
           />
 
           <div className="flex items-center gap-2">
+            {isDropped ? (
+              <Badge variant="destructive" className="font-mono text-xs animate-pulse">
+                <AlertTriangle className="mr-1 h-3 w-3" /> DROPPED
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 text-xs">
+                <CheckCircle2 className="mr-1 h-3 w-3" /> FORWARDED
+              </Badge>
+            )}
             <Badge
               variant="outline"
-              className="font-mono text-xs"
+              className="font-mono text-xs font-bold"
               style={{ color: PROTO_COLORS[proto] || PROTO_COLORS.other }}
             >
               {proto}
@@ -163,13 +324,14 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
 
         {/* Asosiy kontent */}
         <div className="min-h-0 flex-1 overflow-auto p-3.5">
+          {/* TAB 1: 7-LAYER OSI MODEL COMPARISON */}
           {tab === 'osi' && (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
               {/* Chap taraf (7 ustun): OSI 1-7 In vs Out Qatlamlari */}
               <div className="flex flex-col gap-3 lg:col-span-7">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase">
-                    <Network className="h-4 w-4" /> Qatlamlar Dekonstruktsiyasi
+                    <Network className="h-4 w-4 text-primary" /> OSI 1–7 Qatlamlar Dekonstruktsiyasi
                   </div>
                   <Segmented
                     value={osiDirection}
@@ -177,12 +339,12 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
                     items={[
                       { value: 'in', label: 'In Layers (Kiruvchi)' },
                       { value: 'out', label: 'Out Layers (Chiquvchi)' },
-                      { value: 'both', label: 'Taqqoslash' },
+                      { value: 'both', label: 'Ikkalasini Taqqoslash' },
                     ]}
                   />
                 </div>
 
-                <div className="space-y-2.5">
+                <div className="space-y-2">
                   {/* Layer 7: Application */}
                   <LayerCard
                     layerKey="l7"
@@ -194,6 +356,32 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
                     mode={osiDirection}
                     selected={selectedLayer === 'l7'}
                     onSelect={() => setSelectedLayer('l7')}
+                  />
+
+                  {/* Layer 6: Presentation */}
+                  <LayerCard
+                    layerKey="l6"
+                    number={6}
+                    name="Presentation (Taqdimot)"
+                    color="border-l-indigo-500 text-indigo-400"
+                    inData={inLayers.l6}
+                    outData={outLayers.l6}
+                    mode={osiDirection}
+                    selected={selectedLayer === 'l6'}
+                    onSelect={() => setSelectedLayer('l6')}
+                  />
+
+                  {/* Layer 5: Session */}
+                  <LayerCard
+                    layerKey="l5"
+                    number={5}
+                    name="Session (Sessiya)"
+                    color="border-l-cyan-500 text-cyan-400"
+                    inData={inLayers.l5}
+                    outData={outLayers.l5}
+                    mode={osiDirection}
+                    selected={selectedLayer === 'l5'}
+                    onSelect={() => setSelectedLayer('l5')}
                   />
 
                   {/* Layer 4: Transport */}
@@ -250,95 +438,301 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
                 </div>
               </div>
 
-              {/* O'ng taraf (5 ustun): Cisco uslubidagi Device Processing Log */}
+              {/* O'ng taraf (5 ustun): Cisco uslubidagi Step-by-Step Device Processing Log */}
               <div className="flex flex-col gap-2.5 lg:col-span-5">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase">
-                  <ShieldCheck className="h-4 w-4" /> Qurilma Harakatlari Jurnali (Device Processing Log)
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase">
+                    <ShieldCheck className="h-4 w-4 text-primary" /> Qurilma Harakatlari Jurnali (Device Processing Log)
+                  </div>
+                  <span className="text-[11px] text-muted-foreground font-mono">
+                    {deviceProcessingSteps.length} ta qadam
+                  </span>
                 </div>
 
-                <div className="flex-1 rounded-lg border bg-card/40 p-3 font-mono text-xs leading-relaxed">
-                  <div className="space-y-2">
-                    {deviceLogs.map((log, idx) => (
+                <div className="flex-1 space-y-2 overflow-auto rounded-lg border bg-card/40 p-2.5 font-mono text-xs">
+                  {deviceProcessingSteps.map((step, idx) => {
+                    const isActive = activeStepIdx === idx
+                    return (
                       <div
                         key={idx}
-                        className="rounded border border-border/30 bg-card/60 p-2 text-foreground/90 transition-colors hover:border-primary/40"
+                        onClick={() => {
+                          setActiveStepIdx(isActive ? null : idx)
+                          setSelectedLayer(step.layer)
+                        }}
+                        className={cn(
+                          'cursor-pointer rounded border p-2 text-foreground/90 transition-all',
+                          isActive
+                            ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/40'
+                            : 'border-border/40 bg-card/60 hover:border-primary/40 hover:bg-card/90'
+                        )}
                       >
-                        {log}
+                        <div className="flex items-center justify-between font-bold text-[11px]">
+                          <span className="text-foreground">{step.title}</span>
+                          <span className="rounded bg-primary/20 px-1 py-0.5 text-[9.5px] text-primary">
+                            {step.badge}
+                          </span>
+                        </div>
+                        <div className="mt-1 font-sans text-[11px] leading-relaxed text-muted-foreground">
+                          {step.desc}
+                        </div>
                       </div>
-                    ))}
-                  </div>
+                    )
+                  })}
                 </div>
               </div>
             </div>
           )}
 
+          {/* TAB 2: OUTBOUND PDU DETAILS HEADER BREAKDOWN */}
           {tab === 'details' && (
             <div className="space-y-3 font-mono text-xs">
-              {/* Ethernet II */}
-              <Card className="bg-card/40">
+              {/* Inbound vs Outbound Tanlash */}
+              <div className="flex items-center justify-between border-b pb-2">
+                <div className="flex items-center gap-2">
+                  <Segmented
+                    value={pduDetailsMode}
+                    onChange={setPduDetailsMode}
+                    items={[
+                      { value: 'out', label: 'Outbound PDU Details (Chiquvchi Freym)' },
+                      { value: 'in', label: 'Inbound PDU Details (Kiruvchi Freym)' },
+                    ]}
+                  />
+                  {pduDetailsMode === 'out' && (
+                    <Badge variant="outline" className="border-sky-500/30 text-sky-400 text-[11px]">
+                      Router R1 tomonidan modifikatsiya qilingan
+                    </Badge>
+                  )}
+                </div>
+                <span className="text-[11px] text-muted-foreground">
+                  Interfeys: <b>{pduDetailsMode === 'out' ? 'eth1 (Tx)' : `${link} (Rx)`}</b>
+                </span>
+              </div>
+
+              {/* Layer 2: Ethernet II */}
+              <Card className="bg-card/40 border-l-4 border-l-amber-500">
                 <CardContent className="p-3">
-                  <div className="mb-2 font-bold text-sm text-foreground border-b pb-1 font-sans">
-                    Ethernet II Freym Maydonlari (Layer 2)
+                  <div className="mb-2 flex items-center justify-between border-b pb-1">
+                    <span className="font-bold text-sm text-foreground font-sans">
+                      Ethernet II Freym Maydonlari (Layer 2)
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      Uzunlik: 14 bayt sarlavha + 4 bayt FCS
+                    </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-y-1 text-muted-foreground">
-                    <div>Destination MAC: <b className="text-foreground">{inLayers.l2?.dst_mac}</b></div>
-                    <div>Source MAC: <b className="text-foreground">{inLayers.l2?.src_mac}</b></div>
-                    <div>EtherType: <b className="text-foreground">{inLayers.l2?.ethertype}</b></div>
-                    <div>FCS / CRC: <span className="text-emerald-400">0x00000000 (To'g'ri)</span></div>
+                  <div className="grid grid-cols-1 gap-y-1 sm:grid-cols-2 text-muted-foreground">
+                    <div>
+                      Destination MAC:{' '}
+                      <b className={cn('text-foreground', pduDetailsMode === 'out' && 'text-amber-400')}>
+                        {pduDetailsMode === 'out' ? outLayers.l2.dst_mac : inLayers.l2.dst_mac}
+                      </b>
+                      {pduDetailsMode === 'out' && (
+                        <span className="ml-1 text-[10px] text-emerald-400 font-bold">[Next-Hop ARP]</span>
+                      )}
+                    </div>
+                    <div>
+                      Source MAC:{' '}
+                      <b className={cn('text-foreground', pduDetailsMode === 'out' && 'text-sky-400')}>
+                        {pduDetailsMode === 'out' ? outLayers.l2.src_mac : inLayers.l2.src_mac}
+                      </b>
+                      {pduDetailsMode === 'out' && (
+                        <span className="ml-1 text-[10px] text-sky-400 font-bold">[R1 eth1]</span>
+                      )}
+                    </div>
+                    <div>
+                      EtherType: <b className="text-foreground">{inLayers.l2.ethertype}</b>
+                    </div>
+                    <div>
+                      FCS / CRC:{' '}
+                      <span className="text-emerald-400 font-bold">
+                        {pduDetailsMode === 'out' ? '0x3a1f9c02 (Recalculated)' : '0x4e29b10a (Valid)'}
+                      </span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* IPv4 */}
-              <Card className="bg-card/40">
+              {/* Layer 3: IPv4 Packet Header */}
+              <Card className="bg-card/40 border-l-4 border-l-emerald-500">
                 <CardContent className="p-3">
-                  <div className="mb-2 font-bold text-sm text-foreground border-b pb-1 font-sans">
-                    IPv4 Sarlavhasi (Layer 3)
+                  <div className="mb-2 flex items-center justify-between border-b pb-1">
+                    <span className="font-bold text-sm text-foreground font-sans">
+                      IPv4 Sarlavhasi (Layer 3 Header Breakdown)
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">Uzunlik: 20 bayt</span>
                   </div>
-                  <div className="grid grid-cols-2 gap-y-1 text-muted-foreground">
-                    <div>Source IP: <b className="text-foreground">{inLayers.l3?.src_ip}</b></div>
-                    <div>Destination IP: <b className="text-foreground">{inLayers.l3?.dst_ip}</b></div>
-                    <div>TTL (Time to Live): <b className="text-foreground">{inLayers.l3?.ttl}</b></div>
-                    <div>Protocol: <b className="text-foreground">{inLayers.l3?.protocol}</b></div>
-                    <div>Header Checksum: <span className="text-emerald-400">{inLayers.l3?.checksum}</span></div>
-                    <div>Total Length: <span className="text-foreground">{inLayers.l3?.total_len || 60} bayt</span></div>
+                  <div className="grid grid-cols-2 gap-y-1.5 sm:grid-cols-4 text-muted-foreground">
+                    <div>
+                      Version: <b className="text-foreground">4</b>
+                    </div>
+                    <div>
+                      Header Length (IHL): <b className="text-foreground">20 bayt (5)</b>
+                    </div>
+                    <div>
+                      Type of Service (DSCP): <b className="text-foreground">0x00 (CS0)</b>
+                    </div>
+                    <div>
+                      Total Length: <b className="text-foreground">{inLayers.l3.total_len || 60} bayt</b>
+                    </div>
+
+                    <div>
+                      Identification: <b className="text-foreground">0x0065 (101)</b>
+                    </div>
+                    <div>
+                      Flags: <b className="text-sky-400">0x40 (Don't Fragment)</b>
+                    </div>
+                    <div>
+                      Time to Live (TTL):{' '}
+                      <b
+                        className={cn(
+                          'text-foreground',
+                          pduDetailsMode === 'out' && 'text-rose-400 font-bold'
+                        )}
+                      >
+                        {pduDetailsMode === 'out' ? outLayers.l3.ttl : inLayers.l3.ttl}
+                      </b>
+                      {pduDetailsMode === 'out' && (
+                        <span className="ml-1 text-[10px] text-rose-400">[-1 decrement]</span>
+                      )}
+                    </div>
+                    <div>
+                      Protocol: <b className="text-foreground">{inLayers.l3.protocol}</b>
+                    </div>
+
+                    <div className="col-span-2">
+                      Source IP:{' '}
+                      <b className="text-foreground font-bold">{inLayers.l3.src_ip}</b>
+                    </div>
+                    <div className="col-span-2">
+                      Destination IP:{' '}
+                      <b className="text-foreground font-bold">{inLayers.l3.dst_ip}</b>
+                    </div>
+
+                    <div className="col-span-2">
+                      Header Checksum:{' '}
+                      <span className="text-emerald-400 font-bold">
+                        {pduDetailsMode === 'out' ? outLayers.l3.checksum : inLayers.l3.checksum}
+                      </span>
+                      {pduDetailsMode === 'out' && (
+                        <span className="ml-1 text-[10px] text-sky-400 font-normal">
+                          (RFC 1624 qayta hisoblangan)
+                        </span>
+                      )}
+                    </div>
+                    <div className="col-span-2">
+                      FIB Routing Status:{' '}
+                      <span className="text-emerald-400 font-bold">
+                        LPM Match (Next-Hop: 10.0.2.1)
+                      </span>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* L4 TCP/UDP */}
-              <Card className="bg-card/40">
+              {/* Layer 4: TCP / UDP Transport Segment */}
+              <Card className="bg-card/40 border-l-4 border-l-blue-500">
                 <CardContent className="p-3">
-                  <div className="mb-2 font-bold text-sm text-foreground border-b pb-1 font-sans">
-                    {proto} Transport Segmenti (Layer 4)
+                  <div className="mb-2 flex items-center justify-between border-b pb-1">
+                    <span className="font-bold text-sm text-foreground font-sans">
+                      {proto} Transport Segmenti (Layer 4 Header)
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {proto === 'TCP' ? 'Uzunlik: 20-32 bayt' : 'Uzunlik: 8 bayt'}
+                    </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-y-1 text-muted-foreground">
-                    <div>Source Port: <b className="text-foreground">{inLayers.l4?.src_port}</b></div>
-                    <div>Destination Port: <b className="text-foreground">{inLayers.l4?.dst_port}</b></div>
-                    {inLayers.l4?.seq != null && <div>Sequence Number: <span className="text-foreground">{inLayers.l4.seq}</span></div>}
-                    {inLayers.l4?.ack != null && <div>Acknowledgment Number: <span className="text-foreground">{inLayers.l4.ack}</span></div>}
-                    {inLayers.l4?.window != null && <div>Window Size: <span className="text-foreground">{inLayers.l4.window}</span></div>}
-                    {inLayers.l4?.flags && <div>Flags: <span className="text-sky-400 font-bold">[{inLayers.l4.flags.join(', ')}]</span></div>}
+                  <div className="grid grid-cols-2 gap-y-1 sm:grid-cols-3 text-muted-foreground">
+                    <div>
+                      Source Port: <b className="text-foreground">{inLayers.l4.src_port}</b>
+                    </div>
+                    <div>
+                      Destination Port: <b className="text-foreground">{inLayers.l4.dst_port}</b>
+                    </div>
+                    {inLayers.l4.seq != null && (
+                      <div>
+                        Sequence Number: <span className="text-foreground">{inLayers.l4.seq}</span>
+                      </div>
+                    )}
+                    {inLayers.l4.ack != null && (
+                      <div>
+                        Acknowledgment Number: <span className="text-foreground">{inLayers.l4.ack}</span>
+                      </div>
+                    )}
+                    {inLayers.l4.window != null && (
+                      <div>
+                        Window Size: <span className="text-foreground">{inLayers.l4.window} bayt</span>
+                      </div>
+                    )}
+                    {inLayers.l4.flags && inLayers.l4.flags.length > 0 && (
+                      <div>
+                        Flags:{' '}
+                        <span className="text-sky-400 font-bold">
+                          [{inLayers.l4.flags.join(', ')}]
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Layer 7: Application / Payload */}
+              <Card className="bg-card/40 border-l-4 border-l-purple-500">
+                <CardContent className="p-3">
+                  <div className="mb-1 font-bold text-sm text-foreground border-b pb-1 font-sans">
+                    Ilova Qatlami Ma'lumoti (Layer 7 Payload)
+                  </div>
+                  <div className="text-muted-foreground">
+                    <div>Xulosa: <b className="text-foreground">{summary}</b></div>
+                    <div className="mt-1 text-[11px]">Hajm: ~16 bayt (NETLAB_L4 simulyatsiya ma'lumoti)</div>
                   </div>
                 </CardContent>
               </Card>
             </div>
           )}
 
+          {/* TAB 3: WIRESHARK HEX / ASCII DUMP */}
           {tab === 'hex' && (
-            <div className="rounded-lg border bg-card/40 p-3 font-mono text-xs">
-              <div className="mb-2 flex items-center justify-between border-b pb-1">
-                <div className="flex items-center gap-2 font-bold text-sm text-foreground font-sans">
-                  <Binary className="h-4 w-4" /> Wireshark Hex & ASCII Dekoder
+            <div className="space-y-2.5 font-mono text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+                <div className="flex items-center gap-2">
+                  <Binary className="h-4 w-4 text-primary" />
+                  <span className="font-bold text-sm text-foreground font-sans">
+                    Wireshark Hex & ASCII Dekoder
+                  </span>
+                  <Segmented
+                    value={hexMode}
+                    onChange={setHexMode}
+                    items={[
+                      { value: 'in', label: 'Kiruvchi Freym (Inbound)' },
+                      { value: 'out', label: 'Chiquvchi Freym (Outbound)' },
+                    ]}
+                  />
                 </div>
                 <Button size="xs" variant="outline" onClick={copyHex}>
-                  {copied ? <Check className="mr-1 h-3 w-3 text-success" /> : <Copy className="mr-1 h-3 w-3" />}
-                  {copied ? 'Nusxalandi' : 'Nusxa olish'}
+                  {copied ? <Check className="mr-1 h-3 w-3 text-emerald-400" /> : <Copy className="mr-1 h-3 w-3" />}
+                  {copied ? 'Nusxalandi' : 'Hex Dump Nusxalash'}
                 </Button>
               </div>
-              <pre className="overflow-x-auto leading-relaxed text-muted-foreground font-mono text-[11.5px]">
-                {hexDump}
-              </pre>
+
+              {/* Qatlamlar rangi bo'yicha yo'riqnoma */}
+              <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+                <span className="flex items-center gap-1">
+                  <i className="h-2.5 w-2.5 rounded-sm bg-amber-500" /> Layer 2: Ethernet (0–13 B)
+                </span>
+                <span className="flex items-center gap-1">
+                  <i className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Layer 3: IPv4 Header (14–33 B)
+                </span>
+                <span className="flex items-center gap-1">
+                  <i className="h-2.5 w-2.5 rounded-sm bg-blue-500" /> Layer 4: TCP/UDP (34–53 B)
+                </span>
+                <span className="flex items-center gap-1">
+                  <i className="h-2.5 w-2.5 rounded-sm bg-purple-500" /> Layer 7: Payload (54+ B)
+                </span>
+              </div>
+
+              <div className="rounded-lg border bg-card/60 p-3 shadow-inner">
+                <pre className="overflow-x-auto leading-relaxed text-foreground font-mono text-[12px] tracking-wide">
+                  {currentHex}
+                </pre>
+              </div>
             </div>
           )}
         </div>
@@ -378,7 +772,7 @@ function LayerCard({
       className={cn(
         'cursor-pointer rounded-lg border bg-card/70 p-2.5 transition-all border-l-4 hover:bg-accent/40',
         color,
-        selected && 'ring-1 ring-primary/50 bg-card'
+        selected && 'ring-1 ring-primary/50 bg-card shadow-sm'
       )}
     >
       <div className="flex items-center justify-between font-bold text-xs">
@@ -389,12 +783,12 @@ function LayerCard({
       <div className="mt-1 font-mono text-[11.5px] text-muted-foreground">
         {isBoth ? (
           <div className="grid grid-cols-2 gap-2 text-[10.5px]">
-            <div className="border-r pr-1">
-              <div className="text-[10px] font-bold text-foreground">In:</div>
+            <div className="border-r border-border/40 pr-1.5">
+              <div className="text-[10px] font-bold text-foreground">Kiruvchi (In):</div>
               {renderLayerSummary(layerKey, inData)}
             </div>
             <div>
-              <div className="text-[10px] font-bold text-foreground">Out:</div>
+              <div className="text-[10px] font-bold text-foreground">Chiquvchi (Out):</div>
               {renderLayerSummary(layerKey, outData)}
             </div>
           </div>
@@ -427,10 +821,16 @@ function renderLayerSummary(key: string, d?: LayerData) {
     return (
       <div className="flex flex-wrap gap-x-2">
         <span>Port: <b>{d.src_port} → {d.dst_port}</b></span>
-        {d.flags && <span>Flags: <b>[{d.flags.join(',')}]</b></span>}
+        {d.flags && d.flags.length > 0 && <span>Flags: <b>[{d.flags.join(',')}]</b></span>}
         {d.seq != null && <span>Seq: {d.seq}</span>}
       </div>
     )
   }
-  return <span>{d.summary || d.app || 'Payload'}</span>
+  if (key === 'l5') {
+    return <span>{d.session_id || 'TCP Socket (ESTABLISHED)'} · {d.status || 'Active'}</span>
+  }
+  if (key === 'l6') {
+    return <span>{d.encoding || 'ASCII / Binary'} · {d.encryption || 'Plaintext'}</span>
+  }
+  return <span>{d.summary || d.app || 'Payload Data'}</span>
 }

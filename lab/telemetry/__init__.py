@@ -2,12 +2,14 @@
 - TCPInfoCollector: struct tcp_info (CWND, SSTHRESH, RTT, Goodput)
 - EBPFTracker: Kernel drop and retransmission tracker
 - DPIDissector: High-speed OSI 1-7 packet dissector & UDP RFC 3550 Jitter
+- QueueTracker: Linux tc qdisc/class queue telemetry & bufferbloat tracker
 - TelemetryManager: Unified orchestrator and time-series history
 """
 
 from lab.telemetry.dpi_dissector import DPIDissector, UDPJitterTracker, hex_dump_format, calculate_rfc3550_jitter
 from lab.telemetry.ebpf_tracker import EBPFTracker, EBPFEvent
 from lab.telemetry.manager import StreamHistory, TelemetryManager, telemetry_manager
+from lab.telemetry.queue_tracker import BufferbloatAssessment, QueueStats, QueueTracker
 from lab.telemetry.tcp_info_collector import TCPInfoCollector, TCPInfoSample
 
 __all__ = [
@@ -18,6 +20,9 @@ __all__ = [
     "DPIDissector",
     "UDPJitterTracker",
     "calculate_rfc3550_jitter",
+    "QueueTracker",
+    "QueueStats",
+    "BufferbloatAssessment",
     "TelemetryManager",
     "telemetry_manager",
     "StreamHistory",

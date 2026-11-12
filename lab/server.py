@@ -14,6 +14,7 @@ import json
 import os
 import re
 import secrets
+from typing import Any, Dict, List, Optional
 
 from fastapi import Body, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -593,8 +594,11 @@ def create_app(driver_name="demo", token=None):
     @app.get("/api/telemetry/stream/{stream_id:path}")
     @app.get("/api/telemetry/l4/streams/{stream_id:path}")
     def telemetry_stream_detail(stream_id: str):
+        from urllib.parse import unquote
         from lab.telemetry import telemetry_manager
         detail = telemetry_manager.get_stream_detail(stream_id)
+        if not detail and ("%" in stream_id or "+" in stream_id):
+            detail = telemetry_manager.get_stream_detail(unquote(stream_id))
         if not detail:
             raise HTTPException(404, f"Oqim '{stream_id}' topilmadi")
         return detail
@@ -609,25 +613,90 @@ def create_app(driver_name="demo", token=None):
     @app.get("/api/telemetry/l4/drops")
     def telemetry_drops(limit: int = 50):
         from lab.telemetry import telemetry_manager
-        return {"drops": telemetry_manager.get_recent_drops(limit=limit)}
+        safe_limit = max(1, min(int(limit), 1000))
+        return {"drops": telemetry_manager.get_recent_drops(limit=safe_limit)}
+
+    @app.get("/api/telemetry/queues")
+    @app.get("/api/telemetry/l4/queues")
+    def telemetry_queues(dev: Optional[str] = None, bloat_only: bool = False):
+        from lab.telemetry import telemetry_manager
+        queues = telemetry_manager.get_queues(dev=dev)
+        if not queues and not getattr(telemetry_manager, "_running", False):
+            telemetry_manager.poll_once()
+            queues = telemetry_manager.get_queues(dev=dev)
+        if bloat_only:
+            queues = [q for q in queues if q.get("bufferbloat_detected")]
+        return {
+            "queues": queues,
+            "bufferbloat": telemetry_manager.get_bufferbloat_report(),
+            "summary": telemetry_manager.get_queue_summary(),
+        }
+
+    @app.get("/api/telemetry/bufferbloat")
+    @app.get("/api/telemetry/l4/bufferbloat")
+    def telemetry_bufferbloat():
+        from lab.telemetry import telemetry_manager
+        return telemetry_manager.get_bufferbloat_report()
+
+    @app.get("/api/telemetry/queue/{dev:path}")
+    @app.get("/api/telemetry/l4/queues/{dev:path}")
+    def telemetry_queue_detail(dev: str):
+        from lab.telemetry import telemetry_manager
+        queues = telemetry_manager.get_queues(dev=dev)
+        if not queues:
+            raise HTTPException(404, f"Interfeys '{dev}' navbat telemetriyasi topilmadi")
+        history = telemetry_manager.get_queue_history(dev=dev)
+        return {
+            "dev": dev,
+            "latest": queues,
+            "history": history,
+        }
+
+    @app.get("/api/dataplane/health")
+    @app.get("/api/net/dataplane/health")
+    def dataplane_health():
+        from lab.telemetry import telemetry_manager
+        drv_st = driver.status()
+        q_summary = telemetry_manager.get_queue_summary()
+        bloat = telemetry_manager.get_bufferbloat_report()
+        g_stats = telemetry_manager.get_global_stats()
+        return {
+            "status": "ok",
+            "healthy": True,
+            "driver": drv_st,
+            "queues": q_summary,
+            "bufferbloat": bloat.get("summary", {}),
+            "telemetry": g_stats,
+        }
 
     @app.post("/api/telemetry/dissect")
     @app.post("/api/telemetry/l4/dissect")
     def telemetry_dissect(body: dict):
         from lab.telemetry import telemetry_manager
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON body lug'at (dict) bo'lishi kerak")
         raw_hex = body.get("hex")
         raw_b64 = body.get("base64")
-        if raw_hex:
+        if raw_hex is not None:
+            clean_hex = str(raw_hex).strip()
+            if clean_hex.lower().startswith("0x"):
+                clean_hex = clean_hex[2:]
+            clean_hex = re.sub(r"\s+", "", clean_hex)
+            if not clean_hex:
+                raise HTTPException(400, "Bo'sh hex ma'lumot")
             try:
-                raw_bytes = bytes.fromhex(raw_hex.replace(" ", "").replace("\n", "").replace("0x", ""))
-            except ValueError:
-                raise HTTPException(400, "Noto'g'ri hex format")
-        elif raw_b64:
+                raw_bytes = bytes.fromhex(clean_hex)
+            except ValueError as e:
+                raise HTTPException(400, f"Noto'g'ri hex format: {e}")
+        elif raw_b64 is not None:
+            clean_b64 = str(raw_b64).strip()
+            if not clean_b64:
+                raise HTTPException(400, "Bo'sh base64 ma'lumot")
             import base64
             try:
-                raw_bytes = base64.b64decode(raw_b64)
-            except Exception:
-                raise HTTPException(400, "Noto'g'ri base64 format")
+                raw_bytes = base64.b64decode(clean_b64)
+            except Exception as e:
+                raise HTTPException(400, f"Noto'g'ri base64 format: {e}")
         else:
             raise HTTPException(400, "'hex' yoki 'base64' maydoni kerak")
         return telemetry_manager.dissect_raw(raw_bytes)
@@ -635,26 +704,47 @@ def create_app(driver_name="demo", token=None):
     @app.post("/api/pdu/inspect")
     def pdu_inspect(body: dict):
         from lab.telemetry import telemetry_manager
-        pkt = body.get("packet") or body
-        device = body.get("device", "Router")
-        dev_type = body.get("device_type", "router")
+        if not isinstance(body, dict):
+            body = {}
+        pkt = body.get("packet") if isinstance(body.get("packet"), dict) else body
+        device = str(body.get("device") or "Router")
+        dev_type = str(body.get("device_type") or "router")
         return telemetry_manager.inspect_pdu(pkt, device_name=device, device_type=dev_type)
 
     @app.post("/api/telemetry/simulate")
     def telemetry_simulate(body: dict):
         from lab.telemetry import telemetry_manager, TCPInfoCollector
-        src_ip = body.get("src_ip", "10.0.1.10")
-        src_port = int(body.get("src_port", 45678))
-        dst_ip = body.get("dst_ip", "10.0.2.20")
-        dst_port = int(body.get("dst_port", 80))
-        steps = int(body.get("steps", 10))
+        if not isinstance(body, dict):
+            body = {}
+        src_ip = str(body.get("src_ip") or "10.0.1.10")
+        try:
+            src_port = int(body.get("src_port") or 45678)
+        except (ValueError, TypeError):
+            src_port = 45678
+        dst_ip = str(body.get("dst_ip") or "10.0.2.20")
+        try:
+            dst_port = int(body.get("dst_port") or 80)
+        except (ValueError, TypeError):
+            dst_port = 80
+        try:
+            steps = max(1, min(int(body.get("steps") or 10), 200))
+        except (ValueError, TypeError):
+            steps = 10
         has_loss = bool(body.get("has_loss", False))
+        algo = str(body.get("algo") or "cubic")
+
         for step in range(steps):
+            is_loss = has_loss and (step == steps // 2 or (steps > 7 and step == 7))
             sample = TCPInfoCollector.simulate_sample(
-                src_ip, src_port, dst_ip, dst_port, step, has_loss=(has_loss and step == 7)
+                src_ip, src_port, dst_ip, dst_port, step, has_loss=is_loss, algo=algo
             )
             telemetry_manager.ingest_tcp_sample(sample)
-        return {"ok": True, "stream_id": f"{src_ip}:{src_port}->{dst_ip}:{dst_port}"}
+            if getattr(telemetry_manager, "queue_tracker", None):
+                try:
+                    telemetry_manager.queue_tracker.simulate_step(float(step))
+                except Exception:
+                    pass
+        return {"ok": True, "stream_id": f"{src_ip}:{src_port}->{dst_ip}:{dst_port}", "steps": steps}
 
     @app.websocket("/ws/telemetry")
     async def ws_telemetry(ws: WebSocket):
@@ -666,6 +756,10 @@ def create_app(driver_name="demo", token=None):
             return
         await ws.accept()
         from lab.telemetry import telemetry_manager
+        try:
+            telemetry_manager.bind_loop(asyncio.get_running_loop())
+        except Exception:
+            pass
         q = telemetry_manager.subscribe()
         await ws.send_json({"type": "init", "streams": telemetry_manager.get_active_streams()})
 

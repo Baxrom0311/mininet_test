@@ -155,3 +155,104 @@ def routes(net, source, known):
             seen.add((neighbor, area))
             queue.append((neighbor, area, first_via or neighbor_address.ip, first_if or ifname, hops + 1))
     return out
+
+
+def frr_config(project_or_dev, name=None):
+    """Router konfiguratsiyasidan FRR vtysh sintaksisidagi OSPF konfiguratsiyasi matnini yaratadi."""
+    if name is not None and isinstance(project_or_dev, dict) and "devices" in project_or_dev:
+        dev = (project_or_dev.get("devices") or {}).get(name)
+    else:
+        dev = project_or_dev
+        name = name or (dev.get("name") if isinstance(dev, dict) else "")
+    if not dev:
+        return ""
+    cfg = dev.get("config") or {}
+    ospf_cfg = cfg.get("ospf") or {}
+    ifs = cfg.get("interfaces") or {}
+    did = dev.get("id", 1)
+
+    rid = ospf_cfg.get("router_id")
+    if not rid:
+        did_int = int(did) if isinstance(did, (int, str)) and str(did).isdigit() else 1
+        rid = f"1.1.{did_int // 256}.{did_int % 256}"
+
+    lines = ["router ospf", f" ospf router-id {rid}"]
+
+    for r in ospf_cfg.get("redistribute") or []:
+        lines.append(f" redistribute {r}")
+
+    if ospf_cfg.get("passive_default"):
+        lines.append(" passive-interface default")
+    for pif in ospf_cfg.get("passive_interfaces") or []:
+        lines.append(f" passive-interface {pif}")
+
+    configured_nets = ospf_cfg.get("networks")
+    if configured_nets:
+        for net_entry in configured_nets:
+            if isinstance(net_entry, dict):
+                pfx = net_entry.get("network") or net_entry.get("prefix")
+                area = net_entry.get("area", 0)
+                lines.append(f" network {pfx} area {area}")
+            elif isinstance(net_entry, (list, tuple)) and len(net_entry) >= 2:
+                lines.append(f" network {net_entry[0]} area {net_entry[1]}")
+            elif isinstance(net_entry, str):
+                if "area" in net_entry:
+                    lines.append(f" network {net_entry}")
+                else:
+                    lines.append(f" network {net_entry} area 0")
+    else:
+        policy = parse(dev)
+        for ifn, ic in sorted(ifs.items()):
+            ip_str = (ic or {}).get("ip")
+            if not ip_str or ip_str.lower() == "dhcp":
+                continue
+            try:
+                iface_obj = ipaddress.ip_interface(ip_str)
+                if iface_obj.version == 4:
+                    area = policy.area(ifn, iface_obj)
+                    if area is not None:
+                        lines.append(f" network {iface_obj.network} area {area}")
+            except ValueError:
+                pass
+
+    lines.append("!")
+
+    for ifn, ic in sorted(ifs.items()):
+        ip_str = (ic or {}).get("ip")
+        if not ip_str or ip_str.lower() == "dhcp":
+            continue
+        try:
+            iface_obj = ipaddress.ip_interface(ip_str)
+            if iface_obj.version != 4:
+                continue
+        except ValueError:
+            continue
+
+        if_ospf = (ospf_cfg.get("interfaces") or {}).get(ifn) or {}
+        if_lines = [f"interface {ifn}"]
+
+        is_p2p = if_ospf.get("point_to_point") or iface_obj.network.prefixlen in (30, 31)
+        if if_ospf.get("network"):
+            if_lines.append(f" ip ospf network {if_ospf['network']}")
+        elif is_p2p:
+            if_lines.append(" ip ospf network point-to-point")
+
+        hello = if_ospf.get("hello_interval") or (1 if is_p2p else None)
+        dead = if_ospf.get("dead_interval") or (4 if is_p2p else None)
+        if hello:
+            if_lines.append(f" ip ospf hello-interval {hello}")
+        if dead:
+            if_lines.append(f" ip ospf dead-interval {dead}")
+        if if_ospf.get("cost"):
+            if_lines.append(f" ip ospf cost {if_ospf['cost']}")
+        if if_ospf.get("priority") is not None:
+            if_lines.append(f" ip ospf priority {if_ospf['priority']}")
+        if if_ospf.get("area") is not None:
+            if_lines.append(f" ip ospf area {if_ospf['area']}")
+
+        if len(if_lines) > 1:
+            if_lines.append("!")
+            lines += if_lines
+
+    return "\n".join(lines) + "\n"
+
