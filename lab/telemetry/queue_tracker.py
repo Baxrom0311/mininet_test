@@ -944,6 +944,42 @@ class QueueTracker:
         self.ingest_sample(sample)
         return sample
 
+    def simulate_cake_sample(
+        self,
+        dev: str = "r1-eth3",
+        node: str = "r1",
+        bandwidth_bps: float = 20_000_000.0,
+        unforced_drops: int = 4,
+        forced_drops: int = 0,
+        ecn_marks: int = 3,
+        av_delay_ms: float = 3.2,
+        timestamp: Optional[float] = None,
+    ) -> QueueStats:
+        """Kuzatuv paneli va testlar uchun CAKE (sch_cake) namunasini yaratadi."""
+        now = timestamp if timestamp is not None else time.time()
+        sample = self.simulate_sample(
+            dev=dev,
+            node=node,
+            kind="cake",
+            handle="8002:",
+            backlog_packets=2,
+            backlog_bytes=2920,
+            limit=1024,
+            limit_unit="p",
+            dropped=unforced_drops + forced_drops,
+            rate_bps=bandwidth_bps,
+            ldelay_ms=av_delay_ms,
+            ecn=True,
+            ecn_marks=ecn_marks,
+            early_drops=unforced_drops,
+            dropping=(unforced_drops > 0),
+            timestamp=now,
+        )
+        sample.extra_stats["cake_unforced_drops"] = unforced_drops
+        sample.extra_stats["cake_forced_drops"] = forced_drops
+        sample.extra_stats["av_delay_ms"] = av_delay_ms
+        return sample
+
     def simulate_step(self, elapsed: float = 0.0) -> List[QueueStats]:
         """Demo rejimida turli xil qdisc turlarining (FIFO, fq_codel, RED, TBF) dinamikasini yaratadi."""
         now = time.time()
