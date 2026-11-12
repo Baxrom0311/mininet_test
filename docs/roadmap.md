@@ -156,24 +156,26 @@ Hozirgi tizimdagi nazariy L2 cheklovini to'liq yengib o'tish:
 
 ---
 
-## 3. Bosqichma-bosqich Amaliy Reja (Detailed Action Plan)
+## 3. Bosqichma-bosqich Amaliy Reja va Holat (Detailed Action Plan & Status)
 
-| Bosqich | Modul | Asosiy Vazifalar | Tayyorlik Mezoni |
-|---|---|---|---|
-| **Faza 1** | **L4 Telemetriya Yadro Dvigateli** | • `lab/telemetry/tcp_info_collector.py` yaratish<br/>• `lab/telemetry/ebpf_tracker.py` integratsiyasi<br/>• `lab/telemetry/dpi_dissector.py` (Scapy/pcap streamer)<br/>• `/api/telemetry/l4/streams` va WebSocket oqimini ulash | Barcha faol TCP/UDP sessiyalarining CWND, RTT, retransmits, Jitter qiymatlari real vaqtda API ga keladi |
-| **Faza 2** | **L4 Observatory UI Paneli** | • React da `TransportObservatory.tsx` oynasi<br/>• Real-time CWND vs Time grafigi<br/>• RTT & Jitter taqsimoti grafigi<br/>• Retransmit va Loss hodisalari xaritasi | Foydalanuvchi UI orqali istalgan oqimning L4 holatini jonli kuzata oladi |
-| **Faza 3** | **PDU Inspektori (Cisco uslubida)** | • Backendda paketlarni ushlab OSI 1-7 tahlil qiluvchi servis<br/>• Frontendda `PDUInspectorModal.tsx`<br/>• In-Layers vs Out-Layers va Device Processing Log | Har qanday paket bosilganda OSI qatlamlari va marshrutlash mantig'i ko'rinadi |
-| **Faza 4** | **Step-by-Step Simulation Mode** | • Topologiya kanvasida paket animatsiyasi (Canvas/SVG)<br/>• Play / Pause / Step-by-Step boshqaruv paneli<br/>• Tushib qolgan paketlarning qizil animatsiyasi | Foydalanuvchi paketni har bir hop bo'ylab to'xtatib-to'xtatib harakatlantira oladi |
-| **Faza 5** | **Haqiqiy Data-Plane (FIB & FRR)** | • Root simulyatorni haqiqiy FRR bilan birlashtirish<br/>• Dinamik marshrut konvergentsiyasi o'lchovi<br/>• Navbatlar va bufferbloat telemetriyasi | Tarmoq simulyatsiyasida real OSPF/BGP paketlari harakatlanadi, L2-only cheklovi yo'qoladi |
-| **Faza 6** | **OPNET Workload & Analitika** | • HTTP/3, Adaptive Video, VoIP MOS dvigateli<br/>• A/B testlar taqqoslash doskasi<br/>• PDF / LaTeX avtomatik hisobot eksporti | To'liq OPNET/Cisco darajasidagi yakuniy platforma |
+| Bosqich | Modul | Asosiy Vazifalar | Tayyorlik Mezoni | Holat |
+|---|---|---|---|:---:|
+| **Faza 1** | **L4 Telemetriya Yadro Dvigateli** | • `lab/telemetry/tcp_info_collector.py` yaratish<br/>• `lab/telemetry/ebpf_tracker.py` integratsiyasi<br/>• `lab/telemetry/dpi_dissector.py` (Scapy/pcap streamer)<br/>• `/api/telemetry/l4/streams` va WebSocket oqimini ulash | Barcha faol TCP/UDP sessiyalarining CWND, RTT, retransmits, Jitter qiymatlari real vaqtda API ga keladi | ✅ **Yakunlandi** |
+| **Faza 2** | **L4 Observatory UI Paneli** | • React da `TransportObservatory.tsx` oynasi<br/>• Real-time CWND vs Time grafigi<br/>• RTT & Jitter taqsimoti grafigi<br/>• Retransmit va Loss hodisalari xaritasi | Foydalanuvchi UI orqali istalgan oqimning L4 holatini jonli kuzata oladi | ✅ **Yakunlandi** |
+| **Faza 3** | **PDU Inspektori (Cisco uslubida)** | • Backendda paketlarni ushlab OSI 1-7 tahlil qiluvchi servis<br/>• Frontendda `PDUInspectorModal.tsx`<br/>• In-Layers vs Out-Layers va Device Processing Log | Har qanday paket bosilganda OSI qatlamlari va marshrutlash mantig'i ko'rinadi | ✅ **Yakunlandi** |
+| **Faza 4** | **Step-by-Step Simulation Mode** | • Topologiya kanvasida paket animatsiyasi (Canvas/SVG)<br/>• Play / Pause / Step-by-Step boshqaruv paneli<br/>• Tushib qolgan paketlarning qizil animatsiyasi | Foydalanuvchi paketni har bir hop bo'ylab to'xtatib-to'xtatib harakatlantira oladi | ✅ **Yakunlandi** |
+| **Faza 5** | **Haqiqiy Data-Plane (FIB & FRR)** | • Root simulyatorni haqiqiy FRR bilan birlashtirish<br/>• Dinamik marshrut konvergentsiyasi o'lchovi<br/>• Navbatlar va bufferbloat telemetriyasi | Tarmoq simulyatsiyasida real OSPF/BGP paketlari harakatlanadi, L2-only cheklovi yo'qoladi | ✅ **Yakunlandi** |
+| **Faza 6** | **OPNET Workload & Analitika** | • HTTP/3, Adaptive Video, VoIP MOS dvigateli<br/>• A/B testlar taqqoslash doskasi<br/>• PDF / LaTeX avtomatik hisobot eksporti | To'liq OPNET/Cisco darajasidagi yakuniy platforma | ✅ **Yakunlandi** |
 
 ---
 
-## 4. Birinchi Qadam (Immediate Next Step)
+## 4. Xulosa va Erishilgan Natijalar
 
-Biz darhol **Faza 1 (L4 Telemetriya Yadro Dvigateli)** dan boshlaymiz:
-1. `lab/telemetry/` paketini yaratish.
-2. `tcp_info` soket yig'uvchisini yozish.
-3. Streaming DPI dissectorini yaratish.
-4. eBPF yoki yadro eventlarini qo'shish.
-5. FastAPI serveriga WebSocket oqimini ulash.
+Barcha 6 faza to'liq muvaffaqiyatli amalga oshirildi va ishlab chiqildi:
+1. **L4 Telemetriya Yadrosi**: Linux `tcp_info`, Netlink, eBPF drop/retransmit kuzatuvchisi va pure-Python DPI dissector to'liq integratsiya qilindi.
+2. **L4 Observatory UI**: CWND, RTT, Jitter, Delivery rate, soket buferlarini jonli vizualizatsiya qiluvchi reaktiv panel yaratildi.
+3. **Cisco-Grade PDU Inspector**: OSI 1–7 kiruvchi va chiquvchi qatlamlar taqqoslanishi, 8 bosqichli qurilma qayta ishlash logi (Device Processing Log), PDU sarlavhalari va Wireshark uslubidagi Hex/ASCII dump taqdim etildi.
+4. **Step-by-Step Simulation Controller**: Play/Pause, Step-Forward, 0.5x/1x/2x tezlik boshqaruvi, paket konvertlari va tushib qolish animatsiyalari qo'shildi.
+5. **Haqiqiy Data-Plane & Queues**: FRRouting (OSPF, BGP, IS-IS) orqali FIB integratsiyasi, apparat navbatlari (FIFO, RED, CoDel, Token Bucket) va bufferbloat kuzatuvi joriy etildi.
+6. **OPNET Workloads & Ilmiy LaTeX Hisobot**: DASH/HLS adaptiv video oqimi (ITU-T P.1203 QoE), HTTP/3 QUIC 0-RTT simpleksatsiyasi, SLA Muvofiqlik Dvigateli hamda IEEE/ACM talablariga mos LaTeX hisobot generatori ishlab chiqildi.
+
