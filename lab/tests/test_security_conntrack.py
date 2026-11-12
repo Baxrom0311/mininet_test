@@ -604,6 +604,7 @@ class SecurityServerEndpointsTests(unittest.TestCase):
         d1 = resp1.json()
         self.assertTrue(d1["ok"])
         self.assertEqual(d1["result"]["attack_type"], "syn_flood")
+        self.assertIn("time_series", d1["result"])
 
         # 2. UDP Reflection
         payload_udp = {
@@ -618,13 +619,41 @@ class SecurityServerEndpointsTests(unittest.TestCase):
         d2 = resp2.json()
         self.assertEqual(d2["result"]["attack_type"], "udp_reflection")
 
-        # 3. Noto'g'ri hujum turi
+        # 3. Slowloris HTTP
+        payload_slow = {
+            "attack_type": "slowloris",
+            "target_ip": "10.0.2.10",
+            "port": 80,
+            "connections": 100,
+            "server_max_connections": 150,
+        }
+        resp3 = self.client.post("/api/security/attack/simulate", json=payload_slow)
+        self.assertEqual(resp3.status_code, 200)
+        d3 = resp3.json()
+        self.assertEqual(d3["result"]["attack_type"], "slowloris")
+
+        # 4. ARP Spoofing
+        payload_arp = {
+            "attack_type": "arp_spoof",
+            "target_ip": "10.0.1.10",
+            "gateway_ip": "10.0.1.1",
+            "attacker_ip": "10.0.1.50",
+            "duration_s": 2.0,
+            "dai_enabled": True,
+        }
+        resp4 = self.client.post("/api/security/attack/simulate", json=payload_arp)
+        self.assertEqual(resp4.status_code, 200)
+        d4 = resp4.json()
+        self.assertEqual(d4["result"]["attack_type"], "arp_spoof")
+        self.assertTrue(d4["result"]["dai_alert_generated"])
+
+        # 5. Noto'g'ri hujum turi
         resp_err = self.client.post("/api/security/attack/simulate", json={"attack_type": "unknown_attack"})
         self.assertEqual(resp_err.status_code, 400)
 
     def test_get_alerts_endpoint(self):
         """GET /api/security/alerts endpointini tekshirish."""
-        resp = self.client.get("/api/security/alerts")
+        resp = self.client.get("/api/security/alerts?limit=10")
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertIn("alerts", data)
@@ -632,7 +661,7 @@ class SecurityServerEndpointsTests(unittest.TestCase):
 
     def test_post_firewall_rules_endpoint(self):
         """POST /api/security/firewall/rules endpointini tekshirish."""
-        # Stateful qoidani baholash (evaluate)
+        # A) Stateful qoidani baholash (evaluate)
         payload = {
             "action": "evaluate",
             "packet": {
@@ -654,6 +683,19 @@ class SecurityServerEndpointsTests(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertEqual(data["evaluation"]["action"], "accept")
         self.assertEqual(data["evaluation"]["fw_state"], "NEW")
+
+        # B) Qoidalarni tasdiqlash (validate)
+        rules_payload = {
+            "action": "validate",
+            "rules": [
+                {"chain": "forward", "action": "accept", "state": "established"},
+                {"chain": "forward", "action": "drop", "proto": "tcp", "dport": 23},
+            ],
+        }
+        resp_v = self.client.post("/api/security/firewall/rules", json=rules_payload)
+        self.assertEqual(resp_v.status_code, 200)
+        self.assertTrue(resp_v.json()["ok"])
+        self.assertEqual(resp_v.json()["rules_count"], 2)
 
 
 if __name__ == "__main__":
