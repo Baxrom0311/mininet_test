@@ -1,7 +1,7 @@
 /** Topologiya kanvasi (SVG): joylash, ko'chirish, kabel ulash, pan/zoom, paket animatsiyasi,
  *  kabel yuklamasi, Wi-Fi qamrovi va radio yorliqlari, ssenariy harakatlari, masshtab. */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Maximize2, Minus, Plus } from 'lucide-react'
+import { Maximize2, Minus, Pause, Play, Plus, SkipForward } from 'lucide-react'
 import { ICON_PATHS } from '@/components/DeviceIcon'
 import { Button } from '@/components/ui/button'
 import { on } from '@/lib/bus'
@@ -35,6 +35,11 @@ export function Canvas() {
   const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null)
   const drag = useRef<{ name?: string; dx?: number; dy?: number; pan?: { x: number; y: number; tx: number; ty: number }; moved?: boolean; before?: Project } | null>(null)
   const lastClick = useRef({ name: '', t: 0 })
+  const [simPaused, setSimPaused] = useState(false)
+  const [simSpeed, setSimSpeed] = useState<number>(1)
+  const simPausedRef = useRef(simPaused); simPausedRef.current = simPaused
+  const simSpeedRef = useRef(simSpeed); simSpeedRef.current = simSpeed
+  const activePktsRef = useRef<{ el: SVGCircleElement; x1: number; y1: number; x2: number; y2: number; t0: number }[]>([])
 
   // ---- kabel geometriyasi (parallel kabellar ajratiladi) ----
   const geom = useMemo(() => {
@@ -58,24 +63,41 @@ export function Canvas() {
   // ---- paket animatsiyasi (React'dan tashqarida, rAF) ----
   useEffect(() => {
     const active: { el: SVGCircleElement; x1: number; y1: number; x2: number; y2: number; t0: number }[] = []
+    activePktsRef.current = active
+    let lastNow = performance.now()
     let raf = 0
     const tick = (now: number) => {
-      for (let i = active.length - 1; i >= 0; i--) {
-        const a = active[i], t = (now - a.t0) / 520
-        if (t >= 1) { a.el.remove(); active.splice(i, 1); continue }
-        const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
-        a.el.setAttribute('cx', String(a.x1 + (a.x2 - a.x1) * e)); a.el.setAttribute('cy', String(a.y1 + (a.y2 - a.y1) * e))
+      if (!simPausedRef.current) {
+        for (let i = active.length - 1; i >= 0; i--) {
+          const a = active[i]
+          const duration = 520 / (simSpeedRef.current || 1)
+          const t = (now - a.t0) / duration
+          if (t >= 1) { a.el.remove(); active.splice(i, 1); continue }
+          const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2
+          a.el.setAttribute('cx', String(a.x1 + (a.x2 - a.x1) * e))
+          a.el.setAttribute('cy', String(a.y1 + (a.y2 - a.y1) * e))
+        }
+      } else {
+        const elapsed = now - lastNow
+        for (const a of active) a.t0 += elapsed
       }
+      lastNow = now
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
-    const off = on('ev:packet', (p: { link: string; dir: string; proto: string }) => {
+    const off = on('ev:packet', (p: { link: string; dir: string; proto: string; dropped?: boolean; summary?: string }) => {
       if (!useStore.getState().status.running || document.hidden || active.length > 260 || hiddenProtos.has(p.proto)) return
       const g = geomRef.current[p.link]; const layer = pktRef.current
       if (!g || !layer) return
-      const fwd = p.dir !== 'ba', col = PROTO_COLORS[p.proto] || PROTO_COLORS.other
+      const fwd = p.dir !== 'ba', col = p.dropped ? '#ef4444' : (PROTO_COLORS[p.proto] || PROTO_COLORS.other)
       const el = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-      el.setAttribute('r', '4.5'); el.setAttribute('fill', col); el.setAttribute('style', `filter: drop-shadow(0 0 4px ${col})`)
+      el.setAttribute('r', p.dropped ? '6' : '4.5')
+      el.setAttribute('fill', col)
+      el.setAttribute('style', `filter: drop-shadow(0 0 5px ${col}); cursor: pointer; pointer-events: auto;`)
+      el.onclick = (e) => {
+        e.stopPropagation()
+        openWin('pdu', `pkt-${Date.now()}`, { arg: p, w: 760, h: 540 })
+      }
       layer.appendChild(el)
       active.push({ el, x1: fwd ? g.x1 : g.x2, y1: fwd ? g.y1 : g.y2, x2: fwd ? g.x2 : g.x1, y2: fwd ? g.y2 : g.y1, t0: performance.now() })
     })
@@ -276,6 +298,46 @@ export function Canvas() {
         <i className="block h-1.5 border border-t-0 border-muted-foreground" style={{ width: scale.px }} />
         <span>{scale.label}</span>
       </div>
+
+      {/* Cisco / OPNET Simulation Controller: Play / Pause / Step / Speed */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-lg border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={() => setSimPaused(!simPaused)}
+          title={simPaused ? "Davom ettirish (Play)" : "To'xtatish (Pause)"}
+        >
+          {simPaused ? <Play className="h-4 w-4 text-primary fill-primary" /> : <Pause className="h-4 w-4" />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          disabled={!simPaused}
+          onClick={() => {
+            for (const a of activePktsRef.current) a.t0 -= 100
+          }}
+          title="Qadamma-qadam (Step Forward)"
+        >
+          <SkipForward className="h-4 w-4" />
+        </Button>
+        <div className="mx-1 h-4 w-px bg-border" />
+        <span className="text-[11px] font-medium text-muted-foreground">Tezlik:</span>
+        {[0.5, 1, 2].map((sp) => (
+          <button
+            key={sp}
+            onClick={() => setSimSpeed(sp)}
+            className={cn(
+              "rounded px-1.5 py-0.5 text-[11px] font-mono transition-colors",
+              simSpeed === sp ? "bg-primary text-primary-foreground font-bold" : "text-muted-foreground hover:bg-muted"
+            )}
+          >
+            {sp}x
+          </button>
+        ))}
+      </div>
+
       <div className="absolute bottom-3 right-3 flex gap-1.5">
         <Button variant="outline" size="icon" className="glass" onClick={() => zoomAt(1.2)} title="Kattalashtirish"><Plus /></Button>
         <Button variant="outline" size="icon" className="glass" onClick={() => zoomAt(1 / 1.2)} title="Kichiklashtirish"><Minus /></Button>

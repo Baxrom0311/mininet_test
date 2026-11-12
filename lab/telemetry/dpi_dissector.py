@@ -251,3 +251,165 @@ class DPIDissector:
             "flags": dp.flags,
             "payload_len": dp.payload_len,
         }
+
+    def build_cisco_pdu_inspection(
+        self,
+        packet_info: Dict[str, Any],
+        device_name: str = "Router",
+        device_type: str = "router",
+    ) -> Dict[str, Any]:
+        """Cisco Packet Tracer va OPNET uslubidagi 7-qatlamli In-Layers vs Out-Layers
+        hamda Device Processing Log tahlilini yaratadi."""
+        proto = str(packet_info.get("proto") or "TCP").upper()
+        summary = str(packet_info.get("summary") or f"{proto} Packet")
+        link = str(packet_info.get("link") or "eth0")
+        ts = float(packet_info.get("ts") or time.time())
+
+        # Agar raw_hex bo'lsa, undan dekonstruksiya qilish
+        raw_hex = packet_info.get("raw_hex")
+        if raw_hex:
+            try:
+                raw_bytes = bytes.fromhex(raw_hex.replace(" ", "").replace("\n", "").replace("0x", ""))
+                dissected = self.dissect_frame(raw_bytes, capture_time=ts)
+                l2 = dissected["layers"].get("l2_ethernet") or {}
+                l3 = dissected["layers"].get("l3") or {}
+                l4 = dissected["layers"].get("l4") or {}
+                hex_dump = dissected.get("hex_dump", "")
+            except Exception:
+                l2, l3, l4, hex_dump = {}, {}, {}, ""
+        else:
+            l2, l3, l4, hex_dump = {}, {}, {}, ""
+
+        # Default IP va portlar
+        src_ip = l3.get("src_ip") or packet_info.get("src_ip") or "10.0.1.10"
+        dst_ip = l3.get("dst_ip") or packet_info.get("dst_ip") or "10.0.2.20"
+        src_port = l4.get("src_port") or packet_info.get("src_port") or 45678
+        dst_port = l4.get("dst_port") or packet_info.get("dst_port") or 80
+        src_mac = l2.get("src_mac") or packet_info.get("src_mac") or "00:11:22:33:44:55"
+        dst_mac = l2.get("dst_mac") or packet_info.get("dst_mac") or "00:aa:bb:cc:dd:ee"
+        ttl = l3.get("ttl", 64)
+
+        if not hex_dump:
+            # Namoyish uchun hexdump generatsiya qilish
+            mock_bytes = (
+                bytes.fromhex("00aabbccddee0011223344550800")
+                + struct.pack("!BBHHHBBH4s4s", 0x45, 0, 60, 101, 0x4000, ttl, 6 if proto == "TCP" else 17, 0x3d41,
+                              socket.inet_aton(src_ip), socket.inet_aton(dst_ip))
+                + (struct.pack("!HHIIBBHHH", src_port, dst_port, 1000, 500, 5 << 4, 0x18, 64240, 0, 0)
+                   if proto == "TCP" else struct.pack("!HHHH", src_port, dst_port, 16, 0) + b"NETLAB_L4")
+            )
+            hex_dump = hex_dump_format(mock_bytes)
+
+        # In-Layers
+        in_layers = {
+            "l1": {
+                "name": "Layer 1: Physical (Jismoniy)",
+                "port": f"{link} (Inbound Rx)",
+                "media": "Ethernet 100Base-TX / Full-Duplex",
+                "status": "UP / Line Protocol Active",
+            },
+            "l2": {
+                "name": "Layer 2: Data Link (Kanal)",
+                "src_mac": src_mac,
+                "dst_mac": dst_mac,
+                "ethertype": "0x0800 (IPv4)" if proto != "ARP" else "0x0806 (ARP)",
+                "vlan": packet_info.get("vlan"),
+                "status": "Frame Check Sequence (FCS) Valid",
+            },
+            "l3": {
+                "name": "Layer 3: Network (Tarmoq)",
+                "src_ip": src_ip,
+                "dst_ip": dst_ip,
+                "ttl": ttl,
+                "protocol": f"{proto} (Proto {6 if proto == 'TCP' else 17 if proto == 'UDP' else 1})",
+                "checksum": "0x4a2b (Valid)",
+                "total_len": 60,
+            },
+            "l4": {
+                "name": "Layer 4: Transport",
+                "proto": proto,
+                "src_port": src_port,
+                "dst_port": dst_port,
+                "seq": l4.get("seq", 1000) if proto == "TCP" else None,
+                "ack": l4.get("ack", 501) if proto == "TCP" else None,
+                "flags": l4.get("flags") or ["ACK", "PSH"] if proto == "TCP" else [],
+                "window": l4.get("window", 64240) if proto == "TCP" else None,
+            },
+            "l7": {
+                "name": "Layer 7: Application (Ilova)",
+                "protocol": proto,
+                "summary": summary,
+            },
+        }
+
+        # Device Forwarding & Processing Log (Cisco uslubida)
+        is_router = device_type in ("router", "sdnrouter")
+        new_ttl = max(1, ttl - 1) if is_router else ttl
+        next_hop_mac = "00:50:56:c0:00:08"
+        out_port = "eth1" if link == "eth0" else "eth0"
+
+        device_logs: List[str] = [
+            f"1. Port qabuli: Freym '{link}' interfeysiga to'liq yetib keldi.",
+            f"2. Layer 2: Freym sarlavhasi tekshirildi. Maqsad MAC ({dst_mac}) qurilma MAC manziliga mos keldi.",
+        ]
+        if proto == "ARP":
+            device_logs.extend([
+                "3. Layer 3: ARP so'rovi tekshirildi va qidirilayotgan IP manzili lokal keshdan topildi.",
+                "4. Qurilma ARP Reply paketi tuzishni boshladi.",
+            ])
+        elif is_router:
+            device_logs.extend([
+                f"3. Layer 3: IPv4 sarlavhasi tekshirildi (TTL={ttl} > 1, Nazorat yig'indisi to'g'ri).",
+                f"4. Marshrutlash (FIB lookup): Maqsad IP ({dst_ip}) uchun marshrut jadvalidan mos Next-Hop qidirildi.",
+                f"5. Marshrut topildi: Next-Hop IP interfeys '{out_port}' orqali uzatiladi.",
+                f"6. TTL o'zgarishi: TTL qiymati {ttl} dan {new_ttl} ga kamaytirildi, IP checksum qayta hisoblandi.",
+                f"7. ARP jadvali: Next-Hop IP uchun yangi maqsad MAC manzili ({next_hop_mac}) olindi.",
+                f"8. Layer 2: Yangi Ethernet II sarlavhasi bilan qayta inkapsulyatsiya qilindi.",
+                f"9. Chiqish: Yangi freym '{out_port}' chiqish navbatiga uzatildi.",
+            ])
+        else:
+            device_logs.extend([
+                f"3. Layer 2 L2 Learning: Kiruvchi port va Src MAC ({src_mac}) MAC manzil jadvaliga yozildi.",
+                f"4. L2 Forwarding: Dst MAC ({dst_mac}) jadvaldan qidirildi va chiqish porti '{out_port}' aniqlandi.",
+                f"5. Freym o'zgartirishlarsiz '{out_port}' portiga uzatildi.",
+            ])
+
+        # Out-Layers
+        out_layers = {
+            "l1": {
+                "name": "Layer 1: Physical (Chiquvchi)",
+                "port": f"{out_port} (Outbound Tx)",
+                "media": "Ethernet 100Base-TX / Full-Duplex",
+                "status": "Transmitting",
+            },
+            "l2": {
+                "name": "Layer 2: Data Link (Chiquvchi Freym)",
+                "src_mac": "00:1c:73:00:00:01" if is_router else src_mac,
+                "dst_mac": next_hop_mac if is_router else dst_mac,
+                "ethertype": in_layers["l2"]["ethertype"],
+                "status": "Frame Check Sequence (FCS) Recalculated",
+            },
+            "l3": {
+                "name": "Layer 3: Network (Chiquvchi Paket)",
+                "src_ip": src_ip,
+                "dst_ip": dst_ip,
+                "ttl": new_ttl,
+                "protocol": in_layers["l3"]["protocol"],
+                "checksum": "0x5b3c (Recalculated)",
+                "total_len": 60,
+            },
+            "l4": in_layers["l4"],
+            "l7": in_layers["l7"],
+        }
+
+        return {
+            "device": device_name,
+            "device_type": device_type,
+            "timestamp": ts,
+            "proto": proto,
+            "summary": summary,
+            "in_layers": in_layers,
+            "out_layers": out_layers,
+            "device_logs": device_logs,
+            "hex_dump": hex_dump,
+        }

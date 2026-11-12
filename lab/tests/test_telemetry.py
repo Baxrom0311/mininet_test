@@ -161,6 +161,19 @@ ESTAB 0 0 10.0.1.10:45678 10.0.2.20:80
             self.assertEqual(res_dissect["layers"]["l3"]["src_ip"], "10.0.1.1")
             self.assertEqual(res_dissect["layers"]["l4"]["proto"], "TCP")
 
+            # Cisco PDU inspection endpoint
+            res_pdu = client.post("/api/pdu/inspect", json={
+                "packet": {"proto": "TCP", "summary": "TCP 10.0.1.10:45678 -> 10.0.2.20:80", "link": "eth0"},
+                "device": "R1",
+                "device_type": "router"
+            }).json()
+            self.assertIn("in_layers", res_pdu)
+            self.assertIn("out_layers", res_pdu)
+            self.assertIn("device_logs", res_pdu)
+            self.assertEqual(res_pdu["in_layers"]["l3"]["ttl"], 64)
+            self.assertEqual(res_pdu["out_layers"]["l3"]["ttl"], 63)
+            self.assertGreater(len(res_pdu["device_logs"]), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

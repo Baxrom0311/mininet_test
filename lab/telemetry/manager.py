@@ -216,6 +216,14 @@ class TelemetryManager:
     def dissect_raw(self, raw_bytes: bytes) -> Dict[str, Any]:
         return self.dpi.dissect_frame(raw_bytes)
 
+    def inspect_pdu(
+        self,
+        packet_info: Dict[str, Any],
+        device_name: str = "Router",
+        device_type: str = "router",
+    ) -> Dict[str, Any]:
+        return self.dpi.build_cisco_pdu_inspection(packet_info, device_name=device_name, device_type=device_type)
+
 
 # Global singleton instance
 telemetry_manager = TelemetryManager()

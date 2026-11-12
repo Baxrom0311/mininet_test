@@ -632,6 +632,14 @@ def create_app(driver_name="demo", token=None):
             raise HTTPException(400, "'hex' yoki 'base64' maydoni kerak")
         return telemetry_manager.dissect_raw(raw_bytes)
 
+    @app.post("/api/pdu/inspect")
+    def pdu_inspect(body: dict):
+        from lab.telemetry import telemetry_manager
+        pkt = body.get("packet") or body
+        device = body.get("device", "Router")
+        dev_type = body.get("device_type", "router")
+        return telemetry_manager.inspect_pdu(pkt, device_name=device, device_type=dev_type)
+
     @app.post("/api/telemetry/simulate")
     def telemetry_simulate(body: dict):
         from lab.telemetry import telemetry_manager, TCPInfoCollector
