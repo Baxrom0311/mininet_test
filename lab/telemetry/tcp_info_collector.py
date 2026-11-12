@@ -318,8 +318,8 @@ class TCPInfoCollector:
             if m_rtt.group(2):
                 sample.rttvar_ms = float(m_rtt.group(2))
 
-        # Min RTT
-        m_minrtt = re.search(r"\bminrtt:([\d.]+)\b", blob)
+        # Min RTT (minrtt yoki BBR mrtt)
+        m_minrtt = re.search(r"\b(?:minrtt|mrtt):([\d.]+)\b", blob)
         if m_minrtt:
             sample.min_rtt_ms = float(m_minrtt.group(1))
 
@@ -336,6 +336,11 @@ class TCPInfoCollector:
         m_rate = re.search(r"\bdelivery_rate(?:\s+|:)([\d.]+\s*[a-zA-Z/]*)\b", blob)
         if m_rate:
             sample.delivery_rate_bps = parse_rate_string(m_rate.group(1))
+        else:
+            # BBR bw parameter (masalan bbr:(bw:10Mbps,mrtt:12.5))
+            m_bw = re.search(r"\bbw:([\d.]+\s*[a-zA-Z/]*)\b", blob)
+            if m_bw:
+                sample.delivery_rate_bps = parse_rate_string(m_bw.group(1))
 
         # Pacing rate
         m_pace = re.search(r"\bpacing_rate(?:\s+|:)([\d.]+\s*[a-zA-Z/]*)\b", blob)
@@ -613,7 +618,7 @@ class TCPInfoCollector:
 
         rtt_jitter = random.gauss(0, base_rtt_ms * 0.08)
         current_rtt = max(1.0, base_rtt_ms + (cwnd / 40.0) + rtt_jitter)
-        delivery_rate = (cwnd * 1460 * 8) / (current_rtt / 1000.0)
+        delivery_rate = (cwnd * 1460 * 8) / (max(0.001, current_rtt / 1000.0))
 
         sample = TCPInfoSample(
             src_ip=src_ip,
