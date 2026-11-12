@@ -1077,6 +1077,300 @@ def create_app(driver_name="demo", token=None):
         except Exception as e:
             raise HTTPException(400, f"INT dekodlashda xatolik: {e}")
 
+    # ───────────── Faza 9: Multi-Cloud Overlay & SD-WAN Endpoints ─────────────
+    @app.get("/api/overlay/sdwan/tunnels")
+    def overlay_sdwan_tunnels():
+        from lab.overlay import sdwan_router
+        return sdwan_router.get_status()
+
+    @app.post("/api/overlay/sdwan/steer")
+    def overlay_sdwan_steer(body: dict = Body(...)):
+        from lab.overlay import TrafficClass, sdwan_router
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        app_class_str = str(body.get("app_class", "voip")).lower()
+        try:
+            app_class = TrafficClass(app_class_str)
+        except ValueError:
+            raise HTTPException(400, f"Noto'g'ri app_class '{app_class_str}'. Ruxsat etilgan: {[c.value for c in TrafficClass]}")
+        return sdwan_router.select_path(app_class)
+
+    @app.post("/api/overlay/sdwan/impair")
+    def overlay_sdwan_impair(body: dict = Body(...)):
+        from lab.overlay import sdwan_router
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        tunnel_id = body.get("tunnel_id")
+        if not tunnel_id:
+            raise HTTPException(400, "'tunnel_id' ko'rsatilishi shart")
+        add_lat = float(body.get("add_latency_ms", 0.0))
+        add_loss = float(body.get("add_loss_pct", 0.0))
+        set_status = body.get("set_status")
+        try:
+            return sdwan_router.inject_tunnel_impairment(
+                tunnel_id=tunnel_id,
+                add_latency_ms=add_lat,
+                add_loss_pct=add_loss,
+                set_status=set_status,
+            )
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+
+    @app.get("/api/overlay/vxlan/status")
+    def overlay_vxlan_status():
+        from lab.overlay import vxlan_engine
+        return vxlan_engine.get_summary()
+
+    @app.post("/api/overlay/vxlan/encap")
+    def overlay_vxlan_encap(body: dict = Body(...)):
+        from lab.overlay import vxlan_engine
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        vni = int(body.get("vni", 10010))
+        src_mac = str(body.get("src_mac", "00:aa:bb:11:22:33"))
+        dst_mac = str(body.get("dst_mac", "00:aa:bb:44:55:66"))
+        src_vtep = str(body.get("src_vtep_ip", "198.51.100.1"))
+        return vxlan_engine.encapsulate_packet(
+            vni=vni,
+            src_mac=src_mac,
+            dst_mac=dst_mac,
+            src_vtep_ip=src_vtep,
+            payload_bytes=b"VXLAN_INNER_PAYLOAD",
+        )
+
+    @app.get("/api/overlay/wireguard/status")
+    def overlay_wireguard_status():
+        from lab.overlay import wireguard_engine
+        return wireguard_engine.get_status()
+
+    @app.post("/api/overlay/wireguard/handshake")
+    def overlay_wireguard_handshake(body: dict = Body(...)):
+        from lab.overlay import wireguard_engine
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        public_key = body.get("public_key")
+        if not public_key:
+            # Agar peer mavjud bo'lmasa namuna qo'shamiz
+            if not wireguard_engine.peers:
+                wireguard_engine.add_peer(
+                    public_key="demo_peer_pubkey_abcdef1234567890=",
+                    endpoint="198.51.100.2:51820",
+                    allowed_ips=["10.50.1.0/24"],
+                )
+            public_key = list(wireguard_engine.peers.keys())[0]
+        try:
+            return wireguard_engine.initiate_handshake(public_key)
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+
+    @app.get("/api/overlay/vxlan/tunnels")
+    def overlay_vxlan_tunnels():
+        from lab.overlay import vxlan_engine
+        summary = vxlan_engine.get_summary()
+        return {
+            "ok": True,
+            "total_tunnels": summary["total_tunnels"],
+            "tunnels": summary["tunnels"],
+            "vteps": summary["vteps"],
+            "evpn_summary": {
+                "type2_routes_count": summary["total_evpn_type2_routes"],
+                "type5_routes_count": summary["total_evpn_type5_routes"],
+            },
+            "topology": summary.get("topology"),
+        }
+
+    @app.post("/api/overlay/vxlan/configure")
+    def overlay_vxlan_configure(body: dict = Body(...)):
+        from lab.overlay import vxlan_engine, VXLAN_UDP_PORT
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        vni = int(body.get("vni", 100))
+        src_vtep = str(body.get("src_vtep", "10.0.0.1"))
+        dst_vtep = str(body.get("dst_vtep", "10.0.0.2"))
+        udp_port = int(body.get("udp_port", VXLAN_UDP_PORT))
+        tunnel = vxlan_engine.configure_tunnel(
+            vni=vni,
+            src_vtep=src_vtep,
+            dst_vtep=dst_vtep,
+            udp_port=udp_port,
+        )
+        return {
+            "ok": True,
+            "message": f"VXLAN VNI {vni} tuneli muvaffaqiyatli sozlandi",
+            "tunnel": tunnel,
+        }
+
+    @app.get("/api/overlay/wireguard/peers")
+    def overlay_wireguard_peers():
+        from lab.overlay import wireguard_engine
+        status = wireguard_engine.get_status()
+        return {
+            "ok": True,
+            "interface": status["interface"],
+            "public_key": status["public_key"],
+            "listen_port": status["listen_port"],
+            "mtu": status["mtu"],
+            "total_peers": status["total_peers"],
+            "peers": status["peers"],
+            "ipsec_comparison": status.get("ipsec_comparison"),
+        }
+
+    @app.post("/api/overlay/wireguard/peer")
+    def overlay_wireguard_add_peer(body: dict = Body(...)):
+        from lab.overlay import wireguard_engine
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        pubkey = body.get("public_key")
+        if not pubkey:
+            raise HTTPException(400, "'public_key' ko'rsatilishi shart")
+        endpoint = str(body.get("endpoint", "198.51.100.10:51820"))
+        allowed_ips = body.get("allowed_ips", ["10.50.2.0/24"])
+        if isinstance(allowed_ips, str):
+            allowed_ips = [allowed_ips]
+        keepalive = int(body.get("persistent_keepalive_s", body.get("persistent_keepalive", 25)))
+        peer = wireguard_engine.add_peer(
+            public_key=str(pubkey),
+            endpoint=endpoint,
+            allowed_ips=allowed_ips,
+            persistent_keepalive_s=keepalive,
+        )
+        return {
+            "ok": True,
+            "message": "WireGuard peer muvaffaqiyatli qo'shildi/yangilandi",
+            "peer": peer.to_dict(),
+        }
+
+    @app.get("/api/overlay/sdwan/paths")
+    def overlay_sdwan_paths():
+        from lab.overlay import sdwan_manager
+        status = sdwan_manager.get_status()
+        return {
+            "ok": True,
+            "total_paths": status["total_tunnels"],
+            "paths": status["tunnels"],
+            "recent_failovers": status["recent_failovers"],
+        }
+
+    @app.post("/api/overlay/sdwan/evaluate")
+    def overlay_sdwan_evaluate(body: dict = Body(default={})):
+        from lab.overlay import sdwan_manager, TrafficClass
+        body = body or {}
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        impair = body.get("simulate_impairment")
+        if isinstance(impair, dict):
+            tid = impair.get("tunnel_id")
+            if tid:
+                sdwan_manager.inject_tunnel_impairment(
+                    tunnel_id=tid,
+                    add_latency_ms=float(impair.get("add_latency_ms", 0.0)),
+                    add_loss_pct=float(impair.get("add_loss_pct", 0.0)),
+                    set_status=impair.get("set_status"),
+                )
+        traffic_class = body.get("traffic_class")
+        if traffic_class:
+            decision = sdwan_manager.select_path(traffic_class)
+            return {
+                "ok": True,
+                "traffic_class": traffic_class,
+                "decision": decision,
+                "all_paths": sdwan_manager.get_status()["tunnels"],
+            }
+        return {
+            "ok": True,
+            **sdwan_manager.evaluate_all(),
+        }
+
+    # ───────────── Faza 10: Network Digital Twin & NetAcad Auto-Grader Endpoints ─────────────
+    @app.get("/api/twin/topology")
+    def twin_topology():
+        from lab.twin import what_if_analyzer
+        return what_if_analyzer.get_topology_status()
+
+    @app.get("/api/twin/scenarios")
+    def twin_scenarios():
+        from lab.twin import PREDEFINED_SCENARIOS
+        return {"scenarios": PREDEFINED_SCENARIOS}
+
+    @app.post("/api/twin/what_if")
+    def twin_what_if(body: dict = Body(...)):
+        from lab.twin import WhatIfAnalyzer, what_if_analyzer
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        topology_data = body.get("topology")
+        if topology_data and isinstance(topology_data, dict):
+            analyzer = WhatIfAnalyzer.from_project_dict(topology_data)
+            report = analyzer.evaluate(body)
+        else:
+            report = what_if_analyzer.evaluate(body)
+        return report.to_dict()
+
+    @app.post("/api/twin/what-if/surge")
+    def twin_what_if_surge(body: dict = Body(...)):
+        from lab.twin import what_if_analyzer
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        multiplier = float(body.get("multiplier", 2.0))
+        return what_if_analyzer.simulate_traffic_multiplier(multiplier=multiplier)
+
+    @app.post("/api/twin/what-if/link-down")
+    def twin_what_if_link_down(body: dict = Body(...)):
+        from lab.twin import what_if_analyzer
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        link_id = body.get("link_id")
+        if not link_id:
+            raise HTTPException(400, "'link_id' ko'rsatilishi shart")
+        try:
+            return what_if_analyzer.simulate_link_failure(link_id=link_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+
+    @app.get("/api/twin/what-if/worst-case")
+    def twin_what_if_worst_case():
+        from lab.twin import what_if_analyzer
+        return {
+            "rankings": what_if_analyzer.rank_worst_case_failures()
+        }
+
+    @app.get("/api/education/labs")
+    def education_labs():
+        from lab.education import list_available_labs
+        return {
+            "labs": list_available_labs()
+        }
+
+    @app.get("/api/education/rubrics")
+    def education_rubrics():
+        from lab.education import LAB_RUBRICS, list_available_labs
+        return {
+            "rubrics": LAB_RUBRICS,
+            "labs": list_available_labs(),
+        }
+
+    @app.get("/api/education/rubrics/{lab_id}")
+    def education_rubric_detail(lab_id: str):
+        from lab.education import NetAcadGrader
+        rubric = NetAcadGrader.find_rubric(lab_id)
+        if not rubric:
+            raise HTTPException(404, f"Rubric for lab '{lab_id}' not found")
+        return rubric
+
+    @app.post("/api/education/grade")
+    def education_grade(body: dict = Body(...)):
+        from lab.education import auto_grader
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        lab_id = body.get("lab_id")
+        if not lab_id:
+            raise HTTPException(400, "'lab_id' ko'rsatilishi shart")
+        submission = body.get("submission") or body.get("topology")
+        report = auto_grader.grade(lab_id=lab_id, topology=submission)
+        res = report.to_dict()
+        res["ok"] = True
+        res["report"] = report.to_dict()
+        return res
+
     @app.websocket("/ws/telemetry")
     async def ws_telemetry(ws: WebSocket):
         if not same_origin(ws.headers.get("origin"), ws.url):
