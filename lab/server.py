@@ -711,6 +711,35 @@ def create_app(driver_name="demo", token=None):
         dev_type = str(body.get("device_type") or "router")
         return telemetry_manager.inspect_pdu(pkt, device_name=device, device_type=dev_type)
 
+    # ───────────── OPNET Workloads & SLA & LaTeX Hisobot ─────────────
+    @app.get("/api/telemetry/l4/workloads/voip")
+    def telemetry_workload_voip(
+        delay_ms: float = 30.0,
+        jitter_ms: float = 2.0,
+        loss_pct: float = 0.0,
+        codec: str = "G.711",
+    ):
+        from lab.telemetry import telemetry_manager
+        return telemetry_manager.evaluate_voip_call(
+            delay_ms=delay_ms, jitter_ms=jitter_ms, loss_pct=loss_pct, codec=codec
+        )
+
+    @app.get("/api/telemetry/l4/workloads/video")
+    def telemetry_workload_video():
+        from lab.telemetry import telemetry_manager
+        return telemetry_manager.get_video_streaming_stats()
+
+    @app.get("/api/telemetry/l4/sla")
+    def telemetry_sla():
+        from lab.telemetry import telemetry_manager
+        return telemetry_manager.get_sla_report()
+
+    @app.get("/api/telemetry/l4/report/latex")
+    def telemetry_latex_report(title: str = "NetLab Research Evaluation Report"):
+        from lab.telemetry import telemetry_manager
+        latex = telemetry_manager.export_latex_report(title=title)
+        return Response(content=latex, media_type="text/plain; charset=utf-8")
+
     @app.post("/api/telemetry/simulate")
     def telemetry_simulate(body: dict):
         from lab.telemetry import telemetry_manager, TCPInfoCollector

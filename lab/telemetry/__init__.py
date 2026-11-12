@@ -9,6 +9,15 @@
 from lab.telemetry.dpi_dissector import DPIDissector, UDPJitterTracker, hex_dump_format, calculate_rfc3550_jitter
 from lab.telemetry.ebpf_tracker import EBPFTracker, EBPFEvent
 from lab.telemetry.manager import StreamHistory, TelemetryManager, telemetry_manager
+from lab.telemetry.opnet_workloads import (
+    AdaptiveVideoSession,
+    SLAMonitor,
+    SLARule,
+    SLAViolation,
+    VoIPEvalResult,
+    VoIPMOSCalculator,
+    generate_latex_report,
+)
 from lab.telemetry.queue_tracker import BufferbloatAssessment, QueueStats, QueueTracker
 from lab.telemetry.tcp_info_collector import TCPInfoCollector, TCPInfoSample
 
@@ -23,6 +32,13 @@ __all__ = [
     "QueueTracker",
     "QueueStats",
     "BufferbloatAssessment",
+    "VoIPMOSCalculator",
+    "VoIPEvalResult",
+    "AdaptiveVideoSession",
+    "SLAMonitor",
+    "SLARule",
+    "SLAViolation",
+    "generate_latex_report",
     "TelemetryManager",
     "telemetry_manager",
     "StreamHistory",

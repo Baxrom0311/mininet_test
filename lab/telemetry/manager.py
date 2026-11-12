@@ -81,6 +81,24 @@ class TelemetryManager:
         except Exception:
             self.queue_tracker = None
 
+        # OPNET Workloads & SLA Monitor
+        try:
+            from lab.telemetry.opnet_workloads import (
+                AdaptiveVideoSession,
+                SLAMonitor,
+                VoIPMOSCalculator,
+                generate_latex_report,
+            )
+            self.sla_monitor = SLAMonitor()
+            self.video_session = AdaptiveVideoSession("demo_stream")
+            self.voip_calculator = VoIPMOSCalculator
+            self._latex_generator = generate_latex_report
+        except Exception:
+            self.sla_monitor = None
+            self.video_session = None
+            self.voip_calculator = None
+            self._latex_generator = None
+
         # Saqlash xotiralari
         self._streams: Dict[str, StreamHistory] = {}
         self._lock = threading.RLock()
@@ -156,6 +174,21 @@ class TelemetryManager:
             if sid not in self._streams:
                 self._streams[sid] = StreamHistory(sid, max_points=self.history_len)
             self._streams[sid].append(d)
+
+            # SLA va Workload baholash
+            if self.sla_monitor and isinstance(d, dict):
+                rtt = float(d.get("rtt_ms", 0.0) or 0.0)
+                retrans = float(d.get("retrans_total", d.get("retrans", 0.0)) or 0.0)
+                rate = float(d.get("delivery_rate_bps", 0.0) or 0.0)
+                self.sla_monitor.evaluate_stream(
+                    sid,
+                    rtt_ms=rtt,
+                    jitter_ms=round(rtt * 0.12, 2),
+                    loss_pct=min(100.0, retrans * 2.5),
+                    throughput_bps=rate,
+                )
+                if self.video_session and rate > 0:
+                    self.video_session.update(rate)
 
         self._publish_ws({"type": "tcp_sample", "stream_id": sid, "sample": d})
         return d
@@ -340,6 +373,59 @@ class TelemetryManager:
         if self.queue_tracker:
             return self.queue_tracker.get_summary()
         return {}
+
+    def get_sla_report(self) -> Dict[str, Any]:
+        """SLA qoidalariga rioya qilinishi va buzilishlar hisobotini qaytaradi."""
+        if self.sla_monitor:
+            return self.sla_monitor.get_summary()
+        return {
+            "compliance_pct": 100.0,
+            "total_evaluations": 0,
+            "total_violations": 0,
+            "recent_violations": [],
+        }
+
+    def evaluate_voip_call(
+        self,
+        delay_ms: float = 30.0,
+        jitter_ms: float = 2.0,
+        loss_pct: float = 0.0,
+        codec: str = "G.711",
+    ) -> Dict[str, Any]:
+        """ITU-T G.107 E-Model bo'yicha VoIP qo'ng'irog'i sifatini (MOS) baholash."""
+        if self.voip_calculator:
+            return self.voip_calculator.calculate(
+                delay_ms=delay_ms, jitter_ms=jitter_ms, loss_pct=loss_pct, codec=codec
+            ).to_dict()
+        return {}
+
+    def get_video_streaming_stats(self) -> Dict[str, Any]:
+        """Adaptiv video oqimi (HLS/DASH) holatini qaytaradi."""
+        if self.video_session:
+            curr = self.video_session.LADDER[self.video_session.current_rep_idx]
+            return {
+                "session_id": self.video_session.session_id,
+                "current_quality": curr.label,
+                "resolution": curr.resolution,
+                "bitrate_bps": curr.bitrate_bps,
+                "buffer_sec": round(self.video_session.buffer_sec, 2),
+                "stalls": self.video_session.stall_count,
+                "total_stall_sec": round(self.video_session.total_stall_sec, 2),
+                "switches": self.video_session.quality_switches,
+                "history": self.video_session.history[-20:],
+            }
+        return {}
+
+    def export_latex_report(self, title: str = "NetLab Research Evaluation Report") -> str:
+        """Ilmiy maqolalar uchun professional LaTeX hisobotini shakllantiradi."""
+        if self._latex_generator:
+            return self._latex_generator(
+                title=title,
+                telemetry_summary=self.get_global_stats(),
+                sla_summary=self.get_sla_report(),
+                voip_summary=self.evaluate_voip_call(),
+            )
+        return ""
 
 
 # Global singleton instance
