@@ -282,7 +282,7 @@ export function TransportObservatory({ win }: { win?: Win }) {
 
   // Polling va avtomatik yangilash
   useEffect(() => {
-    fetchStreams(false)
+    fetchStreams(true)
     if (autoRefresh) {
       timerRef.current = window.setInterval(() => {
         fetchStreams(true)
