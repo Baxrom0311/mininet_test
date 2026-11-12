@@ -6,6 +6,7 @@
 - TelemetryManager: Unified orchestrator and time-series history
 """
 
+from lab.telemetry.comparison import MetricComparison, TelemetryComparator
 from lab.telemetry.dpi_dissector import DPIDissector, UDPJitterTracker, hex_dump_format, calculate_rfc3550_jitter
 from lab.telemetry.ebpf_tracker import EBPFTracker, EBPFEvent
 from lab.telemetry.manager import StreamHistory, TelemetryManager, telemetry_manager
@@ -39,6 +40,8 @@ __all__ = [
     "SLARule",
     "SLAViolation",
     "generate_latex_report",
+    "TelemetryComparator",
+    "MetricComparison",
     "TelemetryManager",
     "telemetry_manager",
     "StreamHistory",

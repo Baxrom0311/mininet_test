@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Activity, Download, FilePlus2, FolderOpen, Moon, Play, Radio, Redo2, Save, Search, Square, Sun, Undo2, Upload } from 'lucide-react'
+import { Activity, Download, FilePlus2, FolderOpen, Moon, Play, Radio, Redo2, Save, Search, Shield, Square, Sun, Undo2, Upload } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Tip } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
-import { emptyProject, loadProject, mutate, openWin, redo, running, saveProject, startNet, stopNet, toggleTheme, undo, useStore } from '@/lib/store'
+import { closeWin, emptyProject, loadProject, mutate, openWin, redo, running, saveProject, startNet, stopNet, toggleTheme, undo, useStore } from '@/lib/store'
 import type { Project } from '@/lib/types'
 import { canvasApi } from './Canvas'
 import { paletteState } from './CommandPalette'
@@ -84,6 +84,24 @@ export function Topbar() {
       </Button>
       <Button variant="outline" size="sm" onClick={() => openWin('telemetry', 'l4', { w: 920, h: 600 })}>
         <Activity className="h-4 w-4 text-primary" /> L4 Telemetriya
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        className={cn(
+          useStore((s) => s.wins.some((w) => w.kind === 'security')) && 'bg-primary/15 border-primary text-primary font-medium'
+        )}
+        onClick={() => {
+          const isOpen = useStore.getState().wins.some((w) => w.kind === 'security')
+          if (isOpen) {
+            closeWin('security:studio')
+          } else {
+            openWin('security', 'studio', { w: 1060, h: 680 })
+          }
+        }}
+        title="Security Studio (Conntrack, Stateful Netfilter va Hujumlar Simulyatsiyasi)"
+      >
+        <Shield className="h-4 w-4 text-primary" /> Security Studio
       </Button>
       <Button variant="ghost" size="icon" onClick={toggleTheme} title="Kun / tun">{dark ? <Sun /> : <Moon />}</Button>
       <OpenProjectDialog open={openDlg} onClose={() => setOpenDlg(false)} confirmDirty={confirmDirty} />

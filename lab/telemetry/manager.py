@@ -427,6 +427,54 @@ class TelemetryManager:
             )
         return ""
 
+    def compare_streams(
+        self, stream_id_a: str, stream_id_b: str, label_a: str = "Stream A", label_b: str = "Stream B"
+    ) -> Dict[str, Any]:
+        """Ikkita faol L4 oqimining haqiqiy telemetriya ko'rsatkichlarini solishtirish."""
+        from lab.telemetry.comparison import TelemetryComparator
+
+        sa = self.get_stream_detail(stream_id_a) or {}
+        sb = self.get_stream_detail(stream_id_b) or {}
+        return TelemetryComparator.compare_streams(sa, sb, label_a=label_a, label_b=label_b)
+
+    def compare_algorithms(
+        self,
+        algo_a: str = "cubic",
+        algo_b: str = "bbr",
+        bottleneck_bps: float = 20_000_000.0,
+        base_rtt_ms: float = 30.0,
+        loss_pct: float = 1.0,
+        buffer_size_pkts: int = 200,
+    ) -> Dict[str, Any]:
+        """CUBIC vs BBR algoritmlarini turli tarmoq sharoitlarida solishtirish."""
+        from lab.telemetry.comparison import TelemetryComparator
+
+        return TelemetryComparator.compare_algorithms(
+            algo_a=algo_a,
+            algo_b=algo_b,
+            bottleneck_bps=bottleneck_bps,
+            base_rtt_ms=base_rtt_ms,
+            loss_pct=loss_pct,
+            buffer_size_pkts=buffer_size_pkts,
+        )
+
+    def compare_queuing(
+        self,
+        qdisc_a: str = "pfifo_fast",
+        qdisc_b: str = "fq_codel",
+        link_bps: float = 10_000_000.0,
+        load_pct: float = 120.0,
+    ) -> Dict[str, Any]:
+        """FIFO va FQ-CoDel navbat algoritmlarini solishtirish."""
+        from lab.telemetry.comparison import TelemetryComparator
+
+        return TelemetryComparator.compare_queuing(
+            qdisc_a=qdisc_a,
+            qdisc_b=qdisc_b,
+            link_bps=link_bps,
+            load_pct=load_pct,
+        )
+
 
 # Global singleton instance
 telemetry_manager = TelemetryManager()

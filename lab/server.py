@@ -830,6 +830,48 @@ def create_app(driver_name="demo", token=None):
         latex = telemetry_manager.export_latex_report(title=title)
         return Response(content=latex, media_type="text/plain; charset=utf-8")
 
+    # ───────────── A/B Telemetriya & Protokol Solishtirish ─────────────
+    @app.get("/api/telemetry/l4/compare/algorithms")
+    def telemetry_compare_algorithms(
+        algo_a: str = "cubic",
+        algo_b: str = "bbr",
+        bottleneck_mbps: float = 20.0,
+        rtt_ms: float = 30.0,
+        loss_pct: float = 1.0,
+    ):
+        from lab.telemetry import telemetry_manager
+        return telemetry_manager.compare_algorithms(
+            algo_a=algo_a,
+            algo_b=algo_b,
+            bottleneck_bps=bottleneck_mbps * 1e6,
+            base_rtt_ms=rtt_ms,
+            loss_pct=loss_pct,
+        )
+
+    @app.get("/api/telemetry/l4/compare/queues")
+    def telemetry_compare_queues(
+        qdisc_a: str = "pfifo_fast",
+        qdisc_b: str = "fq_codel",
+        link_mbps: float = 10.0,
+        load_pct: float = 120.0,
+    ):
+        from lab.telemetry import telemetry_manager
+        return telemetry_manager.compare_queuing(
+            qdisc_a=qdisc_a,
+            qdisc_b=qdisc_b,
+            link_bps=link_mbps * 1e6,
+            load_pct=load_pct,
+        )
+
+    @app.post("/api/telemetry/l4/compare/streams")
+    def telemetry_compare_streams(body: dict = Body(...)):
+        from lab.telemetry import telemetry_manager
+        stream_a = str(body.get("stream_a") or "")
+        stream_b = str(body.get("stream_b") or "")
+        label_a = str(body.get("label_a") or "Oqim A")
+        label_b = str(body.get("label_b") or "Oqim B")
+        return telemetry_manager.compare_streams(stream_a, stream_b, label_a=label_a, label_b=label_b)
+
     @app.post("/api/telemetry/simulate")
     def telemetry_simulate(body: dict):
         from lab.telemetry import telemetry_manager, TCPInfoCollector
@@ -864,6 +906,119 @@ def create_app(driver_name="demo", token=None):
                 except Exception:
                     pass
         return {"ok": True, "stream_id": f"{src_ip}:{src_port}->{dst_ip}:{dst_port}", "steps": steps}
+
+    # ───────────── Xavfsizlik: Conntrack, Attack Simulator, IDS Ogohlantirishlari ─────────────
+    @app.get("/api/security/conntrack")
+    def security_conntrack(
+        proto: Optional[str] = None,
+        state: Optional[str] = None,
+        search: Optional[str] = None,
+        limit: int = 100,
+        mode: Optional[str] = None,
+    ):
+        from lab.security import conntrack_engine
+        if mode == "system" and os.path.exists("/proc/net/nf_conntrack"):
+            try:
+                with open("/proc/net/nf_conntrack", "r") as f:
+                    entries = conntrack_engine.parse_proc_conntrack(f.read())
+                    return {
+                        "connections": [e.to_dict() for e in entries[:limit]],
+                        "summary": {
+                            "total_connections": len(entries),
+                            "tcp_established": sum(1 for e in entries if e.tcp_state == "ESTABLISHED"),
+                            "tcp_syn_half_open": sum(1 for e in entries if e.tcp_state in ("SYN_SENT", "SYN_RECV")),
+                            "udp_active": sum(1 for e in entries if e.proto == "udp"),
+                            "icmp_active": sum(1 for e in entries if e.proto == "icmp"),
+                            "nat_translations": sum(1 for e in entries if e.nat and e.nat.enabled),
+                        },
+                        "source": "system",
+                    }
+            except Exception:
+                pass
+
+        if conntrack_engine.count == 0 or mode == "synthetic":
+            conntrack_engine.generate_synthetic_entries(count=15)
+
+        filters = {}
+        if proto:
+            filters["proto"] = proto
+        if state:
+            filters["state"] = state
+        if search:
+            filters["search"] = search
+
+        connections = conntrack_engine.get_active_connections(filters)[:limit]
+        return {
+            "connections": connections,
+            "summary": conntrack_engine.get_summary_stats(),
+            "source": "engine",
+        }
+
+    @app.post("/api/security/attack/simulate")
+    def security_attack_simulate(body: dict = Body(...)):
+        from lab.security import attack_simulator
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        attack_type = str(body.get("attack_type") or "").strip()
+        if not attack_type:
+            raise HTTPException(400, "'attack_type' ko'rsatilishi shart (syn_flood, udp_reflection, slowloris, arp_spoof)")
+        try:
+            result = attack_simulator.simulate(attack_type, body)
+            return {"ok": True, "result": result}
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        except Exception as e:
+            raise HTTPException(500, f"Hujum simulyatsiyasida xatolik: {e}")
+
+    @app.get("/api/security/alerts")
+    def security_alerts(
+        severity: Optional[str] = None,
+        attack_type: Optional[str] = None,
+        limit: int = 50,
+    ):
+        from lab.security import alert_manager
+        safe_limit = max(1, min(int(limit), 500))
+        alerts = alert_manager.get_alerts(severity=severity, attack_type=attack_type, limit=safe_limit)
+        return {
+            "alerts": alerts,
+            "stats": alert_manager.get_summary_stats(),
+        }
+
+    @app.post("/api/security/firewall/rules")
+    def security_firewall_rules(body: dict = Body(...)):
+        from lab.security import conntrack_engine
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        action = str(body.get("action", "evaluate")).lower()
+
+        if action == "evaluate":
+            packet = body.get("packet")
+            if not packet or not isinstance(packet, dict):
+                raise HTTPException(400, "'packet' obyekti berilishi shart")
+            rules = body.get("rules") or []
+            if not isinstance(rules, list):
+                raise HTTPException(400, "'rules' massiv bo'lishi kerak")
+            default_policy = str(body.get("default_policy", "drop"))
+            eval_result = conntrack_engine.evaluate_stateful_firewall(
+                packet, rules, default_policy=default_policy
+            )
+            return {"ok": True, "evaluation": eval_result}
+
+        elif action in ("validate", "add"):
+            rules = body.get("rules") or []
+            if not isinstance(rules, list):
+                raise HTTPException(400, "'rules' ro'yxat bo'lishi kerak")
+            valid_rules = []
+            errors = []
+            for idx, r in enumerate(rules):
+                if not isinstance(r, dict):
+                    errors.append(f"Qoida #{idx+1} lug'at bo'lishi kerak")
+                    continue
+                valid_rules.append(r)
+            return {"ok": len(errors) == 0, "rules_count": len(valid_rules), "errors": errors, "rules": valid_rules}
+
+        else:
+            raise HTTPException(400, f"Noma'lum amal '{action}'. Ruxsat etilgan: 'evaluate', 'validate', 'add'")
 
     @app.websocket("/ws/telemetry")
     async def ws_telemetry(ws: WebSocket):

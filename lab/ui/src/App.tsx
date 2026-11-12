@@ -15,6 +15,7 @@ import { Inspector } from '@/features/Inspector'
 import { PDUInspectorWindow } from '@/features/PDUInspector'
 import { ResultsWindow } from '@/features/ResultsWindow'
 import { ScenarioWindow } from '@/features/ScenarioWindow'
+import { SecurityStudio } from '@/features/SecurityStudio'
 import { Sidebar } from '@/features/Sidebar'
 import { Topbar } from '@/features/Topbar'
 import { TransportObservatory } from '@/features/TransportObservatory'
@@ -30,7 +31,8 @@ function Windows() {
             : w.kind === 'scenario' ? <ScenarioWindow key={w.id} win={w} />
               : w.kind === 'telemetry' ? <TransportObservatory key={w.id} win={w} />
                 : w.kind === 'pdu' ? <PDUInspectorWindow key={w.id} win={w} />
-                  : <ResultsWindow key={w.id} win={w} />)}
+                  : w.kind === 'security' ? <SecurityStudio key={w.id} win={w} />
+                    : <ResultsWindow key={w.id} win={w} />)}
     </>
   )
 }

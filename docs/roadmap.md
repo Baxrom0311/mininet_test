@@ -156,6 +156,50 @@ Hozirgi tizimdagi nazariy L2 cheklovini to'liq yengib o'tish:
 
 ---
 
+### USTUN 6: Tarmoq Xavfsizligi, Stateful Firewall & Kibernetik Hujumlar Simulyatsiyasi
+
+1. **Stateful Firewall & Conntrack (Holatli Xavfsizlik Devori)**:
+   - Linux `conntrack` sessiyalar jadvalini real-vaqtda kuzatish (`NEW`, `ESTABLISHED`, `RELATED`, `INVALID`).
+   - `nftables` / `iptables` qoidalari (Stateful packet filtering, NAT, Port Forwarding, DMZ) tahlili.
+2. **Kibernetik Hujumlar Dvigateli (Attack Simulation Vectors)**:
+   - **SYN Flood**: TCP ulanishlar navbatini (backlog) to'ldirib tashlash va SYN Cookie faollashuvini o'lchash.
+   - **UDP Reflection / Amplification**: Katta hajmdagi UDP oqimlari orqali kanalni tiqilinch qilish.
+   - **Slowloris HTTP**: Sekin so'rovlar yuborib server soketlarini bloklash.
+   - **ARP Spoofing / Poisoning**: Man-in-the-Middle (MitM) hujumini va dynamic ARP inspection (DAI) ni ko'rsatish.
+3. **Xavfsizlik Ogohlantirishlari (Security & IDS Badges)**:
+   - PDU Inspector va Canvas'da qizil shubhali paket belgilari (Security Alert tags) va sabablar logi.
+
+---
+
+### USTUN 7: P4-16 In-Band Network Telemetry (INT)
+
+1. **Hop-by-Hop Telemetriya Sarlavhalari**:
+   - Har bir P4 switch paket ichiga (In-Band) o'z ID'si, ingress/egress porti, qamrov vaqti (hop latency) va navbat chuqurligini (queue occupancy) yozadi.
+2. **PDU Inspector INT Vizualizatsiyasi**:
+   - PDU oynasida har bir oraliq tugundagi kechikish va navbat ko'rsatkichlari grafik ko'rinishda tahlil qilinadi.
+
+---
+
+### USTUN 8: Multi-Cloud Overlay & SD-WAN (VXLAN EVPN & WireGuard)
+
+1. **VXLAN & EVPN Data-Plane**:
+   - Data-markazlararo L2-over-L3 overlay tunnellari (VNI, VTEP) va BGP EVPN Type-2/Type-5 marshrutlari.
+2. **WireGuard / IPsec Shifrlangan Tunnellar**:
+   - Kriptografik xavfsiz VPN aloqasi, MTU/MSS clamping va shifrlash kechikishi telemetriyasi.
+3. **Application-Aware SD-WAN**:
+   - Trafik turi (VoIP, Video, Database) bo'yicha eng past RTT va yo'qotishga ega bo'lgan tunnelni dinamik tanlash.
+
+---
+
+### USTUN 9: Network Digital Twin, AI Anomaliya Bashorati & Avtomatik Baholash
+
+1. **What-If Raqamli Egizak (Digital Twin)**:
+   - Tarmoq trafigi 2x, 5x, 10x oshganda yoki muhim tranzit magistral uzilganda nima bo'lishini simulyatsiya qilish.
+2. **Avtomatik Baholash (Interactive NetAcad Auto-Grader)**:
+   - Talabalar yoki muhandislarning laboratoriya topshiriqlarini (IP manzil, OSPF, VLAN, Firewall qoidalari) avtomatik tekshirib ball qo'yish tizimi.
+
+---
+
 ## 3. Bosqichma-bosqich Amaliy Reja va Holat (Detailed Action Plan & Status)
 
 | Bosqich | Modul | Asosiy Vazifalar | Tayyorlik Mezoni | Holat |
@@ -166,6 +210,11 @@ Hozirgi tizimdagi nazariy L2 cheklovini to'liq yengib o'tish:
 | **Faza 4** | **Step-by-Step Simulation Mode** | • Topologiya kanvasida paket animatsiyasi (Canvas/SVG)<br/>• Play / Pause / Step-by-Step boshqaruv paneli<br/>• Tushib qolgan paketlarning qizil animatsiyasi | Foydalanuvchi paketni har bir hop bo'ylab to'xtatib-to'xtatib harakatlantira oladi | ✅ **Yakunlandi** |
 | **Faza 5** | **Haqiqiy Data-Plane (FIB & FRR)** | • Root simulyatorni haqiqiy FRR bilan birlashtirish<br/>• Dinamik marshrut konvergentsiyasi o'lchovi<br/>• Navbatlar va bufferbloat telemetriyasi | Tarmoq simulyatsiyasida real OSPF/BGP paketlari harakatlanadi, L2-only cheklovi yo'qoladi | ✅ **Yakunlandi** |
 | **Faza 6** | **OPNET Workload & Analitika** | • HTTP/3, Adaptive Video, VoIP MOS dvigateli<br/>• A/B testlar taqqoslash doskasi<br/>• PDF / LaTeX avtomatik hisobot eksporti | To'liq OPNET/Cisco darajasidagi yakuniy platforma | ✅ **Yakunlandi** |
+| **Faza 7** | **Tarmoq Xavfsizligi & Stateful Firewall** | • `lab/security/conntrack_engine.py` (TCP state tracking)<br/>• `lab/security/attack_simulator.py` (SYN flood, UDP reflection, Slowloris, ARP MitM)<br/>• Xavfsizlik qoidalari & IDS ogohlantirishlari API va UI | Conntrack holatlari, hujum anomaliyalari va filtr qoidalari real vaqtda kuzatiladi | 🚀 **Jarayonda** |
+| **Faza 8** | **P4-16 In-Band Telemetry (INT)** | • `lab/telemetry/int_collector.py` (INT header parser)<br/>• Hop-by-hop latency va switch queue tracking<br/>• UI PDU Inspector INT tab integratsiyasi | Paket har bir switchdan o'tganda mikrosekund kechikish va bufer hajmi qayd etiladi | 📅 **Rejalashtirilgan** |
+| **Faza 9** | **Multi-Cloud Overlay & SD-WAN** | • `lab/overlay/vxlan_evpn.py` va `lab/overlay/wireguard_vpn.py`<br/>• Overlay/Underlay topologiya generatori<br/>• Dynamic application-aware path selection | VXLAN/EVPN va shifrlangan WireGuard tunnellari orqali xavfsiz va samarali uzatish | 📅 **Rejalashtirilgan** |
+| **Faza 10** | **Digital Twin & Auto-Grader** | • `lab/twin/what_if_analyzer.py` ssenariy solveri<br/>• `lab/education/grader.py` (NetAcad lab avtomatik baholash)<br/>• UI Lab Task & Scoring paneli | Talaba laboratoriya topshiriqlarini avtomatik tekshiruvchi va "What-If" tahlil tizimi | 📅 **Rejalashtirilgan** |
+
 
 ---
 
