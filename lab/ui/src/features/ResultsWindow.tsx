@@ -34,12 +34,14 @@ const runName = (run:RunResult) => (run.label || run.scenario_name || run.run_id
 function StateBadge({status}:{status:string}) {
   return <Badge variant={status === 'done' ? 'success' : ['error','failed'].includes(status) ? 'destructive' : isActive(status) ? 'warning' : 'outline'}>{statusLabel(status)}</Badge>
 }
-export function ResultsWindow({win}:{win:Win}) {
+export function ResultsWindow({win}:{win?:Win}) {
+  const defaultWin: Win = { id: 'results:main', kind: 'results', ref: 'main', z: 1, x: 0, y: 0, w: 1000, h: 700 }
+  const activeWin = win || defaultWin
   const project=useStore(state => state.project.name)
-  const scoped = win.arg?.project === project ? win : {...win,arg:undefined}
-  return <ResultsWorkspace key={project} win={scoped} />
+  const scoped = activeWin.arg?.project === project ? activeWin : {...activeWin,arg:undefined}
+  return <ResultsWorkspace key={project} win={scoped} embedded={!win} />
 }
-function ResultsWorkspace({win}:{win:Win}) {
+function ResultsWorkspace({win, embedded}:{win:Win; embedded?: boolean}) {
   const project=useStore(state => state.project), pname=project.name
   const history=useRunHistory(pname), {runs}=history
   const [selected,setSelected]=useState<string[]>(win.arg?.run ? [win.arg.run] : [])
@@ -207,39 +209,58 @@ function ResultsWorkspace({win}:{win:Win}) {
     </>
   }
 
-  return (
-    <WindowFrame win={win} icon={<BarChart3 />} title={'Natijalar — '+pname} sub="Grafiklar, ilovalar sifati va tarmoq hodisalari">
-      <div className="results-workspace flex min-h-0 flex-1 flex-col"><div className="results-layout grid min-h-0 flex-1">
-        <ResultsHistory history={history} visible={visible} search={search} onSearch={setSearch} selected={selected} study={study} onStudy={id => {setStudy(id);setFlowSel('');setActionError('')}} onChoose={choose} onAction={perform} busy={Boolean(action)} onInvalid={() => setShowInvalid(value => !value)} />
-        <div className="flex min-h-0 min-w-0 flex-col">
-          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-card/40 px-4 py-2.5">
-            {study ? <Button size="xs" variant="ghost" onClick={() => setStudy(null)}><ArrowLeft /> Natijalarga</Button> : <div className="flex items-center gap-2 text-xs"><span className="font-semibold">{selected.length ? selected.length+' ta tanlandi' : 'Tahlil'}</span>{selected.length > 0 && <button aria-label="Tanlovni tozalash" className="text-muted-foreground hover:text-foreground" onClick={() => {auto.current=true;setSelected([])}}><X className="size-3.5" /></button>}</div>}
-            <div className="flex-1" /><Button size="xs" variant="ghost" onClick={refresh} aria-label="Natijalarni yangilash"><RefreshCw className={cn('size-3.5',history.loading && 'animate-spin')} /> Yangilash</Button>
-            {study ? <Button size="xs" variant="outline" asChild><a href={`/api/studies/${encodeURIComponent(pname)}/${encodeURIComponent(study)}/report.html`} target="_blank" rel="noreferrer"><FileText /> HTML</a></Button> : data.length === 1 ? <><Button size="xs" variant="outline" asChild><a href={`${root}/${encodeURIComponent(data[0].run_id)}/report.html`} target="_blank" rel="noreferrer"><FileText /> HTML</a></Button><Button size="xs" variant="outline" asChild><a href={`${root}/${encodeURIComponent(data[0].run_id)}/export.zip`}><Download /> ZIP</a></Button></> : data.length > 1 ? <Button size="xs" variant="outline" disabled={Boolean(action) || data.length !== selected.length} onClick={exportComparison}><FileText /> HTML</Button> : null}
-            <Button size="xs" variant="outline" onClick={exportLatex} disabled={!data.length || detail.loading.length > 0 || Boolean(action)} aria-label="LaTeX Hisobot (.tex)" title="LaTeX Hisobot (.tex)"><FileText className="size-3.5" /> LaTeX Hisobot (.tex)</Button>
-            <Button size="xs" variant="outline" onClick={exportCsv} disabled={!data.length || detail.loading.length > 0}><Download /> CSV</Button>
-          </div>
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
-            {actionError && <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs">{actionError}</div>}
-            {showInvalid && <Section title="O‘qilmagan natijalar" right={<Button size="xs" variant="ghost" disabled={Boolean(action)} onClick={async () => {setAction('reindex');try {await api.post(root+'/reindex');setInvalidPage(0);refresh()} catch(error) {setActionError(error instanceof Error ? error.message : 'Qayta tekshirilmadi')} finally {setAction('')}}}><RefreshCw /> Qayta tekshirish</Button>}>
-              {invalidError ? <p role="alert" className="p-3 text-xs text-destructive">{invalidError}</p> : invalid ? <><DataTable columns={['Run ID','Fayl, bayt','Sabab']} rows={invalid.files.map(file => [file.run_id,file.size,file.error])} empty="Barcha natijalar o‘qildi. Buzilgan fayl topilmadi." />{invalid.total > 20 && <div className="flex items-center justify-between border-t p-2 text-xs"><span>{invalidPage*20+1}–{Math.min((invalidPage+1)*20,invalid.total)} / {invalid.total}</span><div className="flex gap-1"><Button size="xs" variant="ghost" disabled={!invalidPage} onClick={() => setInvalidPage(value => value-1)}>Oldingi</Button><Button size="xs" variant="ghost" disabled={(invalidPage+1)*20 >= invalid.total} onClick={() => setInvalidPage(value => value+1)}>Keyingi</Button></div></div>}</> : <p className="p-3 text-xs text-muted-foreground">Tekshirilmoqda…</p>}
-            </Section>}
-            {study && <Section title="Tadqiqot holati" right={studyState && <StateBadge status={studyState.status} />}>
-              {detail.studyError ? <p role="alert" className="p-3 text-xs text-destructive">{detail.studyError}</p> : studyState ? <><div className="flex flex-wrap items-center justify-between gap-2 p-3 text-xs text-muted-foreground"><span>{studyState.observed_runs} / {studyState.planned_runs ?? '?'} variant · {studyState.complete ? 'Barcha variantlar tayyor' : studyState.settled ? 'Variantlar yakunlandi; barchasi muvaffaqiyatli emas' : 'Tadqiqot hali to‘liq emas'}</span>{isActive(studyState.status) && <Button size="xs" variant="outline" disabled={Boolean(action)} onClick={() => perform(study,'study')}><Square /> Tadqiqotni bekor qilish</Button>}</div><DataTable columns={['Run ID','Qiymat','Holat','Xato']} rows={studyState.runs.map(run => [run.run_id,String(run.study_value ?? '')+(run.study_value2 != null ? ' × '+String(run.study_value2) : ''),<StateBadge status={run.status} />,run.error || '—'])} />{!!studyState.missing_run_ids.length && <p className="p-3 text-xs text-warning">Yetishmayotgan variantlar: {studyState.missing_run_ids.join(', ')}</p>}</> : <p className="p-3 text-xs text-muted-foreground">Variantlar yuklanmoqda…</p>}
-            </Section>}
-            {!study && selected.length > 0 && <div className="flex flex-wrap gap-2">{selected.map(id => {const run=runs.find(item => item.run_id === id) || data.find(item => item.run_id === id);return <div key={id} className="flex max-w-full items-center gap-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-[10px]"><span className="max-w-48 truncate" title={id}>{run?.label || run?.scenario_name || id}</span>{run && <StateBadge status={runState(run)} />}{detail.loading.includes(id) && <Loader2 className="size-3 animate-spin" />}</div>})}</div>}
-            {Object.entries(detail.errors).map(([id,error]) => <div key={id} role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs"><b>{id}</b><p className="mt-1">{error}</p><Button size="xs" variant="outline" className="mt-2" onClick={refresh}>Qayta urinish</Button></div>)}
-            {detail.loading.length > 0 && <div role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> {detail.loading.length} ta natija yuklanmoqda…</div>}
-            {!!data.length && <><ResultStats data={data} /><div className="sticky top-0 z-10 flex shrink-0 gap-1 overflow-auto border-b bg-background/95" role="tablist" aria-label="Natija bo‘limlari">{([{id:'charts',label:'Grafiklar'},{id:'apps',label:'Ilovalar'},{id:'network',label:'Tarmoq sifati'},{id:'events',label:'Hodisalar'}] as const).map(tab => <button key={tab.id} role="tab" tabIndex={view === tab.id ? 0 : -1} onKeyDown={event => {
-                  const ids=['charts','apps','network','events'] as const
-                  const current=ids.indexOf(view)
-                  const next=event.key === 'ArrowRight' ? (current+1)%4 : event.key === 'ArrowLeft' ? (current+3)%4 : event.key === 'Home' ? 0 : event.key === 'End' ? 3 : -1
-                  if (next >= 0) {event.preventDefault();setView(ids[next]);document.getElementById('result-tab-'+win.id+'-'+ids[next])?.focus()}
-                }} aria-selected={view === tab.id} aria-controls={'result-'+win.id+'-'+tab.id} id={'result-tab-'+win.id+'-'+tab.id} onClick={() => setView(tab.id)} className={cn('whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground',view === tab.id && 'border-primary text-foreground')}>{tab.label}</button>)}</div></>}
-            <div id={'result-'+win.id+'-'+view} role={data.length ? "tabpanel" : undefined} aria-labelledby={data.length ? 'result-tab-'+win.id+'-'+view : undefined} className="flex flex-col gap-3">{view === 'charts' || !data.length ? body : <ResultInsights data={data} tab={view} />}</div>
+  const workspaceContent = (
+    <div className="results-workspace flex min-h-0 flex-1 flex-col"><div className="results-layout grid min-h-0 flex-1">
+      <ResultsHistory history={history} visible={visible} search={search} onSearch={setSearch} selected={selected} study={study} onStudy={id => {setStudy(id);setFlowSel('');setActionError('')}} onChoose={choose} onAction={perform} busy={Boolean(action)} onInvalid={() => setShowInvalid(value => !value)} />
+      <div className="flex min-h-0 min-w-0 flex-col">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-card/40 px-4 py-2.5">
+          {study ? <Button size="xs" variant="ghost" onClick={() => setStudy(null)}><ArrowLeft /> Natijalarga</Button> : <div className="flex items-center gap-2 text-xs"><span className="font-semibold">{selected.length ? selected.length+' ta tanlandi' : 'Tahlil'}</span>{selected.length > 0 && <button aria-label="Tanlovni tozalash" className="text-muted-foreground hover:text-foreground" onClick={() => {auto.current=true;setSelected([])}}><X className="size-3.5" /></button>}</div>}
+          <div className="flex-1" /><Button size="xs" variant="ghost" onClick={refresh} aria-label="Natijalarni yangilash"><RefreshCw className={cn('size-3.5',history.loading && 'animate-spin')} /> Yangilash</Button>
+          {study ? <Button size="xs" variant="outline" asChild><a href={`/api/studies/${encodeURIComponent(pname)}/${encodeURIComponent(study)}/report.html`} target="_blank" rel="noreferrer"><FileText /> HTML</a></Button> : data.length === 1 ? <><Button size="xs" variant="outline" asChild><a href={`${root}/${encodeURIComponent(data[0].run_id)}/report.html`} target="_blank" rel="noreferrer"><FileText /> HTML</a></Button><Button size="xs" variant="outline" asChild><a href={`${root}/${encodeURIComponent(data[0].run_id)}/export.zip`}><Download /> ZIP</a></Button></> : data.length > 1 ? <Button size="xs" variant="outline" disabled={Boolean(action) || data.length !== selected.length} onClick={exportComparison}><FileText /> HTML</Button> : null}
+          <Button size="xs" variant="outline" onClick={exportLatex} disabled={!data.length || detail.loading.length > 0 || Boolean(action)} aria-label="LaTeX Hisobot (.tex)" title="LaTeX Hisobot (.tex)"><FileText className="size-3.5" /> LaTeX Hisobot (.tex)</Button>
+          <Button size="xs" variant="outline" onClick={exportCsv} disabled={!data.length || detail.loading.length > 0}><Download /> CSV</Button>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-4">
+          {actionError && <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs">{actionError}</div>}
+          {showInvalid && <Section title="O‘qilmagan natijalar" right={<Button size="xs" variant="ghost" disabled={Boolean(action)} onClick={async () => {setAction('reindex');try {await api.post(root+'/reindex');setInvalidPage(0);refresh()} catch(error) {setActionError(error instanceof Error ? error.message : 'Qayta tekshirilmadi')} finally {setAction('')}}}><RefreshCw /> Qayta tekshirish</Button>}>
+            {invalidError ? <p role="alert" className="p-3 text-xs text-destructive">{invalidError}</p> : invalid ? <><DataTable columns={['Run ID','Fayl, bayt','Sabab']} rows={invalid.files.map(file => [file.run_id,file.size,file.error])} empty="Barcha natijalar o‘qildi. Buzilgan fayl topilmadi." />{invalid.total > 20 && <div className="flex items-center justify-between border-t p-2 text-xs"><span>{invalidPage*20+1}–{Math.min((invalidPage+1)*20,invalid.total)} / {invalid.total}</span><div className="flex gap-1"><Button size="xs" variant="ghost" disabled={!invalidPage} onClick={() => setInvalidPage(value => value-1)}>Oldingi</Button><Button size="xs" variant="ghost" disabled={(invalidPage+1)*20 >= invalid.total} onClick={() => setInvalidPage(value => value+1)}>Keyingi</Button></div></div>}</> : <p className="p-3 text-xs text-muted-foreground">Tekshirilmoqda…</p>}
+          </Section>}
+          {study && <Section title="Tadqiqot holati" right={studyState && <StateBadge status={studyState.status} />}>
+            {detail.studyError ? <p role="alert" className="p-3 text-xs text-destructive">{detail.studyError}</p> : studyState ? <><div className="flex flex-wrap items-center justify-between gap-2 p-3 text-xs text-muted-foreground"><span>{studyState.observed_runs} / {studyState.planned_runs ?? '?'} variant · {studyState.complete ? 'Barcha variantlar tayyor' : studyState.settled ? 'Variantlar yakunlandi; barchasi muvaffaqiyatli emas' : 'Tadqiqot hali to‘liq emas'}</span>{isActive(studyState.status) && <Button size="xs" variant="outline" disabled={Boolean(action)} onClick={() => perform(study,'study')}><Square /> Tadqiqotni bekor qilish</Button>}</div><DataTable columns={['Run ID','Qiymat','Holat','Xato']} rows={studyState.runs.map(run => [run.run_id,String(run.study_value ?? '')+(run.study_value2 != null ? ' × '+String(run.study_value2) : ''),<StateBadge status={run.status} />,run.error || '—'])} />{!!studyState.missing_run_ids.length && <p className="p-3 text-xs text-warning">Yetishmayotgan variantlar: {studyState.missing_run_ids.join(', ')}</p>}</> : <p className="p-3 text-xs text-muted-foreground">Variantlar yuklanmoqda…</p>}
+          </Section>}
+          {!study && selected.length > 0 && <div className="flex flex-wrap gap-2">{selected.map(id => {const run=runs.find(item => item.run_id === id) || data.find(item => item.run_id === id);return <div key={id} className="flex max-w-full items-center gap-2 rounded-md bg-muted/60 px-2.5 py-1.5 text-[10px]"><span className="max-w-48 truncate" title={id}>{run?.label || run?.scenario_name || id}</span>{run && <StateBadge status={runState(run)} />}{detail.loading.includes(id) && <Loader2 className="size-3 animate-spin" />}</div>})}</div>}
+          {Object.entries(detail.errors).map(([id,error]) => <div key={id} role="alert" className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs"><b>{id}</b><p className="mt-1">{error}</p><Button size="xs" variant="outline" className="mt-2" onClick={refresh}>Qayta urinish</Button></div>)}
+          {detail.loading.length > 0 && <div role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" /> {detail.loading.length} ta natija yuklanmoqda…</div>}
+          {!!data.length && <><ResultStats data={data} /><div className="sticky top-0 z-10 flex shrink-0 gap-1 overflow-auto border-b bg-background/95" role="tablist" aria-label="Natija bo‘limlari">{([{id:'charts',label:'Grafiklar'},{id:'apps',label:'Ilovalar'},{id:'network',label:'Tarmoq sifati'},{id:'events',label:'Hodisalar'}] as const).map(tab => <button key={tab.id} role="tab" tabIndex={view === tab.id ? 0 : -1} onKeyDown={event => {
+                const ids=['charts','apps','network','events'] as const
+                const current=ids.indexOf(view)
+                const next=event.key === 'ArrowRight' ? (current+1)%4 : event.key === 'ArrowLeft' ? (current+3)%4 : event.key === 'Home' ? 0 : event.key === 'End' ? 3 : -1
+                if (next >= 0) {event.preventDefault();setView(ids[next]);document.getElementById('result-tab-'+win.id+'-'+ids[next])?.focus()}
+              }} aria-selected={view === tab.id} aria-controls={'result-'+win.id+'-'+tab.id} id={'result-tab-'+win.id+'-'+tab.id} onClick={() => setView(tab.id)} className={cn('whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground',view === tab.id && 'border-primary text-foreground')}>{tab.label}</button>)}</div></>}
+          <div id={'result-'+win.id+'-'+view} role={data.length ? "tabpanel" : undefined} aria-labelledby={data.length ? 'result-tab-'+win.id+'-'+view : undefined} className="flex flex-col gap-3">{view === 'charts' || !data.length ? body : <ResultInsights data={data} tab={view} />}</div>
+        </div>
+      </div>
+    </div></div>
+  )
+
+  if (embedded) {
+    return (
+      <div className="glass flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl shadow-lg">
+        <div className="flex items-center gap-2.5 border-b border-border/50 px-4 py-2.5 bg-card/25 shrink-0">
+          <BarChart3 className="h-5 w-5 text-amber-400" />
+          <div>
+            <div className="text-xs font-semibold text-foreground">Tahlil va Natijalar — {pname}</div>
+            <div className="text-[10.5px] text-muted-foreground">Grafiklar, ilovalar sifati, SLA monitoring va LaTeX hisobotlar</div>
           </div>
         </div>
-      </div></div>
+        <div className="flex-1 min-h-0 overflow-hidden">{workspaceContent}</div>
+      </div>
+    )
+  }
+
+  return (
+    <WindowFrame win={win} icon={<BarChart3 />} title={'Natijalar — '+pname} sub="Grafiklar, ilovalar sifati va tarmoq hodisalari">
+      {workspaceContent}
     </WindowFrame>
   )
 }

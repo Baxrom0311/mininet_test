@@ -430,7 +430,7 @@ function generateInitialAlerts(): SecurityAlertItem[] {
 
 // ──────────────────────────────── SecurityStudio Component ────────────────────────────────
 
-export function SecurityStudio({ win }: { win: Win }) {
+export function SecurityStudio({ win }: { win?: Win }) {
   const [activeTab, setActiveTab] = useState<'conntrack' | 'attacks' | 'alerts'>('conntrack')
 
   // Conntrack State
@@ -937,14 +937,8 @@ export function SecurityStudio({ win }: { win: Win }) {
 
   // ──────────────────────── Render Tabs ────────────────────────
 
-  return (
-    <WindowFrame
-      win={win}
-      icon={<Shield className="h-5 w-5 text-primary" />}
-      title="Security Studio"
-      sub="Conntrack Sessiyalar Jadvali, Kibernetik Hujumlar Simulyatori va IDS Monitoring"
-    >
-      <div className="flex flex-col h-full overflow-hidden">
+  const bodyContent = (
+    <div className="flex flex-col h-full overflow-hidden">
         {/* Navigation Tabs Header */}
         <div className="flex items-center justify-between border-b px-3 py-1.5 bg-muted/20">
           <Segmented
@@ -2040,6 +2034,31 @@ export function SecurityStudio({ win }: { win: Win }) {
           </div>
         )}
       </div>
+  )
+
+  if (!win) {
+    return (
+      <div className="glass flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl shadow-lg">
+        <div className="flex items-center gap-2.5 border-b border-border/50 px-4 py-2.5 bg-card/25 shrink-0">
+          <Shield className="h-5 w-5 text-rose-400" />
+          <div>
+            <div className="text-xs font-semibold text-foreground">Security Studio</div>
+            <div className="text-[10.5px] text-muted-foreground">Conntrack Sessiyalar Jadvali, Kibernetik Hujumlar Simulyatori va IDS Monitoring</div>
+          </div>
+        </div>
+        {bodyContent}
+      </div>
+    )
+  }
+
+  return (
+    <WindowFrame
+      win={win}
+      icon={<Shield className="h-5 w-5 text-primary" />}
+      title="Security Studio"
+      sub="Conntrack Sessiyalar Jadvali, Kibernetik Hujumlar Simulyatori va IDS Monitoring"
+    >
+      {bodyContent}
     </WindowFrame>
   )
 }

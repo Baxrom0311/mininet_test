@@ -90,7 +90,7 @@ export interface StreamDetail extends StreamSummary {
 
 type TabType = 'cwnd' | 'rtt' | 'rate' | 'buffers' | 'queues' | 'workloads' | 'sla' | 'compare'
 
-export function TransportObservatory({ win }: { win: Win }) {
+export function TransportObservatory({ win }: { win?: Win }) {
   const [streams, setStreams] = useState<StreamSummary[]>([])
   const [selectedStreamId, setSelectedStreamId] = useState<string>('')
   const [streamDetail, setStreamDetail] = useState<StreamDetail | null>(null)
@@ -480,14 +480,8 @@ export function TransportObservatory({ win }: { win: Win }) {
   const rcvSpaceKb = cur?.rcv_space ? Math.round(cur.rcv_space / 1024) : 64
   const rcvBufPercent = Math.min(100, Math.round((rcvSpaceKb / Math.max(1, rcvBufKb)) * 100))
 
-  return (
-    <WindowFrame
-      win={win}
-      icon={<Activity className="text-primary" />}
-      title="Transport Qatlami (L4) & OPNET Observatory"
-      sub="TCP CWND · RTT · Jitter (RFC 3550) · Linux Qdisc Bufferbloat · ITU-T G.107 VoIP · ABR Video · SLA & A/B Engine"
-    >
-      <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3">
+  const bodyContent = (
+    <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-auto p-3">
         {/* Yuqori boshqaruv paneli */}
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-card/40 p-2 shadow-sm">
           <div className="flex flex-wrap items-center gap-2.5">
@@ -1461,6 +1455,31 @@ export function TransportObservatory({ win }: { win: Win }) {
           </div>
         </div>
       </div>
+  )
+
+  if (!win) {
+    return (
+      <div className="glass flex h-full min-h-0 flex-1 flex-col overflow-hidden rounded-xl shadow-lg">
+        <div className="flex items-center gap-2.5 border-b border-border/50 px-4 py-2.5 bg-card/25 shrink-0">
+          <Activity className="h-5 w-5 text-emerald-400" />
+          <div>
+            <div className="text-xs font-semibold text-foreground">Transport Qatlami (L4) & OPNET Observatory</div>
+            <div className="text-[10.5px] text-muted-foreground">TCP CWND · RTT · Jitter (RFC 3550) · Linux Qdisc Bufferbloat · ITU-T G.107 VoIP · ABR Video · SLA & A/B Engine</div>
+          </div>
+        </div>
+        {bodyContent}
+      </div>
+    )
+  }
+
+  return (
+    <WindowFrame
+      win={win}
+      icon={<Activity className="text-primary" />}
+      title="Transport Qatlami (L4) & OPNET Observatory"
+      sub="TCP CWND · RTT · Jitter (RFC 3550) · Linux Qdisc Bufferbloat · ITU-T G.107 VoIP · ABR Video · SLA & A/B Engine"
+    >
+      {bodyContent}
     </WindowFrame>
   )
 }

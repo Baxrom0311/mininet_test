@@ -1,22 +1,45 @@
 import { useState } from 'react'
-import { Activity, BarChart3, Cable, Cpu, LineChart, MousePointer2, Network, Plus, Trash2 } from 'lucide-react'
+import {
+  Cable,
+  ChevronLeft,
+  ChevronRight,
+  Cpu,
+  LineChart,
+  MousePointer2,
+  Network,
+  Plus,
+  Trash2,
+} from 'lucide-react'
 import { DeviceIcon } from '@/components/DeviceIcon'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { Field, Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
+import { Tip } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/toast'
-import { devLabel, mutate, openWin, setMode, useStore } from '@/lib/store'
+import { devLabel, mutate, openWin, setMode, toggleSidebar, useStore } from '@/lib/store'
 import type { DeviceType } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 const PALETTE: DeviceType[] = ['host', 'server', 'switch', 'p4switch', 'router', 'sdnrouter', 'wifiap']
 
-function SecTitle({ children, onAdd, addTitle }: { children: React.ReactNode; onAdd?: () => void; addTitle?: string }) {
+function SecTitle({
+  children,
+  onAdd,
+  addTitle,
+}: {
+  children: React.ReactNode
+  onAdd?: () => void
+  addTitle?: string
+}) {
   return (
-    <div className="flex items-center justify-between px-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
       {children}
-      {onAdd && <button title={addTitle} onClick={onAdd} className="rounded p-0.5 hover:bg-accent hover:text-foreground"><Plus className="h-3.5 w-3.5" /></button>}
+      {onAdd && (
+        <button title={addTitle} onClick={onAdd} className="rounded p-0.5 hover:bg-accent hover:text-foreground">
+          <Plus className="h-3 w-3" />
+        </button>
+      )}
     </div>
   )
 }
@@ -25,61 +48,187 @@ export function Sidebar() {
   const mode = useStore((s) => s.mode)
   const placeType = useStore((s) => s.placeType)
   const project = useStore((s) => s.project)
+  const collapsed = useStore((s) => s.sidebarCollapsed)
   const [dlg, setDlg] = useState<null | 'p4' | 'sdn' | 'scenario'>(null)
 
   const tools: [typeof mode, string, string, React.ReactNode][] = [
-    ['select', "Tanlash / ko'chirish", 'V', <MousePointer2 key="s" />],
-    ['link', 'Kabel ulash', 'C', <Cable key="l" />],
-    ['delete', "O'chirish", 'D', <Trash2 key="d" />],
+    ['select', "Tanlash / ko'chirish", 'V', <MousePointer2 key="s" className="h-4 w-4" />],
+    ['link', 'Kabel ulash', 'C', <Cable key="l" className="h-4 w-4" />],
+    ['delete', "O'chirish", 'D', <Trash2 key="d" className="h-4 w-4" />],
   ]
-  return (
-    <aside className="glass flex min-h-0 flex-col gap-4 overflow-auto rounded-xl p-3">
-      <div className="flex flex-col gap-2">
-        <SecTitle>Qurilmalar</SecTitle>
-        <div className="grid grid-cols-2 gap-1.5">
+
+  // Yig'ilgan (Collapsed) Mini Rail ko'rinishi
+  if (collapsed) {
+    return (
+      <aside className="glass flex h-full w-12 flex-col items-center gap-3 py-2.5 rounded-xl transition-all">
+        <Tip content="Panelni kengaytirish">
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={toggleSidebar}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </Tip>
+
+        <div className="h-px w-6 bg-border/60" />
+
+        {/* Asboblar */}
+        <div className="flex flex-col gap-1.5">
+          {tools.map(([m, label, key, icon]) => (
+            <Tip key={m} content={`${label} (${key})`}>
+              <Button
+                variant={mode === m ? 'secondary' : 'ghost'}
+                size="icon"
+                className={cn('h-8 w-8', mode === m && 'bg-accent text-foreground shadow-sm')}
+                onClick={() => setMode(m)}
+              >
+                {icon}
+              </Button>
+            </Tip>
+          ))}
+        </div>
+
+        <div className="h-px w-6 bg-border/60" />
+
+        {/* Tezkor Qurilmalar */}
+        <div className="flex flex-col gap-1.5 overflow-auto">
           {PALETTE.map((t) => (
-            <button key={t} draggable onDragStart={(e) => e.dataTransfer.setData('text/netlab-type', t)}
-              onClick={() => setMode(mode === 'place' && placeType === t ? 'select' : 'place', t)}
-              title="Bosing va kanvasga joylang (yoki sudrang). Shift — bir nechta."
-              className={cn('flex flex-col items-center gap-1 rounded-lg border bg-background/30 px-1 pb-2 pt-2.5 text-[11px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground',
-                mode === 'place' && placeType === t && 'border-foreground/60 bg-accent text-foreground')}>
-              <DeviceIcon type={t} size={28} />
-              {devLabel(t)}
+            <Tip key={t} content={`Joylash: ${devLabel(t)}`}>
+              <button
+                draggable
+                onDragStart={(e) => e.dataTransfer.setData('text/netlab-type', t)}
+                onClick={() => setMode(mode === 'place' && placeType === t ? 'select' : 'place', t)}
+                className={cn(
+                  'grid h-8 w-8 place-items-center rounded-lg border border-transparent p-1 transition-colors hover:border-border hover:bg-accent/50',
+                  mode === 'place' && placeType === t && 'border-foreground/50 bg-accent'
+                )}
+              >
+                <DeviceIcon type={t} size={20} />
+              </button>
+            </Tip>
+          ))}
+        </div>
+      </aside>
+    )
+  }
+
+  // To'liq Kengaytirilgan ko'rinish
+  return (
+    <aside className="glass flex h-full min-h-0 w-52 flex-col gap-3.5 overflow-auto rounded-xl p-3 text-xs transition-all">
+      {/* Sarlavha va Yig'ish tugmasi */}
+      <div className="flex items-center justify-between pb-1 border-b border-border/40">
+        <span className="font-semibold text-foreground text-xs">Asboblar paneli</span>
+        <Tip content="Panelni yig'ish (bo'sh joyni ko'paytirish)">
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-foreground" onClick={toggleSidebar}>
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </Button>
+        </Tip>
+      </div>
+
+      {/* Asboblar (Select, Link, Delete) */}
+      <div className="flex flex-col gap-1">
+        <SecTitle>Rejimlar</SecTitle>
+        <div className="flex flex-col gap-0.5">
+          {tools.map(([m, label, key, icon]) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={cn(
+                'flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground',
+                mode === m && 'bg-accent text-foreground font-medium shadow-sm'
+              )}
+            >
+              {icon}
+              <span>{label}</span>
+              <span className="kbd ml-auto">{key}</span>
             </button>
           ))}
         </div>
       </div>
-      <div className="flex flex-col gap-1">
-        <SecTitle>Asboblar</SecTitle>
-        {tools.map(([m, label, key, icon]) => (
-          <button key={m} onClick={() => setMode(m)}
-            className={cn('flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&_svg]:size-4',
-              mode === m && 'bg-accent text-foreground')}>
-            {icon}<span>{label}</span><span className="kbd ml-auto">{key}</span>
-          </button>
-        ))}
+
+      {/* Qurilmalar Palitrasi */}
+      <div className="flex flex-col gap-1.5">
+        <SecTitle>Qurilmalar</SecTitle>
+        <div className="grid grid-cols-2 gap-1.5">
+          {PALETTE.map((t) => (
+            <button
+              key={t}
+              draggable
+              onDragStart={(e) => e.dataTransfer.setData('text/netlab-type', t)}
+              onClick={() => setMode(mode === 'place' && placeType === t ? 'select' : 'place', t)}
+              title="Bosing va kanvasga joylang (yoki sudrang). Shift — bir nechta."
+              className={cn(
+                'flex flex-col items-center gap-1 rounded-lg border border-border/40 bg-card/30 px-1 py-2 text-[10.5px] text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground',
+                mode === 'place' && placeType === t && 'border-foreground/60 bg-accent text-foreground font-semibold'
+              )}
+            >
+              <DeviceIcon type={t} size={24} />
+              <span>{devLabel(t)}</span>
+            </button>
+          ))}
+        </div>
       </div>
-      <ResList title="P4 dasturlar" icon={<Cpu />} items={Object.keys(project.p4_programs).map((n) => [n, '.p4'])}
-        empty="yo'q — P4 switch qo'shilganda shablon qo'shiladi" onAdd={() => setDlg('p4')} onOpen={(n) => openWin('p4', n, { w: 880, h: 640 })} />
-      <ResList title="SDN kontrollerlar" icon={<Network />} items={Object.entries(project.controllers).map(([n, c]) => [n, ':' + c.port])}
-        empty="yo'q" onAdd={() => setDlg('sdn')} onOpen={(n) => openWin('sdn', n, { w: 880, h: 660 })} />
-      <ResList title="Ssenariylar" icon={<LineChart />} items={Object.entries(project.scenarios || {}).map(([n, sc]) => [n, `${(sc.apps || []).length} ilova`])}
-        empty="yo'q — trafik va hodisalarni tahlil qilish uchun" onAdd={() => setDlg('scenario')} onOpen={(n) => openWin('scenario', n, { w: 940, h: 680 })} />
-      <Button variant="outline" size="sm" onClick={() => openWin('telemetry', 'main', { w: 980, h: 680 })}><Activity /> L4 Observatory</Button>
-      <Button variant="outline" size="sm" onClick={() => openWin('results', 'main', { w: 1060, h: 700 })}><BarChart3 /> Natijalar va solishtirish</Button>
+
+      {/* Dasturlash va Ssenariylar */}
+      <div className="flex flex-col gap-2.5 mt-auto pt-2 border-t border-border/40">
+        <ResList
+          title="P4 Dasturlar"
+          icon={<Cpu className="h-3.5 w-3.5 text-sky-400" />}
+          items={Object.keys(project.p4_programs).map((n) => [n, '.p4'])}
+          empty="yo'q"
+          onAdd={() => setDlg('p4')}
+          onOpen={(n) => openWin('p4', n, { w: 880, h: 640 })}
+        />
+        <ResList
+          title="SDN Kontrollerlar"
+          icon={<Network className="h-3.5 w-3.5 text-emerald-400" />}
+          items={Object.entries(project.controllers).map(([n, c]) => [n, ':' + c.port])}
+          empty="yo'q"
+          onAdd={() => setDlg('sdn')}
+          onOpen={(n) => openWin('sdn', n, { w: 880, h: 660 })}
+        />
+        <ResList
+          title="Ssenariylar"
+          icon={<LineChart className="h-3.5 w-3.5 text-purple-400" />}
+          items={Object.entries(project.scenarios || {}).map(([n, sc]) => [n, `${(sc.apps || []).length} ilova`])}
+          empty="yo'q"
+          onAdd={() => setDlg('scenario')}
+          onOpen={(n) => openWin('scenario', n, { w: 940, h: 680 })}
+        />
+      </div>
+
       <NewResourceDialog kind={dlg} onClose={() => setDlg(null)} />
     </aside>
   )
 }
 
-function ResList({ title, icon, items, empty, onAdd, onOpen }: { title: string; icon: React.ReactNode; items: [string, string][]; empty: string; onAdd: () => void; onOpen: (n: string) => void }) {
+function ResList({
+  title,
+  icon,
+  items,
+  empty,
+  onAdd,
+  onOpen,
+}: {
+  title: string
+  icon: React.ReactNode
+  items: [string, string][]
+  empty: string
+  onAdd: () => void
+  onOpen: (n: string) => void
+}) {
   return (
     <div className="flex flex-col gap-1">
-      <SecTitle onAdd={onAdd} addTitle={'Yangi: ' + title}>{title}</SecTitle>
-      {!items.length && <div className="px-1 text-[11px] text-muted-foreground/80">{empty}</div>}
+      <SecTitle onAdd={onAdd} addTitle={'Yangi: ' + title}>
+        {title}
+      </SecTitle>
+      {!items.length && <div className="px-1 text-[10.5px] text-muted-foreground/60">{empty}</div>}
       {items.map(([n, tag]) => (
-        <button key={n} onClick={() => onOpen(n)} className="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground [&_svg]:size-3.5">
-          {icon}<span className="truncate">{n}</span><span className="ml-auto font-mono text-[10px] opacity-70">{tag}</span>
+        <button
+          key={n}
+          onClick={() => onOpen(n)}
+          className="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        >
+          {icon}
+          <span className="truncate">{n}</span>
+          <span className="ml-auto font-mono text-[10px] opacity-60">{tag}</span>
         </button>
       ))}
     </div>
@@ -91,13 +240,16 @@ function NewResourceDialog({ kind, onClose }: { kind: null | 'p4' | 'sdn' | 'sce
   const [name, setName] = useState('')
   const [tpl, setTpl] = useState<string>('')
   const tpls = kind === 'p4' ? templates.p4 : kind === 'sdn' ? templates.sdn : {}
+
   const create = () => {
     const n = name.trim()
     const p = useStore.getState().project
     if (kind === 'scenario') {
       if (!/^[A-Za-z0-9_-]{1,30}$/.test(n)) return toast('Nom: harf/raqam/_/- (1-30)', 'error')
       if (p.scenarios[n]) return toast('Bu nom band', 'error')
-      mutate((q) => { q.scenarios[n] = { duration: 30, apps: [], events: [] } })
+      mutate((q) => {
+        q.scenarios[n] = { duration: 30, apps: [], events: [] }
+      })
       openWin('scenario', n, { w: 940, h: 680 })
     } else {
       const re = kind === 'p4' ? /^[a-z][a-z0-9_]{0,23}$/ : /^[a-z][a-z0-9]{0,7}$/
@@ -105,26 +257,65 @@ function NewResourceDialog({ kind, onClose }: { kind: null | 'p4' | 'sdn' | 'sce
       const src = tpl && tpl !== '__empty__' ? tpls[tpl] : ''
       if (kind === 'p4') {
         if (p.p4_programs[n]) return toast('Bu nom band', 'error')
-        mutate((q) => { q.p4_programs[n] = src }); openWin('p4', n, { w: 880, h: 640 })
+        mutate((q) => {
+          q.p4_programs[n] = src
+        })
+        openWin('p4', n, { w: 880, h: 640 })
       } else {
         if (p.controllers[n]) return toast('Bu nom band', 'error')
         const used = Object.values(p.controllers).map((c) => c.port)
-        let port = 6653; while (used.includes(port)) port++
-        mutate((q) => { q.controllers[n] = { code: src, port } }); openWin('sdn', n, { w: 880, h: 660 })
+        let port = 6653
+        while (used.includes(port)) port++
+        mutate((q) => {
+          q.controllers[n] = { code: src, port }
+        })
+        openWin('sdn', n, { w: 880, h: 660 })
       }
     }
-    setName(''); onClose()
+    setName('')
+    onClose()
   }
+
   const title = kind === 'p4' ? 'Yangi P4 dastur' : kind === 'sdn' ? 'Yangi SDN kontroller' : 'Yangi ssenariy'
+
   return (
-    <Dialog open={!!kind} onOpenChange={(o) => !o && onClose()} title={title}
-      description={kind === 'scenario' ? "Ssenariy = trafik ilovalari (UDP/TCP/ping) + vaqtli hodisalar. Analitik, ns-3 yoki Mininet dvigatelida ishga tushirib, natijalarni solishtirasiz." : undefined}
-      footer={<><Button variant="ghost" onClick={onClose}>Bekor</Button><Button onClick={create}>Yaratish</Button></>}>
-      <Field label="Nom"><Input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={kind === 'p4' ? 'my_router' : kind === 'sdn' ? 'c2' : 'uzilish'} onKeyDown={(e) => e.key === 'Enter' && create()} /></Field>
+    <Dialog
+      open={!!kind}
+      onOpenChange={(o) => !o && onClose()}
+      title={title}
+      description={
+        kind === 'scenario'
+          ? 'Ssenariy = trafik ilovalari (UDP/TCP/ping) + vaqtli hodisalar. Natijalarni solishtirish uchun ishlatiladi.'
+          : undefined
+      }
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Bekor
+          </Button>
+          <Button onClick={create}>Yaratish</Button>
+        </>
+      }
+    >
+      <Field label="Nom">
+        <Input
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={kind === 'p4' ? 'my_router' : kind === 'sdn' ? 'c2' : 'uzilish'}
+          onKeyDown={(e) => e.key === 'Enter' && create()}
+        />
+      </Field>
       {kind !== 'scenario' && (
         <Field label="Asos">
-          <Select value={tpl || Object.keys(tpls)[0] || '__empty__'} onChange={setTpl}
-            options={[{ value: '__empty__', label: "— bo'sh —" }, ...Object.keys(tpls).map((t) => ({ value: t, label: 'shablon: ' + t }))]} />
+          <Select
+            value={tpl || Object.keys(tpls)[0] || '__empty__'}
+            onChange={setTpl}
+            options={[
+              { value: '__empty__', label: "— bo'sh —" },
+              ...Object.keys(tpls).map((t) => ({ value: t, label: 'shablon: ' + t })),
+            ]}
+          />
         </Field>
       )}
     </Dialog>

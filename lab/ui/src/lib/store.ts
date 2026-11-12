@@ -10,6 +10,7 @@ import type { Device, DeviceType, Info, Link, LinkParams, LinkStats, Project, Sc
 
 export type Mode = 'select' | 'link' | 'delete' | 'place' | 'pick'
 export type WinKind = 'device' | 'p4' | 'sdn' | 'scenario' | 'results' | 'telemetry' | 'pdu' | 'security'
+export type ActiveTab = 'canvas' | 'telemetry' | 'security' | 'results'
 export interface Win { id: string; kind: WinKind; ref: string; tab?: string; z: number; x: number; y: number; w: number; h: number; arg?: any }
 
 const TYPE_PREFIX: Record<DeviceType, string> = { host: 'pc', server: 'srv', switch: 's', p4switch: 'p', router: 'r', sdnrouter: 'sr', wifiap: 'ap' }
@@ -40,6 +41,9 @@ interface State {
   theme: 'dark' | 'light'
   canUndo: boolean
   canRedo: boolean
+  activeTab: ActiveTab
+  sidebarCollapsed: boolean
+  inspectorOpen: boolean
 }
 
 export const useStore = create<State>(() => ({
@@ -47,6 +51,9 @@ export const useStore = create<State>(() => ({
   stats: {}, history: {}, mode: 'select', placeType: null, linkSrc: null, overlay: [], pickCb: null, busy: null, wsOk: false, wins: [], zTop: 10,
   theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
   canUndo: false, canRedo: false,
+  activeTab: 'canvas',
+  sidebarCollapsed: false,
+  inspectorOpen: false,
 }))
 
 const S = () => useStore.getState()
@@ -285,7 +292,12 @@ export async function saveProject(name?: string) {
 // ---------------- kanvas rejimi / oynalar ----------------
 export const setMode = (mode: Mode, placeType: DeviceType | null = null) => set({ mode, placeType, linkSrc: null, ...(mode !== 'pick' ? { pickCb: null } : {}) })
 export const pickPoint = (cb: (x: number, y: number) => void) => set({ mode: 'pick', pickCb: cb })
-export const select = (selection: Selection) => set({ selection })
+export const setActiveTab = (activeTab: ActiveTab) => set({ activeTab })
+export const toggleSidebar = () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed }))
+export const setSidebarCollapsed = (sidebarCollapsed: boolean) => set({ sidebarCollapsed })
+export const toggleInspector = () => set((s) => ({ inspectorOpen: !s.inspectorOpen }))
+export const setInspectorOpen = (inspectorOpen: boolean) => set({ inspectorOpen })
+export const select = (selection: Selection) => set({ selection, inspectorOpen: !!selection })
 
 export function openWin(kind: WinKind, ref: string, opts: { tab?: string; w?: number; h?: number; arg?: any } = {}) {
   const id = `${kind}:${ref}`
