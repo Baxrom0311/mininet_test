@@ -583,6 +583,102 @@ def create_app(driver_name="demo", token=None):
             raise HTTPException(404, "tadqiqot natijalari topilmadi")
         return _html(study_report(rs, state), f"{study_id}.html")
 
+    # ───────────── Telemetriya: L4 Observatory ─────────────
+    @app.get("/api/telemetry/streams")
+    @app.get("/api/telemetry/l4/streams")
+    def telemetry_streams():
+        from lab.telemetry import telemetry_manager
+        return {"streams": telemetry_manager.get_active_streams()}
+
+    @app.get("/api/telemetry/stream/{stream_id:path}")
+    @app.get("/api/telemetry/l4/streams/{stream_id:path}")
+    def telemetry_stream_detail(stream_id: str):
+        from lab.telemetry import telemetry_manager
+        detail = telemetry_manager.get_stream_detail(stream_id)
+        if not detail:
+            raise HTTPException(404, f"Oqim '{stream_id}' topilmadi")
+        return detail
+
+    @app.get("/api/telemetry/stats")
+    @app.get("/api/telemetry/l4/stats")
+    def telemetry_stats():
+        from lab.telemetry import telemetry_manager
+        return telemetry_manager.get_global_stats()
+
+    @app.get("/api/telemetry/drops")
+    @app.get("/api/telemetry/l4/drops")
+    def telemetry_drops(limit: int = 50):
+        from lab.telemetry import telemetry_manager
+        return {"drops": telemetry_manager.get_recent_drops(limit=limit)}
+
+    @app.post("/api/telemetry/dissect")
+    @app.post("/api/telemetry/l4/dissect")
+    def telemetry_dissect(body: dict):
+        from lab.telemetry import telemetry_manager
+        raw_hex = body.get("hex")
+        raw_b64 = body.get("base64")
+        if raw_hex:
+            try:
+                raw_bytes = bytes.fromhex(raw_hex.replace(" ", "").replace("\n", "").replace("0x", ""))
+            except ValueError:
+                raise HTTPException(400, "Noto'g'ri hex format")
+        elif raw_b64:
+            import base64
+            try:
+                raw_bytes = base64.b64decode(raw_b64)
+            except Exception:
+                raise HTTPException(400, "Noto'g'ri base64 format")
+        else:
+            raise HTTPException(400, "'hex' yoki 'base64' maydoni kerak")
+        return telemetry_manager.dissect_raw(raw_bytes)
+
+    @app.post("/api/telemetry/simulate")
+    def telemetry_simulate(body: dict):
+        from lab.telemetry import telemetry_manager, TCPInfoCollector
+        src_ip = body.get("src_ip", "10.0.1.10")
+        src_port = int(body.get("src_port", 45678))
+        dst_ip = body.get("dst_ip", "10.0.2.20")
+        dst_port = int(body.get("dst_port", 80))
+        steps = int(body.get("steps", 10))
+        has_loss = bool(body.get("has_loss", False))
+        for step in range(steps):
+            sample = TCPInfoCollector.simulate_sample(
+                src_ip, src_port, dst_ip, dst_port, step, has_loss=(has_loss and step == 7)
+            )
+            telemetry_manager.ingest_tcp_sample(sample)
+        return {"ok": True, "stream_id": f"{src_ip}:{src_port}->{dst_ip}:{dst_port}"}
+
+    @app.websocket("/ws/telemetry")
+    async def ws_telemetry(ws: WebSocket):
+        if not same_origin(ws.headers.get("origin"), ws.url):
+            await ws.close(code=1008, reason="Origin denied")
+            return
+        if not _authorized(ws.cookies, ws.query_params):
+            await ws.close(code=4401)
+            return
+        await ws.accept()
+        from lab.telemetry import telemetry_manager
+        q = telemetry_manager.subscribe()
+        await ws.send_json({"type": "init", "streams": telemetry_manager.get_active_streams()})
+
+        async def pump():
+            while True:
+                ev = await q.get()
+                batch = [ev]
+                while not q.empty() and len(batch) < 50:
+                    batch.append(q.get_nowait())
+                await ws.send_text(json.dumps(batch if len(batch) > 1 else ev, default=str))
+
+        task = asyncio.create_task(pump())
+        try:
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            pass
+        finally:
+            task.cancel()
+            telemetry_manager.unsubscribe(q)
+
     # ───────────── WebSocket: hodisalar ─────────────
     @app.websocket("/ws/events")
     async def ws_events(ws: WebSocket):
