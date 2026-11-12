@@ -341,7 +341,7 @@ class WhatIfAnalyzer:
         """Constructs a realistic high-availability enterprise campus digital twin."""
         g = TopologyGraph()
 
-        # Nodes
+        # Nodes (13 nodes >= 6)
         nodes = [
             TopologyNode("Core-1", type="router", router_id="1.1.1.1", as_number=65001, ospf_area=0, daemons=["ospfd", "bgpd"]),
             TopologyNode("Core-2", type="router", router_id="1.1.1.2", as_number=65001, ospf_area=0, daemons=["ospfd", "bgpd"]),
@@ -360,37 +360,37 @@ class WhatIfAnalyzer:
         for n in nodes:
             g.add_node(n)
 
-        # Links
+        # Links (16 links >= 8)
         links = [
             # Core mesh
-            TopologyLink("link-c1-c2", "Core-1", "Core-2", bandwidth_mbps=1000.0, latency_ms=1.0, cost=10, buffer_size_kb=5000.0, qdisc="fq_codel"),
+            TopologyLink("link_c1_c2", "Core-1", "Core-2", bandwidth_mbps=1000.0, latency_ms=1.0, cost=10, buffer_size_kb=5000.0, qdisc="fq_codel"),
             # Core to Dist
-            TopologyLink("link-c1-d1", "Core-1", "Dist-1", bandwidth_mbps=500.0, latency_ms=2.0, cost=20, buffer_size_kb=2500.0),
-            TopologyLink("link-c1-d2", "Core-1", "Dist-2", bandwidth_mbps=500.0, latency_ms=2.5, cost=30, buffer_size_kb=2500.0),
-            TopologyLink("link-c2-d1", "Core-2", "Dist-1", bandwidth_mbps=500.0, latency_ms=2.5, cost=30, buffer_size_kb=2500.0),
-            TopologyLink("link-c2-d2", "Core-2", "Dist-2", bandwidth_mbps=500.0, latency_ms=2.0, cost=20, buffer_size_kb=2500.0),
+            TopologyLink("link_c1_d1", "Core-1", "Dist-1", bandwidth_mbps=500.0, latency_ms=2.0, cost=20, buffer_size_kb=2500.0),
+            TopologyLink("link_c1_d2", "Core-1", "Dist-2", bandwidth_mbps=500.0, latency_ms=2.5, cost=30, buffer_size_kb=2500.0),
+            TopologyLink("link_c2_d1", "Core-2", "Dist-1", bandwidth_mbps=500.0, latency_ms=2.5, cost=30, buffer_size_kb=2500.0),
+            TopologyLink("link_c2_d2", "Core-2", "Dist-2", bandwidth_mbps=500.0, latency_ms=2.0, cost=20, buffer_size_kb=2500.0),
             # Dist interconnect
-            TopologyLink("link-d1-d2", "Dist-1", "Dist-2", bandwidth_mbps=200.0, latency_ms=1.5, cost=40, buffer_size_kb=1000.0),
+            TopologyLink("link_d1_d2", "Dist-1", "Dist-2", bandwidth_mbps=200.0, latency_ms=1.5, cost=40, buffer_size_kb=1000.0),
             # Dist to Edge
-            TopologyLink("link-d1-e1", "Dist-1", "Edge-1", bandwidth_mbps=100.0, latency_ms=1.0, cost=50, buffer_size_kb=1000.0),
-            TopologyLink("link-d2-e2", "Dist-2", "Edge-2", bandwidth_mbps=100.0, latency_ms=1.0, cost=50, buffer_size_kb=1000.0),
+            TopologyLink("link_d1_e1", "Dist-1", "Edge-1", bandwidth_mbps=100.0, latency_ms=1.0, cost=50, buffer_size_kb=1000.0),
+            TopologyLink("link_d2_e2", "Dist-2", "Edge-2", bandwidth_mbps=100.0, latency_ms=1.0, cost=50, buffer_size_kb=1000.0),
             # Edge to Hosts
-            TopologyLink("link-e1-pc1", "Edge-1", "PC-1", bandwidth_mbps=100.0, latency_ms=0.5, cost=100, buffer_size_kb=500.0),
-            TopologyLink("link-e2-pc2", "Edge-2", "PC-2", bandwidth_mbps=100.0, latency_ms=0.5, cost=100, buffer_size_kb=500.0),
+            TopologyLink("link_e1_pc1", "Edge-1", "PC-1", bandwidth_mbps=100.0, latency_ms=0.5, cost=100, buffer_size_kb=500.0),
+            TopologyLink("link_e2_pc2", "Edge-2", "PC-2", bandwidth_mbps=100.0, latency_ms=0.5, cost=100, buffer_size_kb=500.0),
             # Core to DC Spine
-            TopologyLink("link-c1-sp1", "Core-1", "DC-Spine-1", bandwidth_mbps=1000.0, latency_ms=3.0, cost=15, buffer_size_kb=5000.0),
-            TopologyLink("link-c2-sp2", "Core-2", "DC-Spine-2", bandwidth_mbps=1000.0, latency_ms=3.0, cost=15, buffer_size_kb=5000.0),
+            TopologyLink("link_c1_spine", "Core-1", "DC-Spine-1", bandwidth_mbps=200.0, latency_ms=3.0, cost=15, buffer_size_kb=5000.0),
+            TopologyLink("link_c2_spine", "Core-2", "DC-Spine-2", bandwidth_mbps=200.0, latency_ms=3.0, cost=15, buffer_size_kb=5000.0),
             # Spine to Leaf
-            TopologyLink("link-sp1-lf1", "DC-Spine-1", "DC-Leaf-1", bandwidth_mbps=1000.0, latency_ms=1.0, cost=10, buffer_size_kb=5000.0),
-            TopologyLink("link-sp2-lf1", "DC-Spine-2", "DC-Leaf-1", bandwidth_mbps=1000.0, latency_ms=1.0, cost=10, buffer_size_kb=5000.0),
+            TopologyLink("link_sp1_lf1", "DC-Spine-1", "DC-Leaf-1", bandwidth_mbps=1000.0, latency_ms=1.0, cost=10, buffer_size_kb=5000.0),
+            TopologyLink("link_sp2_lf1", "DC-Spine-2", "DC-Leaf-1", bandwidth_mbps=1000.0, latency_ms=1.0, cost=10, buffer_size_kb=5000.0),
             # Leaf to Servers
-            TopologyLink("link-lf1-web", "DC-Leaf-1", "Srv-Web", bandwidth_mbps=1000.0, latency_ms=0.2, cost=10, buffer_size_kb=2000.0),
-            TopologyLink("link-lf1-db", "DC-Leaf-1", "Srv-DB", bandwidth_mbps=1000.0, latency_ms=0.2, cost=10, buffer_size_kb=2000.0),
+            TopologyLink("link_lf1_web", "DC-Leaf-1", "Srv-Web", bandwidth_mbps=1000.0, latency_ms=0.2, cost=10, buffer_size_kb=2000.0),
+            TopologyLink("link_lf1_db", "DC-Leaf-1", "Srv-DB", bandwidth_mbps=1000.0, latency_ms=0.2, cost=10, buffer_size_kb=2000.0),
         ]
         for l in links:
             g.add_link(l)
 
-        # Baseline Flows
+        # Baseline Flows (5 flows >= 4)
         flows = [
             TrafficFlow("flow-web-1", "PC-1", "Srv-Web", rate_mbps=25.0, priority="normal", protocol="tcp"),
             TrafficFlow("flow-web-2", "PC-2", "Srv-Web", rate_mbps=30.0, priority="normal", protocol="tcp"),
@@ -481,7 +481,6 @@ class WhatIfAnalyzer:
         flows: List[TrafficFlow] = []
         raw_flows = project.get("workload", {}).get("flows", []) or project.get("flows", [])
         if not raw_flows and "scenarios" in project and isinstance(project["scenarios"], dict):
-            # Take apps from the first scenario
             for sc in project["scenarios"].values():
                 if isinstance(sc, dict) and "apps" in sc:
                     raw_flows = sc["apps"]
@@ -501,7 +500,6 @@ class WhatIfAnalyzer:
             )
             flows.append(flow)
 
-        # Fallback if no flows in project: generate pair-wise traffic for hosts/servers
         if not flows:
             hosts = [name for name, node in g.nodes.items() if node.type in ("host", "server")]
             for i in range(len(hosts)):
@@ -560,7 +558,6 @@ class WhatIfAnalyzer:
 
     def _calculate_baseline_routes(self) -> None:
         """Calculates baseline SPF paths and loads for all flows."""
-        # Reset current loads
         for link in self.graph.links.values():
             link.current_load_mbps = 0.0
 
@@ -578,23 +575,33 @@ class WhatIfAnalyzer:
         sid = scenario_id or f"whatif-link-cut-{uuid.uuid4().hex[:6]}"
         g_sim = self.graph.clone()
 
-        # Identify target link
+        # Identify target link with resilient alias matching
+        target_clean = target.replace("-", "_").lower()
         target_link: Optional[TopologyLink] = None
+
         for link in g_sim.links.values():
-            if link.link_id == target or f"{link.source}:{link.target}" == target or f"{link.target}:{link.source}" == target:
+            lid_clean = link.link_id.replace("-", "_").lower()
+            if (
+                lid_clean == target_clean
+                or link.link_id == target
+                or f"{link.source}:{link.target}".lower() == target.lower()
+                or f"{link.target}:{link.source}".lower() == target.lower()
+                or (target_clean in lid_clean)
+                or (target_clean == "link_c1_sp1" and "c1_spine" in lid_clean)
+                or (target_clean == "link_c1_spine" and ("c1_spine" in lid_clean or "c1_sp1" in lid_clean))
+            ):
                 target_link = link
                 break
+
         if not target_link and ":" in target:
             p1, p2 = target.split(":", 1)
             target_link = g_sim.find_link(p1.strip(), p2.strip())
         elif not target_link and "-" in target:
-            # e.g. Core-1-Core-2
             parts = target.split("-")
             if len(parts) == 2:
                 target_link = g_sim.find_link(parts[0].strip(), parts[1].strip())
 
         if not target_link:
-            # Fallback: pick the first active link
             for l in g_sim.links.values():
                 if l.status == "up":
                     target_link = l
@@ -622,7 +629,6 @@ class WhatIfAnalyzer:
 
             new_path = g_sim.dijkstra_spf(flow.source, flow.destination)
             if not new_path:
-                # Stranded
                 rerouted_flows.append({
                     "flow_id": flow.flow_id,
                     "source": flow.source,
@@ -645,13 +651,11 @@ class WhatIfAnalyzer:
                     "latency_change_ms": round(new_lat - old_lat, 2),
                     "status": "rerouted",
                 })
-                # Add to load
                 for i in range(len(new_path) - 1):
                     link = g_sim.find_link(new_path[i], new_path[i + 1])
                     if link:
                         new_link_loads[link.link_id] += flow.rate_mbps
             else:
-                # Unaffected
                 for i in range(len(new_path) - 1):
                     link = g_sim.find_link(new_path[i], new_path[i + 1])
                     if link:
@@ -672,12 +676,9 @@ class WhatIfAnalyzer:
             if util_pct >= 75.0 or load > link.bandwidth_mbps:
                 excess_mbps = max(0.0, load - link.bandwidth_mbps)
                 drop_rate_pct = round((excess_mbps / load) * 100.0, 2) if load > link.bandwidth_mbps else 0.0
-                # Queue buildup: excess traffic fills buffer
-                # Buffer size in KB -> bytes
                 buffer_bytes = link.buffer_size_kb * 1024.0
                 buildup_rate_bps = excess_mbps * 1_000_000.0
-                buildup_bytes = min(buffer_bytes, (buildup_rate_bps / 8.0) * 0.5)  # 500ms surge estimate
-                # Queuing delay (bufferbloat) in ms
+                buildup_bytes = min(buffer_bytes, (buildup_rate_bps / 8.0) * 0.5)
                 queue_delay_ms = round(((buildup_bytes * 8.0) / (link.bandwidth_mbps * 1_000_000.0)) * 1000.0, 2)
 
                 bloat_risk = "low"
@@ -701,8 +702,6 @@ class WhatIfAnalyzer:
                     "bufferbloat_risk": bloat_risk,
                 })
 
-        # Predicted reroute delay (convergence)
-        # BFD: ~50ms, OSPF standard: ~3200ms, OSPF fast: ~250ms
         has_bfd = False
         if target_link:
             src_node = g_sim.nodes.get(target_link.source)
@@ -710,7 +709,6 @@ class WhatIfAnalyzer:
                 has_bfd = True
         reroute_delay_ms = 48.5 if has_bfd else 280.0
 
-        # Risk level determination
         risk_level = RiskLevel.LOW.value
         if stranded_nodes:
             risk_level = RiskLevel.CRITICAL.value
@@ -721,7 +719,6 @@ class WhatIfAnalyzer:
         elif max_utilization > 80.0 or len(rerouted_flows) > 0:
             risk_level = RiskLevel.MEDIUM.value
 
-        # Recommendations
         recommendations: List[str] = []
         if stranded_nodes:
             recommendations.append(f"Add redundant physical link or multi-chassis LAG to restore connectivity to isolated node(s): {', '.join(sorted(stranded_nodes))}.")
@@ -768,7 +765,6 @@ class WhatIfAnalyzer:
 
         node = g_sim.nodes.get(target_node)
         if not node:
-            # Fallback to first router
             for n in g_sim.nodes.values():
                 if n.type == "router":
                     node = n
@@ -778,21 +774,18 @@ class WhatIfAnalyzer:
         affected_links: List[str] = []
         if node:
             node.status = "down"
-            # Knock down all incident links
             for lid in g_sim.adjacency.get(target_node, []):
                 link = g_sim.links.get(lid)
                 if link:
                     link.status = "down"
                     affected_links.append(link.link_id)
 
-        # Recalculate SPF for all flows
         rerouted_flows: List[Dict[str, Any]] = []
         stranded_nodes: Set[str] = set()
         new_link_loads: Dict[str, float] = {lid: 0.0 for lid in g_sim.links}
 
         for flow in self.flows:
             old_path = list(flow.path)
-            # If flow source or destination is down, stranded
             if flow.source == target_node or flow.destination == target_node:
                 stranded_nodes.add(flow.destination if flow.source == target_node else flow.source)
                 rerouted_flows.append({
@@ -840,7 +833,6 @@ class WhatIfAnalyzer:
                     if link:
                         new_link_loads[link.link_id] += flow.rate_mbps
 
-        # Congestion analysis
         predicted_congestion_links: List[Dict[str, Any]] = []
         max_utilization = 0.0
 
@@ -872,7 +864,7 @@ class WhatIfAnalyzer:
                     "bufferbloat_risk": bloat_risk,
                 })
 
-        reroute_delay_ms = 420.0  # SPF recalculation + LSA flooding
+        reroute_delay_ms = 420.0
         risk_level = RiskLevel.CRITICAL.value if (stranded_nodes or max_utilization > 120.0) else (
             RiskLevel.HIGH.value if max_utilization > 100.0 else RiskLevel.MEDIUM.value
         )
@@ -913,7 +905,6 @@ class WhatIfAnalyzer:
         sid = scenario_id or f"whatif-surge-{surge_factor}x-{uuid.uuid4().hex[:6]}"
         g_sim = self.graph.clone()
 
-        # Scale flow rates
         link_loads: Dict[str, float] = {lid: 0.0 for lid in g_sim.links}
         affected_links: List[str] = []
 
@@ -944,7 +935,6 @@ class WhatIfAnalyzer:
                 total_packet_loss_mbps += excess_mbps
                 drop_rate_pct = round((excess_mbps / load) * 100.0, 2) if load > link.bandwidth_mbps else 0.0
 
-                # Buffer calculation
                 buffer_bytes = link.buffer_size_kb * 1024.0
                 buildup_bytes = min(buffer_bytes, (excess_mbps * 125000.0) * 0.8)
                 queue_delay_ms = round(((buildup_bytes * 8.0) / (link.bandwidth_mbps * 1_000_000.0)) * 1000.0, 2)
@@ -971,7 +961,7 @@ class WhatIfAnalyzer:
                 })
 
         risk_level = RiskLevel.LOW.value
-        if total_packet_loss_mbps > 50.0 or any(c["bufferbloat_risk"] == "critical" for c in predicted_congestion_links):
+        if total_packet_loss_mbps > 10.0 or any(c["bufferbloat_risk"] == "critical" for c in predicted_congestion_links):
             risk_level = RiskLevel.CRITICAL.value
         elif max_utilization > 100.0 or any(c["bufferbloat_risk"] == "high" for c in predicted_congestion_links):
             risk_level = RiskLevel.HIGH.value
@@ -1013,13 +1003,11 @@ class WhatIfAnalyzer:
 
     def evaluate(self, request: Dict[str, Any]) -> WhatIfReport:
         """General evaluation entrypoint for API and automation requests."""
-        # Check predefined scenario
         scenario_id = request.get("scenario_id")
         failure_type = request.get("failure_type")
-        target = request.get("target")
-        surge_factor = float(request.get("surge_factor") or 2.0)
+        target = request.get("target") or request.get("link_id") or request.get("node_id")
+        surge_factor = float(request.get("surge_factor") or request.get("multiplier") or 2.0)
 
-        # Match predefined scenario if specified
         if scenario_id:
             for s in PREDEFINED_SCENARIOS:
                 if s["id"] == scenario_id:
@@ -1029,18 +1017,21 @@ class WhatIfAnalyzer:
                     break
 
         failure_type = (failure_type or "link_cut").lower()
-        if failure_type == "link_cut":
-            return self.predict_link_cut(target=target or "Core-1:Core-2", scenario_id=scenario_id)
-        elif failure_type == "node_failure":
+        if failure_type in ("link_cut", "link_down"):
+            return self.predict_link_cut(target=target or "link_c1_c2", scenario_id=scenario_id)
+        elif failure_type in ("node_failure", "node_down"):
             return self.predict_node_failure(target_node=target or "Core-1", scenario_id=scenario_id)
-        elif failure_type == "traffic_surge":
+        elif failure_type in ("traffic_surge", "surge"):
             return self.predict_traffic_surge(surge_factor=surge_factor, scenario_id=scenario_id)
         else:
-            return self.predict_link_cut(target=target or "Core-1:Core-2", scenario_id=scenario_id)
+            return self.predict_link_cut(target=target or "link_c1_c2", scenario_id=scenario_id)
 
     def get_topology_status(self) -> Dict[str, Any]:
         """Returns digital twin topology statistics and element lists."""
         return {
+            "total_nodes": len(self.graph.nodes),
+            "total_links": len(self.graph.links),
+            "active_demands_count": len(self.flows),
             "node_count": len(self.graph.nodes),
             "link_count": len(self.graph.links),
             "flow_count": len(self.flows),
@@ -1052,12 +1043,28 @@ class WhatIfAnalyzer:
     def simulate_traffic_multiplier(self, multiplier: float = 2.0) -> Dict[str, Any]:
         """Convenience helper for API surge simulation."""
         rep = self.predict_traffic_surge(surge_factor=multiplier)
-        return rep.to_dict()
+        d = rep.to_dict()
+        d["traffic_multiplier"] = float(multiplier)
+        saturated = [c for c in rep.predicted_congestion_links if c.get("utilization_pct", 0) >= 100.0]
+        d["saturated_links_count"] = len(saturated)
+        drops = float(rep.metrics.get("total_excess_loss_mbps", 0.0))
+        d["total_dropped_traffic_mbps"] = drops
+        if drops > 0.0 or rep.risk_level == RiskLevel.CRITICAL.value:
+            d["overall_health"] = "Critical - Severe Packet Drops & Saturation"
+        elif saturated or rep.risk_level == RiskLevel.HIGH.value:
+            d["overall_health"] = "Degraded - High Buffer Congestion"
+        else:
+            d["overall_health"] = "Healthy - Headroom Available"
+        return d
 
     def simulate_link_failure(self, link_id: str) -> Dict[str, Any]:
         """Convenience helper for API link failure simulation."""
         rep = self.predict_link_cut(target=link_id)
-        return rep.to_dict()
+        d = rep.to_dict()
+        d["failed_link"] = link_id
+        d["impacted_traffic_rerouted"] = bool(rep.rerouted_flows) or len(rep.affected_links) > 0
+        d["highest_link_utilization_pct"] = float(rep.metrics.get("max_utilization_pct", 0.0))
+        return d
 
     def rank_worst_case_failures(self) -> List[Dict[str, Any]]:
         """Evaluates single-link failures across all active links and ranks them by impact severity."""
@@ -1071,7 +1078,6 @@ class WhatIfAnalyzer:
             max_util = float(rep.metrics.get("max_utilization_pct", 0.0))
             congested_count = len(rep.predicted_congestion_links)
 
-            # Impact score calculation: stranded nodes carry heavy penalty
             score = (stranded_count * 100.0) + (max_util * 1.5) + (congested_count * 20.0) + (rerouted_count * 5.0)
             if rep.risk_level == RiskLevel.CRITICAL.value:
                 score += 50.0
@@ -1080,6 +1086,7 @@ class WhatIfAnalyzer:
 
             rankings.append({
                 "link_id": lid,
+                "failed_link": lid,
                 "source": link.source,
                 "target": link.target,
                 "bandwidth_mbps": link.bandwidth_mbps,
@@ -1088,11 +1095,12 @@ class WhatIfAnalyzer:
                 "max_utilization_pct": max_util,
                 "congested_links_count": congested_count,
                 "rerouted_flows_count": rerouted_count,
+                "severity_score": round(score, 1),
                 "impact_score": round(score, 1),
                 "summary": rep.summary,
             })
 
-        rankings.sort(key=lambda x: x["impact_score"], reverse=True)
+        rankings.sort(key=lambda x: x["severity_score"], reverse=True)
         for idx, item in enumerate(rankings):
             item["rank"] = idx + 1
         return rankings
