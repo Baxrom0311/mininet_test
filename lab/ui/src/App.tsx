@@ -12,10 +12,12 @@ import { P4Window, SdnWindow } from '@/features/CodeWindows'
 import { DeviceWindow } from '@/features/DeviceWindow'
 import { Dock, logLocal } from '@/features/Dock'
 import { Inspector } from '@/features/Inspector'
+import { PDUInspectorWindow } from '@/features/PDUInspector'
 import { ResultsWindow } from '@/features/ResultsWindow'
 import { ScenarioWindow } from '@/features/ScenarioWindow'
 import { Sidebar } from '@/features/Sidebar'
 import { Topbar } from '@/features/Topbar'
+import { TransportObservatory } from '@/features/TransportObservatory'
 import { cn } from '@/lib/utils'
 
 function Windows() {
@@ -26,7 +28,9 @@ function Windows() {
         : w.kind === 'p4' ? <P4Window key={w.id} win={w} />
           : w.kind === 'sdn' ? <SdnWindow key={w.id} win={w} />
             : w.kind === 'scenario' ? <ScenarioWindow key={w.id} win={w} />
-              : <ResultsWindow key={w.id} win={w} />)}
+              : w.kind === 'telemetry' ? <TransportObservatory key={w.id} win={w} />
+                : w.kind === 'pdu' ? <PDUInspectorWindow key={w.id} win={w} />
+                  : <ResultsWindow key={w.id} win={w} />)}
     </>
   )
 }

@@ -9,7 +9,7 @@ import { toast } from '@/components/ui/toast'
 import type { Device, DeviceType, Info, Link, LinkParams, LinkStats, Project, ScenarioEvent, Selection, Status } from './types'
 
 export type Mode = 'select' | 'link' | 'delete' | 'place' | 'pick'
-export type WinKind = 'device' | 'p4' | 'sdn' | 'scenario' | 'results'
+export type WinKind = 'device' | 'p4' | 'sdn' | 'scenario' | 'results' | 'telemetry' | 'pdu'
 export interface Win { id: string; kind: WinKind; ref: string; tab?: string; z: number; x: number; y: number; w: number; h: number; arg?: any }
 
 const TYPE_PREFIX: Record<DeviceType, string> = { host: 'pc', server: 'srv', switch: 's', p4switch: 'p', router: 'r', sdnrouter: 'sr', wifiap: 'ap' }
@@ -76,7 +76,7 @@ function restore(p: Project) {
   set((s) => ({
     project: p, dirty: true,
     selection: s.selection && (s.selection.kind === 'device' ? p.devices[s.selection.id] : p.links[s.selection.id]) ? s.selection : null,
-    wins: s.wins.filter((w) => w.kind === 'results' || (w.kind === 'device' ? p.devices[w.ref] : w.kind === 'p4' ? p.p4_programs[w.ref] != null
+    wins: s.wins.filter((w) => w.kind === 'results' || w.kind === 'telemetry' || w.kind === 'pdu' || (w.kind === 'device' ? p.devices[w.ref] : w.kind === 'p4' ? p.p4_programs[w.ref] != null
       : w.kind === 'sdn' ? p.controllers[w.ref] : p.scenarios?.[w.ref])),
   }))
   storage.set('netlab.draft', p)

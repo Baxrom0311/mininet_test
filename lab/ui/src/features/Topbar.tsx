@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Download, FilePlus2, FolderOpen, Moon, Play, Radio, Redo2, Save, Search, Square, Sun, Undo2, Upload } from 'lucide-react'
+import { Activity, Download, FilePlus2, FolderOpen, Moon, Play, Radio, Redo2, Save, Search, Square, Sun, Undo2, Upload } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Tip } from '@/components/ui/tooltip'
 import { toast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
-import { emptyProject, loadProject, mutate, redo, running, saveProject, startNet, stopNet, toggleTheme, undo, useStore } from '@/lib/store'
+import { emptyProject, loadProject, mutate, openWin, redo, running, saveProject, startNet, stopNet, toggleTheme, undo, useStore } from '@/lib/store'
 import type { Project } from '@/lib/types'
 import { canvasApi } from './Canvas'
 import { paletteState } from './CommandPalette'
@@ -81,6 +81,9 @@ export function Topbar() {
       )}
       <Button size="sm" variant={status.running ? 'destructive' : 'default'} disabled={!!busy} onClick={() => (status.running ? stopNet() : startNet())}>
         {status.running ? <><Square /> To'xtatish</> : <><Play /> Ishga tushirish</>}
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => openWin('telemetry', 'l4', { w: 920, h: 600 })}>
+        <Activity className="h-4 w-4 text-primary" /> L4 Telemetriya
       </Button>
       <Button variant="ghost" size="icon" onClick={toggleTheme} title="Kun / tun">{dark ? <Sun /> : <Moon />}</Button>
       <OpenProjectDialog open={openDlg} onClose={() => setOpenDlg(false)} confirmDirty={confirmDirty} />

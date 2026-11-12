@@ -6,7 +6,7 @@ import { Segmented } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toast'
 import { emit, on } from '@/lib/bus'
 import { PROTO_COLORS, clock, storage } from '@/lib/format'
-import { useStore } from '@/lib/store'
+import { openWin, useStore } from '@/lib/store'
 import { setHiddenProtos } from './Canvas'
 import { cn } from '@/lib/utils'
 
@@ -72,7 +72,12 @@ export function Dock({ collapsed, onToggle }: { collapsed: boolean; onToggle: ()
       {!collapsed && (
         <div ref={body} className="min-h-0 flex-1 overflow-auto font-mono text-[11.5px]">
           {tab === 'pkt' ? rows.map((p, i) => (
-            <div key={i} className="grid grid-cols-[76px_160px_60px_1fr] gap-2.5 whitespace-nowrap border-b border-border/40 px-3 py-0.5">
+            <div
+              key={i}
+              onClick={() => openWin('pdu', `pkt_${p.ts}_${i}`, { arg: p, w: 720, h: 540 })}
+              className="grid grid-cols-[76px_160px_60px_1fr] gap-2.5 whitespace-nowrap border-b border-border/40 px-3 py-0.5 cursor-pointer hover:bg-accent/50 transition-colors"
+              title="PDU tafsilotlarini ochish uchun bosing"
+            >
               <span className="text-muted-foreground">{clock(p.ts)}</span><span className="truncate">{linkName(p.link, p.dir)}</span>
               <span className="font-bold" style={{ color: PROTO_COLORS[p.proto] || PROTO_COLORS.other }}>{p.proto}</span>
               <span className="truncate" title={p.summary}>{p.summary}</span>

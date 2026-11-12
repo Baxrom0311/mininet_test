@@ -1,7 +1,7 @@
 /** Buyruqlar palitrasi (Ctrl+K): qurilma, ssenariy, dastur, namuna va buyruqlarni tez qidirish. */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
-import { BarChart3, Cpu, FilePlus2, FolderOpen, LineChart, Maximize2, Moon, Network, Play, Redo2, Save, Search, Square, Undo2 } from 'lucide-react'
+import { Activity, BarChart3, Cpu, FilePlus2, FolderOpen, LineChart, Maximize2, Moon, Network, Play, Redo2, Save, Search, Square, Undo2 } from 'lucide-react'
 import { DeviceIcon } from '@/components/DeviceIcon'
 import { toast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
@@ -35,6 +35,7 @@ export function CommandPalette({ onToggleTheme }: { onToggleTheme: () => void })
       { id: 'redo', group: 'Buyruqlar', label: 'Qaytarish', hint: 'Ctrl+Shift+Z', icon: <Redo2 />, run: redo },
       { id: 'fit', group: 'Buyruqlar', label: "Hammasini ko'rsatish", hint: 'F', icon: <Maximize2 />, run: () => canvasApi.fit() },
       { id: 'results', group: 'Buyruqlar', label: 'Natijalar va solishtirish', icon: <BarChart3 />, run: () => openWin('results', 'main', { w: 1060, h: 700 }) },
+      { id: 'telemetry', group: 'Buyruqlar', label: 'L4 Observatory (Transport Qatlami Telemetriyasi)', icon: <Activity />, run: () => openWin('telemetry', 'main', { w: 980, h: 680 }) },
       { id: 'theme', group: 'Buyruqlar', label: 'Kun / tun mavzusi', icon: <Moon />, run: onToggleTheme },
       { id: 'new', group: 'Buyruqlar', label: 'Yangi loyiha', icon: <FilePlus2 />, run: () => {
         if (running()) return toast("Avval tarmoqni to'xtating", 'warn')

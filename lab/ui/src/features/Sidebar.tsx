@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BarChart3, Cable, Cpu, LineChart, MousePointer2, Network, Plus, Trash2 } from 'lucide-react'
+import { Activity, BarChart3, Cable, Cpu, LineChart, MousePointer2, Network, Plus, Trash2 } from 'lucide-react'
 import { DeviceIcon } from '@/components/DeviceIcon'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -65,6 +65,7 @@ export function Sidebar() {
         empty="yo'q" onAdd={() => setDlg('sdn')} onOpen={(n) => openWin('sdn', n, { w: 880, h: 660 })} />
       <ResList title="Ssenariylar" icon={<LineChart />} items={Object.entries(project.scenarios || {}).map(([n, sc]) => [n, `${(sc.apps || []).length} ilova`])}
         empty="yo'q — trafik va hodisalarni tahlil qilish uchun" onAdd={() => setDlg('scenario')} onOpen={(n) => openWin('scenario', n, { w: 940, h: 680 })} />
+      <Button variant="outline" size="sm" onClick={() => openWin('telemetry', 'main', { w: 980, h: 680 })}><Activity /> L4 Observatory</Button>
       <Button variant="outline" size="sm" onClick={() => openWin('results', 'main', { w: 1060, h: 700 })}><BarChart3 /> Natijalar va solishtirish</Button>
       <NewResourceDialog kind={dlg} onClose={() => setDlg(null)} />
     </aside>
