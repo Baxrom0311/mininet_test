@@ -8,10 +8,20 @@ export interface ScenarioApp { id: string; type: 'udp' | 'tcp' | 'ping' | 'voip'
 export interface ScenarioEvent { t: number; action: 'link_down' | 'link_up' | 'link_params' | 'move' | 'roam'; link?: string; params?: Record<string, any>; device?: string; x?: number; y?: number; duration?: number; from?: string; to?: string }
 export interface FailureGroup { mtbf_s: number; mttr_s: number; targets: 'all' | string[] }
 export interface Scenario { duration: number; apps: ScenarioApp[]; events: ScenarioEvent[]; notes?: string; seed?: number; rng_run?: number; sample?: number; ns3_fast?: boolean; ip_version?: 4 | 6; failures?: { seed?: number; distribution?: 'fixed' | 'exponential'; links?: FailureGroup; devices?: FailureGroup } }
+export type ControllerType = 'ryu' | 'pox' | 'remote' | 'onos' | 'odl' | 'floodlight'
+
+export interface Controller {
+  code?: string
+  port: number
+  type?: ControllerType
+  ip?: string
+  modules?: string
+}
+
 export interface Project {
   version: number; name: string; notes?: string; meters_per_px?: number
   devices: Record<string, Device>; links: Record<string, Link>
-  p4_programs: Record<string, string>; controllers: Record<string, { code: string; port: number }>
+  p4_programs: Record<string, string>; controllers: Record<string, Controller>
   scenarios: Record<string, Scenario>
 }
 export interface Status { driver?: string; running: boolean; project?: string | null; capture?: boolean }

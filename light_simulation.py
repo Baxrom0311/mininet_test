@@ -48,7 +48,13 @@ from controller import start_controller
 from dataset_builder import build_dataset
 from impairments import Impairments
 from netutil import graph_diameter
-from network_build import NATMonitor, apply_qos_qdiscs, build_topology, setup_nat_gateway
+from network_build import (
+    NATMonitor,
+    apply_qos_qdiscs,
+    build_topology,
+    setup_nat_gateway,
+    warn_external_controller_telemetry,
+)
 from path_tracer import PathTracer
 from topologies import TOPOLOGIES
 from traffic_gen import TrafficGen
@@ -251,6 +257,10 @@ Misollar:
             nat_monitor = NATMonitor(net, topo)
             nat_monitor.start()
 
+            is_external_ctrl = args.controller in ("remote", "onos", "odl", "opendaylight", "floodlight")
+            if is_external_ctrl:
+                warn_external_controller_telemetry(args.controller)
+
             print(f"\n{'='*55}")
             print(f"  Simulyatsiya: {args.duration/60:.1f} min | {args.topology} | {args.routing}")
             print(f"{'='*55}\n")
@@ -258,11 +268,15 @@ Misollar:
             start_time = time.time()
             while time.time() - start_time < args.duration:
                 elapsed = time.time() - start_time
-                ev = sum(1 for _ in open(f"{DATA_DIR}/stats/transport_events.jsonl")) if os.path.exists(f"{DATA_DIR}/stats/transport_events.jsonl") else 0
-                fs = sum(1 for _ in open(f"{DATA_DIR}/stats/flow_stats.jsonl")) if os.path.exists(f"{DATA_DIR}/stats/flow_stats.jsonl") else 0
                 pt = sum(1 for _ in open(f"{DATA_DIR}/stats/path_traces.jsonl")) if os.path.exists(f"{DATA_DIR}/stats/path_traces.jsonl") else 0
-                print(f"\r  [{elapsed:.0f}s/{args.duration}s] events:{ev} flows:{fs} paths:{pt}   ",
-                      end="", flush=True)
+                if is_external_ctrl:
+                    print(f"\r  [{elapsed:.0f}s/{args.duration}s] paths:{pt} (tashqi {args.controller.upper()} kontroller faol)   ",
+                          end="", flush=True)
+                else:
+                    ev = sum(1 for _ in open(f"{DATA_DIR}/stats/transport_events.jsonl")) if os.path.exists(f"{DATA_DIR}/stats/transport_events.jsonl") else 0
+                    fs = sum(1 for _ in open(f"{DATA_DIR}/stats/flow_stats.jsonl")) if os.path.exists(f"{DATA_DIR}/stats/flow_stats.jsonl") else 0
+                    print(f"\r  [{elapsed:.0f}s/{args.duration}s] events:{ev} flows:{fs} paths:{pt}   ",
+                          end="", flush=True)
                 time.sleep(5)
 
             print("\n\n[Stop]...")

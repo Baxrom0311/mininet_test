@@ -74,6 +74,19 @@ def _setup_qos_qdisc(intf, params):
     node.cmd(" ; ".join(cmds))
 
 
+def warn_external_controller_telemetry(controller_type):
+    """Tashqi kontroller tanlanganda telemetriya cheklovlari va statistika haqida ogohlantirish beradi."""
+    c_type = (controller_type or "").lower()
+    if c_type in ("remote", "onos", "odl", "opendaylight", "floodlight"):
+        label = c_type.upper() if c_type != "odl" else "OpenDaylight"
+        print(f"\n[Telemetry] OGOHLANTIRISH: Tashqi '{label}' kontrolleri tanlangan.")
+        print("  - Ichki Ryu transport_monitor agenti ishga tushmaydi.")
+        print("  - OpenFlow oqim statistikasi (flow_stats) va transport hodisalari (transport_events)")
+        print(f"    ichki loglarga yozilmaydi (ular bevosita {label} kontroller orqali boshqariladi).")
+        print("  - Mahalliy telemetriya (tcpdump PCAP, RTT o'lchovlari, NAT tarjimalari, path traces)")
+        print("    xatosiz yig'ilishda davom etadi.\n")
+
+
 def build_topology(topo, controller_type="ryu", controller_ip="127.0.0.1", controller_port=None, of_protocol=None):
     """Mininet topologiya yaratish."""
     from mininet.net import Mininet
@@ -93,6 +106,14 @@ def build_topology(topo, controller_type="ryu", controller_ip="127.0.0.1", contr
                   autoSetMacs=True, autoStaticArp=True)
     net.addController("c0", controller=RemoteController,
                       ip=controller_ip, port=controller_port, protocols=of_protocol)
+
+    net.controller_type = c_type
+    net.controller_ip = controller_ip
+    net.controller_port = controller_port
+    net.is_external_controller = c_type in ("remote", "onos", "odl", "opendaylight", "floodlight")
+
+    if net.is_external_controller:
+        warn_external_controller_telemetry(c_type)
 
     switches = {}
     for sw_name in topo["switches"]:

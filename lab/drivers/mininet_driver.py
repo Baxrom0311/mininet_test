@@ -63,11 +63,13 @@ def _run(cmd, input_text=None, timeout=15):
         return f"{cmd[0]}: vaqt tugadi"
 
 
-def _wait_port(port, timeout=10.0):
+def _wait_port(port, timeout=10.0, host="127.0.0.1", proc=None):
     end = time.time() + timeout
     while time.time() < end:
+        if proc is not None and proc.poll() is not None:
+            return False
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            with socket.create_connection((host, int(port)), timeout=0.5):
                 return True
         except OSError:
             time.sleep(0.2)
@@ -625,8 +627,8 @@ class MininetDriver(BaseDriver):
                 self.net.stop()
             except Exception as e:  # noqa: BLE001
                 self.bus.log("warn", f"net.stop: {e}")
-        for p in list(self._ctrl_procs.values()):
-            self._kill(p)
+        for cname in list(self._ctrl_procs.keys()):
+            self._ctrl_stop(cname)
         self._ctrl_procs.clear()
         self._ctrl_objs.clear()
         self._links.clear()
@@ -638,11 +640,24 @@ class MininetDriver(BaseDriver):
     @staticmethod
     def _kill(p):
         try:
-            p.terminate()
+            if hasattr(os, "killpg") and hasattr(p, "pid"):
+                try:
+                    os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+                except OSError:
+                    p.terminate()
+            else:
+                p.terminate()
             p.wait(timeout=3)
         except Exception:  # noqa: BLE001
             try:
-                p.kill()
+                if hasattr(os, "killpg") and hasattr(p, "pid"):
+                    try:
+                        os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                    except OSError:
+                        p.kill()
+                else:
+                    p.kill()
+                p.wait(timeout=1)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -657,11 +672,13 @@ class MininetDriver(BaseDriver):
             self.net.addHost(name, cls=FRRRouter, ip=None)
         elif t == "switch":
             sdn = cfg.get("mode") == "sdn"
-            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13", datapath=self._datapath,
+            proto = self._ctrl_protocol_for(d)
+            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols=proto, datapath=self._datapath,
                                failMode="secure" if sdn else "standalone",
                                stp=bool(cfg.get("stp")) and not sdn and not cfg.get("bonds"))   # bond: STP yo'q (lab/stp.py)
         elif t == "sdnrouter":
-            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols="OpenFlow13", datapath=self._datapath,
+            proto = self._ctrl_protocol_for(d)
+            self.net.addSwitch(name, cls=OVSSwitch, dpid=f"{did:016x}", protocols=proto, datapath=self._datapath,
                                failMode="secure")
         elif t == "wifiap":
             # Mininet'da radio yo'q: AP = OVS L2 switch, Wi-Fi kabellari radio modelidan
@@ -673,6 +690,18 @@ class MininetDriver(BaseDriver):
                                thrift_port=THRIFT_BASE + did, device_id=did)
         else:
             raise DriverError(f"{name}: noma'lum tur {t}")
+
+    def _ctrl_protocol_for(self, d):
+        cfg = d.get("config") or {}
+        cname = cfg.get("controller")
+        if cname and self.project:
+            c = self.project.get("controllers", {}).get(cname, {})
+            if c.get("protocol"):
+                return c["protocol"]
+            ctype = (c.get("type") or "").lower()
+            if ctype == "pox":
+                return "OpenFlow10"
+        return "OpenFlow13"
 
     def _ctrls_for(self, d):
         cfg = d.get("config") or {}
@@ -1088,7 +1117,7 @@ exit 0
             if not d:
                 raise DriverError(f"{name} loyihada yo'q")
             c = (d.get("config") or {}).get("controller")
-            if c and c not in self._ctrl_procs:
+            if c and c not in self._ctrl_procs and c not in self._ctrl_objs:
                 self._ctrl_start(c)
             self._add_node(name, d)
             if DEVICE_TYPES[d["type"]]["ns"]:
@@ -1147,14 +1176,15 @@ exit 0
                 nc = d.get("config") or {}
                 if (oc.get("mode"), oc.get("controller"), oc.get("stp")) != (nc.get("mode"), nc.get("controller"), nc.get("stp")):
                     c = nc.get("controller")
-                    if c and c not in self._ctrl_procs:
+                    if c and c not in self._ctrl_procs and c not in self._ctrl_objs:
                         self._ctrl_start(c)
                     sdn = t == "sdnrouter" or nc.get("mode") == "sdn"
                     node.cmd(f"ovs-vsctl set-fail-mode {name} {'secure' if sdn else 'standalone'}")
                     node.cmd(f"ovs-vsctl set bridge {name} stp_enable={'true' if (nc.get('stp') and not sdn) else 'false'}")
                     ctrls = self._ctrls_for(d)
                     if ctrls:
-                        node.cmd(f"ovs-vsctl set-controller {name} tcp:127.0.0.1:{ctrls[0].port}")
+                        cip = getattr(ctrls[0], "ip", "127.0.0.1")
+                        node.cmd(f"ovs-vsctl set-controller {name} tcp:{cip}:{ctrls[0].port}")
                     else:
                         node.cmd(f"ovs-vsctl del-controller {name}")
                         node.cmd(f"ovs-ofctl -O OpenFlow13 del-flows {name}")
@@ -1461,6 +1491,12 @@ exit 0
                 json.dump(conf, f, indent=2)
             os.replace(tmp, os.path.join(d, "config.json"))
 
+    def _ctrl_stop(self, cname):
+        """SDN kontroller jarayonini to'xtatadi va resurslarni tozalaydi."""
+        p = self._ctrl_procs.pop(cname, None)
+        if p:
+            self._kill(p)
+
     def _ctrl_start(self, cname):
         from mininet.node import RemoteController
         c = self.project["controllers"][cname]
@@ -1469,28 +1505,40 @@ exit 0
         cport = c["port"]
         d = os.path.join(RUN_DIR, "sdn", cname)
         os.makedirs(d, exist_ok=True)
+        log_path = os.path.join(d, "controller.log")
+
+        # Avvalgi ishlayotgan jarayonni to'xtatish
+        self._ctrl_stop(cname)
 
         if ctype in ("remote", "onos", "odl", "opendaylight", "floodlight"):
             label = ctype.upper() if ctype != "odl" else "OpenDaylight"
-            import socket
             is_open = False
             try:
-                s = socket.socket()
-                s.settimeout(2.0)
-                s.connect((cip, cport))
-                s.close()
-                is_open = True
+                with socket.create_connection((cip, cport), timeout=2.0):
+                    is_open = True
             except OSError:
                 is_open = False
+
+            ts_str = time.strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                with open(log_path, "a", encoding="utf-8") as f:
+                    status_text = "ULANDI" if is_open else "ULANIB BO'LMADI"
+                    f.write(f"[{ts_str}] Masofaviy {label} kontroller '{cname}' ({cip}:{cport}) tekshirildi: {status_text}\n")
+            except OSError:
+                pass
 
             if is_open:
                 self.bus.log("ok", f"Masofaviy {label} kontroller '{cname}' ({cip}:{cport}) ulandi")
             else:
                 self.bus.log("warn", f"Masofaviy {label} kontroller '{cname}' ({cip}:{cport}) ga ulanib bo'lmadi — kontroller ishga tushirilganini tekshiring")
 
-            if cname not in self._ctrl_objs and self.net is not None:
-                self._ctrl_objs[cname] = self.net.addController(
-                    f"c_{cname}", controller=RemoteController, ip=cip, port=cport)
+            if self.net is not None:
+                if cname not in self._ctrl_objs:
+                    self._ctrl_objs[cname] = self.net.addController(
+                        f"c_{cname}", controller=RemoteController, ip=cip, port=cport)
+                else:
+                    self._ctrl_objs[cname].ip = cip
+                    self._ctrl_objs[cname].port = cport
             return
 
         elif ctype == "pox":
@@ -1508,19 +1556,24 @@ exit 0
                 env = dict(os.environ)
                 app_args = ["openflow.of_01", f"--port={cport}", *modules.split()]
 
-            logf = open(os.path.join(d, "controller.log"), "ab")
+            logf = open(log_path, "ab")
             p = subprocess.Popen([sys.executable, pox_bin, *app_args],
                                  stdout=logf, stderr=subprocess.STDOUT, env=env, cwd=d,
                                  start_new_session=True)
             logf.close()
             self._ctrl_procs[cname] = p
-            if not _wait_port(cport, 15):
+            if not _wait_port(cport, 15, host="127.0.0.1", proc=p):
                 self.bus.log("error", f"POX kontroller '{cname}' {cport}-portda ochilmadi:\n"
                                       f"{self.controller_log(cname)[-600:]}")
-            if cname not in self._ctrl_objs and self.net is not None:
-                self._ctrl_objs[cname] = self.net.addController(
-                    f"c_{cname}", controller=RemoteController, ip="127.0.0.1", port=cport)
-            self.bus.log("ok", f"POX kontroller '{cname}' :{cport} ishga tushdi")
+            else:
+                self.bus.log("ok", f"POX kontroller '{cname}' :{cport} ishga tushdi")
+            if self.net is not None:
+                if cname not in self._ctrl_objs:
+                    self._ctrl_objs[cname] = self.net.addController(
+                        f"c_{cname}", controller=RemoteController, ip="127.0.0.1", port=cport)
+                else:
+                    self._ctrl_objs[cname].ip = "127.0.0.1"
+                    self._ctrl_objs[cname].port = cport
 
         else:
             with open(os.path.join(d, "app.py"), "w") as f:
@@ -1529,7 +1582,7 @@ exit 0
             mgr = controller_cmd()
             if not mgr:
                 raise DriverError("osken-manager/ryu-manager topilmadi")
-            logf = open(os.path.join(d, "controller.log"), "ab")
+            logf = open(log_path, "ab")
             env = dict(os.environ, NETLAB_CONFIG=os.path.join(d, "config.json"))
             p = subprocess.Popen([*mgr, "--ofp-listen-host", "127.0.0.1",
                                   "--ofp-tcp-listen-port", str(cport), os.path.join(d, "app.py")],
@@ -1537,13 +1590,18 @@ exit 0
                                  start_new_session=True)
             logf.close()
             self._ctrl_procs[cname] = p
-            if not _wait_port(cport, 15):
+            if not _wait_port(cport, 15, host="127.0.0.1", proc=p):
                 self.bus.log("error", f"Kontroller '{cname}' {cport}-portda ochilmadi:\n"
                                       f"{self.controller_log(cname)[-600:]}")
-            if cname not in self._ctrl_objs and self.net is not None:
-                self._ctrl_objs[cname] = self.net.addController(
-                    f"c_{cname}", controller=RemoteController, ip="127.0.0.1", port=cport)
-            self.bus.log("ok", f"Kontroller '{cname}' :{cport} ishga tushdi")
+            else:
+                self.bus.log("ok", f"Kontroller '{cname}' :{cport} ishga tushdi")
+            if self.net is not None:
+                if cname not in self._ctrl_objs:
+                    self._ctrl_objs[cname] = self.net.addController(
+                        f"c_{cname}", controller=RemoteController, ip="127.0.0.1", port=cport)
+                else:
+                    self._ctrl_objs[cname].ip = "127.0.0.1"
+                    self._ctrl_objs[cname].port = cport
 
     def controller_restart(self, project, cname):
         with self.lock:
@@ -1551,9 +1609,7 @@ exit 0
             self._set_project(project, collection="controllers", key=cname)
             if cname not in self.project.get("controllers", {}):
                 raise DriverError(f"kontroller {cname} yo'q")
-            p = self._ctrl_procs.pop(cname, None)
-            if p:
-                self._kill(p)
+            self._ctrl_stop(cname)
             self._ctrl_start(cname)
             return {"ok": True, "log": self.controller_log(cname)[-2000:]}
 
