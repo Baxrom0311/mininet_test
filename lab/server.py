@@ -1017,8 +1017,88 @@ def create_app(driver_name="demo", token=None):
                 valid_rules.append(r)
             return {"ok": len(errors) == 0, "rules_count": len(valid_rules), "errors": errors, "rules": valid_rules}
 
+        elif action == "generate":
+            from lab.security.firewall_generator import FirewallGenerator
+            syntax = str(body.get("syntax", "both")).lower()
+            generator = FirewallGenerator(
+                default_input=body.get("default_input", "drop"),
+                default_forward=body.get("default_forward", "drop"),
+                default_output=body.get("default_output", "accept"),
+            )
+            for r in body.get("rules") or []:
+                generator.add_rule(r)
+            for pf in body.get("port_forwards") or []:
+                generator.add_port_forward(**pf)
+            for nr in body.get("nat_rules") or []:
+                generator.add_nat(**nr)
+            return {
+                "ok": True,
+                "iptables": generator.generate_iptables() if syntax in ("both", "iptables") else None,
+                "nftables": generator.generate_nftables() if syntax in ("both", "nftables") else None,
+            }
+
         else:
-            raise HTTPException(400, f"Noma'lum amal '{action}'. Ruxsat etilgan: 'evaluate', 'validate', 'add'")
+            raise HTTPException(400, f"Noma'lum amal '{action}'. Ruxsat etilgan: 'evaluate', 'validate', 'add', 'generate'")
+
+    @app.post("/api/security/firewall/generate")
+    def security_firewall_generate(body: dict = Body(...)):
+        from lab.security.firewall_generator import FirewallGenerator
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        dmz_preset = body.get("dmz_preset")
+        if dmz_preset:
+            lan = str(body.get("lan_subnet", "10.0.1.0/24"))
+            dmz = str(body.get("dmz_subnet", "10.0.2.0/24"))
+            wan_if = str(body.get("wan_if", "eth0"))
+            wan_ip = body.get("wan_ip", "203.0.113.1")
+            generator = FirewallGenerator.create_dmz_preset(
+                lan_subnet=lan, dmz_subnet=dmz, wan_if=wan_if, wan_ip=wan_ip,
+                published_services=body.get("published_services"),
+            )
+        else:
+            generator = FirewallGenerator(
+                default_input=body.get("default_input", "drop"),
+                default_forward=body.get("default_forward", "drop"),
+                default_output=body.get("default_output", "accept"),
+            )
+            for r in body.get("rules") or []:
+                generator.add_rule(r)
+            for pf in body.get("port_forwards") or []:
+                generator.add_port_forward(**pf)
+            for nr in body.get("nat_rules") or []:
+                generator.add_nat(**nr)
+
+        syntax = str(body.get("syntax", "both")).lower()
+        return {
+            "ok": True,
+            "iptables": generator.generate_iptables() if syntax in ("both", "iptables") else None,
+            "nftables": generator.generate_nftables() if syntax in ("both", "nftables") else None,
+        }
+
+    @app.get("/api/security/ids/rules")
+    def security_ids_rules():
+        from lab.security import ids_engine
+        return {
+            "ok": True,
+            "rules": ids_engine.get_rules(),
+            "count": len(ids_engine.rules),
+        }
+
+    @app.post("/api/security/ids/match")
+    def security_ids_match(body: dict = Body(...)):
+        from lab.security import ids_engine
+        if not isinstance(body, dict):
+            raise HTTPException(400, "JSON tana kerak")
+        pkt = body.get("packet")
+        if not pkt or not isinstance(pkt, dict):
+            raise HTTPException(400, "'packet' lug'ati talab qilinadi")
+        payload = body.get("payload")
+        alerts = ids_engine.match_packet(pkt, payload=payload)
+        return {
+            "ok": True,
+            "matched": len(alerts) > 0,
+            "alerts": alerts,
+        }
 
     # ───────────── P4 INT (In-Band Network Telemetry) Endpoints ─────────────
     @app.get("/api/telemetry/p4/int/reports")
@@ -1389,22 +1469,29 @@ def create_app(driver_name="demo", token=None):
         await ws.send_json({"type": "init", "streams": telemetry_manager.get_active_streams()})
 
         async def pump():
-            while True:
-                ev = await q.get()
-                batch = [ev]
-                while not q.empty() and len(batch) < 50:
-                    batch.append(q.get_nowait())
-                await ws.send_text(json.dumps(batch if len(batch) > 1 else ev, default=str))
+            try:
+                while True:
+                    ev = await q.get()
+                    batch = [ev]
+                    while not q.empty() and len(batch) < 50:
+                        batch.append(q.get_nowait())
+                    await ws.send_text(json.dumps(batch if len(batch) > 1 else ev, default=str))
+            except Exception:
+                pass
 
         task = asyncio.create_task(pump())
         try:
             while True:
                 await ws.receive_text()
-        except WebSocketDisconnect:
+        except Exception:
             pass
         finally:
             task.cancel()
             telemetry_manager.unsubscribe(q)
+            try:
+                await ws.close()
+            except Exception:
+                pass
 
     # ───────────── WebSocket: hodisalar ─────────────
     @app.websocket("/ws/events")
