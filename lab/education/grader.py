@@ -5,7 +5,7 @@ Automated inspection of student topology and device configurations:
 - Routing process (OSPF area, router-id, network statements, neighbor adjacency)
 - VLAN assignment & trunk encapsulation
 - Security rules (port 23 drop, port 22 permit, web permit, default drop)
-Calculates detailed grade report with checklist and summary feedback.
+Calculates detailed grade report with checklist, check results, and summary feedback.
 """
 
 from __future__ import annotations
@@ -38,6 +38,28 @@ class ChecklistItem:
 
 
 @dataclass
+class CheckResult:
+    check_id: str
+    name: str
+    passed: bool
+    points_awarded: float
+    max_points: float
+    remediation_hint: Optional[str] = None
+    feedback: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "check_id": self.check_id,
+            "name": self.name,
+            "passed": self.passed,
+            "points_awarded": self.points_awarded,
+            "max_points": self.max_points,
+            "remediation_hint": self.remediation_hint,
+            "feedback": self.feedback,
+        }
+
+
+@dataclass
 class GradeReport:
     lab_id: str
     total_score: float
@@ -46,6 +68,20 @@ class GradeReport:
     passed: bool
     checklist: List[Dict[str, Any]]
     summary_feedback: str
+    score_pct: float = 0.0
+    is_passed: bool = False
+    grade_letter: str = "F"
+    passed_checks_count: int = 0
+    failed_checks_count: int = 0
+    check_results: List[CheckResult] = field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.score_pct:
+            self.score_pct = self.percentage
+        if self.is_passed is False and self.passed:
+            self.is_passed = True
+        if self.passed is False and self.is_passed:
+            self.passed = True
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -53,8 +89,14 @@ class GradeReport:
             "total_score": self.total_score,
             "max_score": self.max_score,
             "percentage": self.percentage,
+            "score_pct": self.score_pct,
             "passed": self.passed,
+            "is_passed": self.is_passed,
+            "grade_letter": self.grade_letter,
+            "passed_checks_count": self.passed_checks_count,
+            "failed_checks_count": self.failed_checks_count,
             "checklist": self.checklist,
+            "check_results": [c.to_dict() for c in self.check_results],
             "summary_feedback": self.summary_feedback,
         }
 
@@ -144,6 +186,21 @@ class NetAcadGrader:
         for r in LAB_RUBRICS:
             if r["lab_id"] == norm or norm in r.get("aliases", []):
                 return r
+        # Also check lab_templates
+        from lab.education.lab_templates import LAB_TEMPLATES
+        if norm in LAB_TEMPLATES:
+            t = LAB_TEMPLATES[norm]
+            return {
+                "lab_id": t["lab_id"],
+                "title": t["title"],
+                "description": t["description"],
+                "max_score": t["max_score"],
+                "passing_threshold_pct": t.get("passing_threshold_pct", 70.0),
+                "items": [
+                    {"item": c["name"], "max_points": c["points"], "description": c.get("remediation_hint", "")}
+                    for c in t.get("rubric", [])
+                ],
+            }
         return None
 
     def load_topology(self, lab_id: str, submitted_topology: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -161,9 +218,14 @@ class NetAcadGrader:
         return submitted_topology or {}
 
     def grade(self, lab_id: str, topology: Optional[Dict[str, Any]] = None, options: Optional[Dict[str, Any]] = None) -> GradeReport:
+        norm = lab_id.strip().lower()
+        if norm == "ccna_enterprise_routing":
+            from lab.education.lab_templates import get_lab_template
+            tmpl = get_lab_template("ccna_enterprise_routing")
+            return self.evaluate_lab(lab_id="ccna_enterprise_routing", rubric_checks=tmpl["rubric"], submission_data=topology or {})
+
         rubric = self.find_rubric(lab_id)
         if not rubric:
-            # Fallback to lab1 if unknown
             rubric = LAB_RUBRICS[0]
             canonical_id = "lab1"
         else:
@@ -181,6 +243,102 @@ class NetAcadGrader:
             return self._grade_lab4_firewall(rubric, topo)
         else:
             return self._grade_lab1_subnetting(rubric, topo)
+
+    def evaluate_lab(
+        self,
+        lab_id: str,
+        rubric_checks: Optional[List[Dict[str, Any]]] = None,
+        submission_data: Optional[Dict[str, Any]] = None,
+        student_id: str = "student_1",
+    ) -> GradeReport:
+        """Evaluates lab submission matching NetAcad rubric requirements."""
+        if not rubric_checks:
+            from lab.education.lab_templates import get_lab_template
+            try:
+                tmpl = get_lab_template(lab_id)
+                rubric_checks = tmpl.get("rubric")
+            except Exception:
+                pass
+
+        if rubric_checks and submission_data and "devices" in submission_data:
+            devices = submission_data.get("devices", {})
+            results: List[CheckResult] = []
+            checklist: List[Dict[str, Any]] = []
+            total_points = 0.0
+            max_points = 0.0
+
+            for check in rubric_checks:
+                cid = check.get("id", "")
+                cname = check.get("name", cid)
+                pts = float(check.get("points", 20.0))
+                max_points += pts
+                dev_name = check.get("device")
+                field_name = check.get("field")
+                expected = check.get("expected")
+                hint = check.get("remediation_hint")
+
+                actual_val = None
+                if dev_name in devices and isinstance(devices[dev_name], dict):
+                    actual_val = devices[dev_name].get(field_name)
+
+                passed = False
+                if expected is not None:
+                    if isinstance(expected, list):
+                        passed = actual_val in expected or str(actual_val) in [str(x) for x in expected]
+                    else:
+                        passed = str(actual_val).strip().lower() == str(expected).strip().lower()
+
+                awarded = pts if passed else 0.0
+                total_points += awarded
+                rem_hint = None if passed else (hint or f"Verify {dev_name} {field_name} matches {expected}.")
+                feedback = f"Matched {expected}" if passed else (rem_hint or "Check failed.")
+
+                cr = CheckResult(
+                    check_id=cid,
+                    name=cname,
+                    passed=passed,
+                    points_awarded=awarded,
+                    max_points=pts,
+                    remediation_hint=rem_hint,
+                    feedback=feedback,
+                )
+                results.append(cr)
+                checklist.append({
+                    "item": cname,
+                    "max_points": pts,
+                    "awarded_points": awarded,
+                    "status": "PASS" if passed else "FAIL",
+                    "feedback": feedback,
+                })
+
+            score_pct = round((total_points / max(max_points, 0.001)) * 100.0, 1)
+            is_passed = score_pct >= 70.0
+            grade_letter = "A" if score_pct >= 90 else ("B" if score_pct >= 80 else ("C" if score_pct >= 70 else ("D" if score_pct >= 60 else "F")))
+            passed_count = sum(1 for r in results if r.passed)
+            failed_count = sum(1 for r in results if not r.passed)
+
+            summary = (
+                f"Evaluation for {student_id}: Grade {grade_letter} ({score_pct:.1f}%). "
+                f"{passed_count} passed, {failed_count} failed."
+            )
+
+            return GradeReport(
+                lab_id=lab_id,
+                total_score=total_points,
+                max_score=max_points,
+                percentage=score_pct,
+                score_pct=score_pct,
+                passed=is_passed,
+                is_passed=is_passed,
+                grade_letter=grade_letter,
+                passed_checks_count=passed_count,
+                failed_checks_count=failed_count,
+                check_results=results,
+                checklist=checklist,
+                summary_feedback=summary,
+            )
+
+        return self.grade(lab_id=lab_id, topology=submission_data)
 
     # ───────────── Lab 1: IP & Subnetting ─────────────
     def _grade_lab1_subnetting(self, rubric: Dict[str, Any], topo: Dict[str, Any]) -> GradeReport:
@@ -201,7 +359,6 @@ class NetAcadGrader:
                 if ip_str and "/" in ip_str:
                     try:
                         iface = ipaddress.IPv4Interface(ip_str)
-                        # Ensure not network or broadcast address
                         if iface.ip != iface.network.network_address and iface.ip != iface.network.broadcast_address:
                             host_ips_valid += 1
                     except ValueError:
@@ -278,7 +435,6 @@ class NetAcadGrader:
             if gw:
                 try:
                     gw_ip = ipaddress.IPv4Address(gw)
-                    # Check if gw is in the subnet of one of host's interfaces
                     for idata in intfs.values():
                         ip_str = idata.get("ip", "")
                         if ip_str:
@@ -388,7 +544,6 @@ class NetAcadGrader:
         devices = topo.get("devices", {})
         routers = [d for d in devices.values() if d.get("type") == "router"]
 
-        # Item 1: OSPF Routing Daemon Activation (15 pts)
         ospfd_count = 0
         for r in routers:
             daemons = r.get("config", {}).get("daemons", [])
@@ -421,7 +576,6 @@ class NetAcadGrader:
                 feedback="ospfd routing daemon is not enabled on routers.",
             ))
 
-        # Item 2: OSPF Process & Router-ID (20 pts)
         router_ids: Set[str] = set()
         for r in routers:
             startup = r.get("config", {}).get("startup", "")
@@ -454,7 +608,6 @@ class NetAcadGrader:
                 feedback="Missing 'ospf router-id <ip>' statement in router startup configuration.",
             ))
 
-        # Item 3: Area 0 Network Statements (25 pts)
         area0_statements = 0
         for r in routers:
             startup = r.get("config", {}).get("startup", "")
@@ -486,7 +639,6 @@ class NetAcadGrader:
                 feedback="Missing 'network <prefix> area 0' statements under router ospf.",
             ))
 
-        # Item 4: Point-to-Point Interface Network Type (20 pts)
         p2p_found = False
         timer_found = False
         for r in routers:
@@ -521,7 +673,6 @@ class NetAcadGrader:
                 feedback="WAN interface uses broadcast network type; configure 'ip ospf network point-to-point' to eliminate DR/BDR election delay.",
             ))
 
-        # Item 5: OSPF Neighbor Adjacency & Area Matching (20 pts)
         if len(routers) >= 2 and ospfd_count >= 2 and area0_statements >= 2:
             checklist.append(ChecklistItem(
                 item="OSPF Neighbor Adjacency & Area Matching",
@@ -556,7 +707,6 @@ class NetAcadGrader:
         switches = [d for d in devices.values() if d.get("type") in ("switch", "ovs")]
         routers = [d for d in devices.values() if d.get("type") == "router"]
 
-        # Item 1: VLAN Database Provisioning (20 pts)
         vlans_found: Set[int] = set()
         for s in switches:
             ports = s.get("config", {}).get("ports", {})
@@ -567,7 +717,6 @@ class NetAcadGrader:
                     for v in pdata["allowed"]:
                         vlans_found.add(int(v))
 
-        # Check router subinterfaces
         for r in routers:
             intfs = r.get("config", {}).get("interfaces", {})
             for iname in intfs.keys():
@@ -600,7 +749,6 @@ class NetAcadGrader:
                 feedback="No VLANs defined on switch ports or router interfaces.",
             ))
 
-        # Item 2: Access Port VLAN Membership (25 pts)
         access_ports = 0
         for s in switches:
             ports = s.get("config", {}).get("ports", {})
@@ -633,7 +781,6 @@ class NetAcadGrader:
                 feedback="Missing switch ports configured with 'mode: access' and designated VLAN ID.",
             ))
 
-        # Item 3: 802.1Q Trunk Port Encapsulation (25 pts)
         trunk_ports = 0
         for s in switches:
             ports = s.get("config", {}).get("ports", {})
@@ -660,7 +807,6 @@ class NetAcadGrader:
                 feedback="No switch port configured as 802.1Q trunk ('mode: trunk' with allowed VLANs).",
             ))
 
-        # Item 4: Router-on-a-Stick Subinterfaces (20 pts)
         subinterfaces: List[str] = []
         for r in routers:
             intfs = r.get("config", {}).get("interfaces", {})
@@ -693,7 +839,6 @@ class NetAcadGrader:
                 feedback="Missing router subinterfaces with dot1q encapsulation for inter-VLAN routing.",
             ))
 
-        # Item 5: VLAN Segmentation & Subnet Alignment (10 pts)
         if 10 in vlans_found and 20 in vlans_found and access_ports >= 2:
             checklist.append(ChecklistItem(
                 item="VLAN Segmentation & Subnet Alignment",
@@ -733,7 +878,6 @@ class NetAcadGrader:
             if "access-list" in startup or "ip access-group" in startup:
                 cisco_acl_text += startup + "\n"
 
-        # Item 1: Firewall / ACL Engine Configuration (15 pts)
         has_fw = bool(all_rules) or bool(cisco_acl_text)
         if has_fw:
             checklist.append(ChecklistItem(
@@ -752,7 +896,6 @@ class NetAcadGrader:
                 feedback="No firewall rules or access-lists configured on router.",
             ))
 
-        # Item 2: Block Plaintext Telnet (Port 23) (25 pts)
         telnet_blocked = False
         for rule in all_rules:
             action = rule.get("action", "")
@@ -766,7 +909,7 @@ class NetAcadGrader:
                 telnet_blocked = True
 
         if default_policy in ("drop", "reject") and not any(r.get("dport") in (23, "23") and r.get("action") == "accept" for r in all_rules):
-            telnet_blocked = True  # Blocked by default policy without permit
+            telnet_blocked = True
 
         if telnet_blocked:
             checklist.append(ChecklistItem(
@@ -785,7 +928,6 @@ class NetAcadGrader:
                 feedback="Telnet port 23 is permitted or not explicitly denied in firewall rules.",
             ))
 
-        # Item 3: Permit Secure Shell SSH (Port 22) (20 pts)
         ssh_permitted = False
         for rule in all_rules:
             action = rule.get("action", "")
@@ -793,7 +935,6 @@ class NetAcadGrader:
             if dport in (22, "22", "ssh") and action in ("accept", "permit"):
                 ssh_permitted = True
                 break
-            # Inbound accept on LAN interface also permits SSH from LAN
             if rule.get("in") and action in ("accept", "permit"):
                 ssh_permitted = True
 
@@ -818,7 +959,6 @@ class NetAcadGrader:
                 feedback="SSH (TCP 22) traffic is blocked by firewall rules.",
             ))
 
-        # Item 4: Permit Web Traffic (HTTP 80 / HTTPS 443) (15 pts)
         web_permitted = False
         for rule in all_rules:
             action = rule.get("action", "")
@@ -848,7 +988,6 @@ class NetAcadGrader:
                 feedback="HTTP web traffic is blocked by firewall policy.",
             ))
 
-        # Item 5: Stateful Connection Tracking (15 pts)
         stateful = False
         for rule in all_rules:
             if rule.get("state") in ("established", "related") and rule.get("action") in ("accept", "permit"):
@@ -876,7 +1015,6 @@ class NetAcadGrader:
                 feedback="Missing stateful inspection rule ('state: established').",
             ))
 
-        # Item 6: Default Deny Security Posture (10 pts)
         if default_policy in ("drop", "reject") or "deny ip any any" in cisco_acl_text.lower():
             checklist.append(ChecklistItem(
                 item="Default Deny Security Posture",
@@ -903,19 +1041,32 @@ class NetAcadGrader:
         passed = pct >= passing_threshold_pct
 
         passed_count = sum(1 for c in checklist if c.status == "PASS")
-        partial_count = sum(1 for c in checklist if c.status == "PARTIAL")
-        failed_count = sum(1 for c in checklist if c.status == "FAIL")
+        failed_count = sum(1 for c in checklist if c.status != "PASS")
+        grade_letter = "A" if pct >= 90 else ("B" if pct >= 80 else ("C" if pct >= 70 else ("D" if pct >= 60 else "F")))
+
+        check_results = [
+            CheckResult(
+                check_id=f"chk_{idx+1}",
+                name=c.item,
+                passed=(c.status == "PASS"),
+                points_awarded=c.awarded_points,
+                max_points=c.max_points,
+                remediation_hint=c.feedback if c.status != "PASS" else None,
+                feedback=c.feedback,
+            )
+            for idx, c in enumerate(checklist)
+        ]
 
         if passed:
             summary = (
                 f"Congratulations! Lab score: {pct:.1f}% ({total_score:.0f}/{max_score:.0f} pts). "
-                f"Passed {passed_count}/{len(checklist)} criteria. All core requirements satisfied."
+                f"Grade: {grade_letter}. Passed {passed_count}/{len(checklist)} criteria."
             )
         else:
-            failed_items = [c.item for c in checklist if c.status in ("FAIL", "PARTIAL")]
+            failed_items = [c.item for c in checklist if c.status != "PASS"]
             summary = (
                 f"Lab requirements not fully met. Score: {pct:.1f}% (Required: {passing_threshold_pct:.0f}%). "
-                f"Needs revision on: {', '.join(failed_items)}."
+                f"Grade: {grade_letter}. Needs revision on: {', '.join(failed_items)}."
             )
 
         return GradeReport(
@@ -923,52 +1074,18 @@ class NetAcadGrader:
             total_score=total_score,
             max_score=max_score,
             percentage=pct,
+            score_pct=pct,
             passed=passed,
+            is_passed=passed,
+            grade_letter=grade_letter,
+            passed_checks_count=passed_count,
+            failed_checks_count=failed_count,
+            check_results=check_results,
             checklist=[c.to_dict() for c in checklist],
             summary_feedback=summary,
         )
 
-    def evaluate_lab(
-        self,
-        lab_id: str,
-        rubric_checks: Optional[List[Dict[str, Any]]] = None,
-        submission_data: Optional[Dict[str, Any]] = None,
-        student_id: str = "student_1",
-    ) -> GradeReport:
-        """Evaluates lab submission matching NetAcad rubric requirements."""
-        return self.grade(lab_id=lab_id, topology=submission_data)
 
-
-# Global instances and helper functions
+# Alias AutoGraderEngine
 AutoGraderEngine = NetAcadGrader
 auto_grader = NetAcadGrader()
-
-
-def list_available_labs() -> List[Dict[str, Any]]:
-    """Lists all registered Cisco NetAcad lab rubrics."""
-    return [
-        {
-            "lab_id": r["lab_id"],
-            "title": r["title"],
-            "description": r["description"],
-            "max_score": r["max_score"],
-            "passing_threshold_pct": r.get("passing_threshold_pct", 70.0),
-            "items_count": len(r.get("items", [])),
-        }
-        for r in LAB_RUBRICS
-    ]
-
-
-def get_lab_template(lab_id: str) -> Dict[str, Any]:
-    """Retrieves full lab rubric template and checklist criteria."""
-    rubric = NetAcadGrader.find_rubric(lab_id)
-    if not rubric:
-        raise ValueError(f"Lab rubric '{lab_id}' not found")
-    return {
-        "lab_id": rubric["lab_id"],
-        "title": rubric["title"],
-        "description": rubric["description"],
-        "max_score": rubric["max_score"],
-        "passing_threshold_pct": rubric.get("passing_threshold_pct", 70.0),
-        "rubric": rubric.get("items", []),
-    }

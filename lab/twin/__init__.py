@@ -2,16 +2,16 @@
 
 from .what_if_analyzer import (
     FailureType,
+    PREDEFINED_SCENARIOS,
     RiskLevel,
-    TopologyNode,
-    TopologyLink,
-    TrafficFlow,
-    WhatIfReport,
     TopologyGraph,
+    TopologyLink,
+    TopologyNode,
+    TrafficFlow,
     WhatIfAnalyzer,
+    WhatIfReport,
+    what_if_analyzer,
 )
-
-what_if_analyzer = WhatIfAnalyzer()
 
 __all__ = [
     "FailureType",
@@ -22,5 +22,6 @@ __all__ = [
     "WhatIfReport",
     "TopologyGraph",
     "WhatIfAnalyzer",
+    "PREDEFINED_SCENARIOS",
     "what_if_analyzer",
 ]
