@@ -60,7 +60,7 @@ export function Sidebar() {
   // Yig'ilgan (Collapsed) Mini Rail ko'rinishi
   if (collapsed) {
     return (
-      <aside className="glass flex h-full w-12 flex-col items-center gap-3 py-2.5 rounded-xl transition-all">
+      <aside className="glass flex h-full w-12 shrink-0 flex-col items-center gap-3 py-2.5 rounded-xl transition-all">
         <Tip content="Panelni kengaytirish">
           <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={toggleSidebar}>
             <ChevronRight className="h-4 w-4" />
@@ -109,9 +109,9 @@ export function Sidebar() {
     )
   }
 
-  // To'liq Kengaytirilgan ko'rinish
+  // To'liq Kengaytirilgan ko'rinish (210px rail)
   return (
-    <aside className="glass flex h-full min-h-0 w-52 flex-col gap-3.5 overflow-auto rounded-xl p-3 text-xs transition-all">
+    <aside className="glass flex h-full min-h-0 w-[210px] shrink-0 flex-col gap-3.5 overflow-auto rounded-xl p-3 text-xs transition-all">
       {/* Sarlavha va Yig'ish tugmasi */}
       <div className="flex items-center justify-between pb-1 border-b border-border/40">
         <span className="font-semibold text-foreground text-xs">Asboblar paneli</span>

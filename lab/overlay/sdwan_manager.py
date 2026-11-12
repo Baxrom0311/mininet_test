@@ -268,6 +268,10 @@ class SDWANManager:
         if not t:
             raise ValueError(f"Tunnel {tunnel_id} mavjud emas")
 
+        # Pre-impairment active paths
+        monitored_apps = [TrafficClass.VOIP, TrafficClass.VIDEO, TrafficClass.CRITICAL_DATA, TrafficClass.BULK_BACKUP]
+        pre_paths = {app: self.select_path(app)["selected_tunnel"]["tunnel_id"] for app in monitored_apps}
+
         t.latency_ms += add_latency_ms
         t.packet_loss_pct += add_loss_pct
         if set_status:
@@ -279,10 +283,10 @@ class SDWANManager:
 
         # Barcha ilovalar uchun qayta yo'naltirish (Dynamic Steering)
         failovers = []
-        for app in [TrafficClass.VOIP, TrafficClass.VIDEO, TrafficClass.CRITICAL_DATA, TrafficClass.BULK_BACKUP]:
+        for app in monitored_apps:
             new_selection = self.select_path(app)
             new_tid = new_selection["selected_tunnel"]["tunnel_id"]
-            if new_tid != tunnel_id:
+            if pre_paths[app] == tunnel_id and new_tid != tunnel_id:
                 reason = "Blackout (Link offline)" if t.status == "down" else f"Brownout (SLA buzilishi: Loss={t.packet_loss_pct:.1f}%, Latency={t.latency_ms:.1f}ms)"
                 ev = FailoverEvent(
                     timestamp=time.time(),

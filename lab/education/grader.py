@@ -260,8 +260,8 @@ class NetAcadGrader:
             except Exception:
                 pass
 
-        if rubric_checks and submission_data and "devices" in submission_data:
-            devices = submission_data.get("devices", {})
+        if rubric_checks:
+            devices = submission_data.get("devices", {}) if isinstance(submission_data, dict) else {}
             results: List[CheckResult] = []
             checklist: List[Dict[str, Any]] = []
             total_points = 0.0
@@ -279,7 +279,10 @@ class NetAcadGrader:
 
                 actual_val = None
                 if dev_name in devices and isinstance(devices[dev_name], dict):
-                    actual_val = devices[dev_name].get(field_name)
+                    dev_data = devices[dev_name]
+                    actual_val = dev_data.get(field_name)
+                    if actual_val is None and "config" in dev_data and isinstance(dev_data["config"], dict):
+                        actual_val = dev_data["config"].get(field_name)
 
                 passed = False
                 if expected is not None:
@@ -430,8 +433,14 @@ class NetAcadGrader:
         # Item 3: Default Gateway Configuration (20 pts)
         gw_correct = 0
         for h in hosts:
-            gw = h.get("config", {}).get("gateway", "")
-            intfs = h.get("config", {}).get("interfaces", {})
+            h_cfg = h.get("config", {})
+            gw = h_cfg.get("gateway", "")
+            intfs = h_cfg.get("interfaces", {})
+            if not gw:
+                for idata in intfs.values():
+                    if idata.get("gateway"):
+                        gw = idata.get("gateway")
+                        break
             if gw:
                 try:
                     gw_ip = ipaddress.IPv4Address(gw)
@@ -872,7 +881,7 @@ class NetAcadGrader:
             cfg = r.get("config", {})
             fw = cfg.get("firewall", {})
             if isinstance(fw, dict):
-                default_policy = fw.get("default", default_policy)
+                default_policy = fw.get("default") or fw.get("default_policy") or fw.get("policy") or default_policy
                 all_rules.extend(fw.get("rules", []))
             startup = cfg.get("startup", "")
             if "access-list" in startup or "ip access-group" in startup:
@@ -908,7 +917,11 @@ class NetAcadGrader:
             if re.search(r"deny\s+tcp\s+.*\s+(?:eq\s+23|eq\s+telnet|23)", cisco_acl_text, re.IGNORECASE):
                 telnet_blocked = True
 
-        if default_policy in ("drop", "reject") and not any(r.get("dport") in (23, "23") and r.get("action") == "accept" for r in all_rules):
+        if default_policy in ("drop", "reject") and not any(
+            (r.get("dport") or r.get("dst_port")) in (23, "23", "telnet")
+            and r.get("action") in ("accept", "permit")
+            for r in all_rules
+        ):
             telnet_blocked = True
 
         if telnet_blocked:

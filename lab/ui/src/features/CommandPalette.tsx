@@ -5,7 +5,7 @@ import { Activity, BarChart3, Cpu, FilePlus2, FolderOpen, LineChart, Maximize2, 
 import { DeviceIcon } from '@/components/DeviceIcon'
 import { toast } from '@/components/ui/toast'
 import { api } from '@/lib/api'
-import { addDevice, devLabel, emptyProject, loadProject, openWin, redo, running, saveProject, select, startNet, stopNet, undo, useStore } from '@/lib/store'
+import { addDevice, devLabel, emptyProject, loadProject, openWin, redo, running, saveProject, select, setActiveTab, startNet, stopNet, undo, useStore } from '@/lib/store'
 import type { DeviceType, Project } from '@/lib/types'
 import { canvasApi } from './Canvas'
 import { cn } from '@/lib/utils'
@@ -29,6 +29,10 @@ export function CommandPalette({ onToggleTheme }: { onToggleTheme: () => void })
 
   const cmds = useMemo<Cmd[]>(() => {
     const out: Cmd[] = [
+      { id: 'ws-canvas', group: 'Ishchi Fazolar', label: 'Topologiya Kanvasi', icon: <Network />, run: () => setActiveTab('canvas') },
+      { id: 'ws-telemetry', group: 'Ishchi Fazolar', label: 'L4 Telemetriya Observatoriyasi', icon: <Activity />, run: () => setActiveTab('telemetry') },
+      { id: 'ws-security', group: 'Ishchi Fazolar', label: 'Security Studio & Conntrack', icon: <Shield />, run: () => setActiveTab('security') },
+      { id: 'ws-results', group: 'Ishchi Fazolar', label: 'Natijalar va Tahlil', icon: <BarChart3 />, run: () => setActiveTab('results') },
       { id: 'run', group: 'Buyruqlar', label: isRunning ? "Tarmoqni to'xtatish" : 'Tarmoqni ishga tushirish', icon: isRunning ? <Square /> : <Play />, run: () => (isRunning ? stopNet() : startNet()) },
       { id: 'save', group: 'Buyruqlar', label: 'Loyihani saqlash', hint: 'Ctrl+S', icon: <Save />, run: () => saveProject().catch((e) => toast(e.message, 'error')) },
       { id: 'undo', group: 'Buyruqlar', label: 'Bekor qilish', hint: 'Ctrl+Z', icon: <Undo2 />, run: undo },

@@ -9,6 +9,7 @@ ishlaydi va Cisco Packet Tracer / Wireshark kabi 7-qatlamli PDU strukturasini ya
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 import socket
 import struct
 import time

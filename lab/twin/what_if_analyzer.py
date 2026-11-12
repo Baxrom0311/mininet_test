@@ -1105,6 +1105,9 @@ class WhatIfAnalyzer:
             item["rank"] = idx + 1
         return rankings
 
+    # N-1 worst case vulnerability ranking alias
+    evaluate_n_minus_one_worst_case = rank_worst_case_failures
+
 
 # Singleton instance for server and background services
 what_if_analyzer = WhatIfAnalyzer()

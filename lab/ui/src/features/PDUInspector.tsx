@@ -81,6 +81,12 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
   const [intLoading, setIntLoading] = useState(false)
   const [burstSwitch, setBurstSwitch] = useState<string>('s2')
 
+  const pkt = win.arg || {}
+  const proto = (pkt.proto || 'TCP').toUpperCase()
+  const summary = pkt.summary || `${proto} Packet`
+  const link = pkt.link || 'eth0'
+  const isDropped = Boolean(pkt.dropped)
+
   const runINTSimulation = async (burst = false) => {
     setIntLoading(true)
     try {
@@ -109,12 +115,6 @@ export function PDUInspectorWindow({ win }: { win: Win }) {
       runINTSimulation(false)
     }
   }, [tab])
-
-  const pkt = win.arg || {}
-  const proto = (pkt.proto || 'TCP').toUpperCase()
-  const summary = pkt.summary || `${proto} Packet`
-  const link = pkt.link || 'eth0'
-  const isDropped = Boolean(pkt.dropped)
 
   // Backend orqali real PDU dekonstruksiyasi va Cisco Processing Logini olish
   useEffect(() => {

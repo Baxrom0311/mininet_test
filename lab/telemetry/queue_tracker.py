@@ -310,10 +310,18 @@ class QueueTracker:
                     )
                 else:
                     recommendation = f"{clean_kind.upper()} ({dev}) kechikishni me'yorida ushlab turmoqda."
+            elif clean_kind == "cake":
+                if dropping or early_drops > 0:
+                    recommendation = (
+                        f"CAKE ({dev}) da Cobalt AQM algoritmi kechikishni jilovlash uchun "
+                        f"paketlarni nazorat ostida tashlamoqda/ECN bilan belgilamoqda ({delay_ms:.1f}ms kechikish). Bu kutilgan normal reaksiyadir."
+                    )
+                else:
+                    recommendation = f"CAKE ({dev}) minimal kechikish ({delay_ms:.1f}ms) va adolatli taqsimot (Fair Queueing) bilan optimal ishlamoqda."
             else:
                 recommendation = f"Interfeys {dev} navbatida yuqori kechikish ({delay_ms:.1f}ms). Parametrlarni optimallashtiring."
         else:
-            if clean_kind in ("codel", "fq_codel"):
+            if clean_kind in ("codel", "fq_codel", "cake"):
                 recommendation = f"{clean_kind.upper()} ({dev}) minimal kechikish bilan optimal ishlamoqda."
             else:
                 recommendation = f"Navbat holati me'yorida ({delay_ms:.1f}ms kechikish)."
@@ -461,11 +469,27 @@ class QueueTracker:
         if m_prob:
             params["probability"] = float(m_prob.group(1))
 
-        # TBF / Rate parametrlari
-        m_rate = re.search(r"\brate\s+([\d.]+[a-zA-Z/]+)", header)
+        # TBF / CAKE / Rate parametrlari
+        m_rate = re.search(r"\b(?:bandwidth|rate)\s+([\d.]+[a-zA-Z/]+)", header)
         rate_bps = parse_rate_bps(m_rate.group(1)) if m_rate else None
         if rate_bps is not None:
             params["rate_bps"] = rate_bps
+
+        # CAKE rtt va boshqaruv parametrlari
+        m_cake_rtt = re.search(r"\brtt\s+([\d.]+[a-zA-Z]*)", header)
+        if m_cake_rtt:
+            cake_rtt_ms = parse_time_ms(m_cake_rtt.group(1))
+            params["target_rtt_ms"] = cake_rtt_ms
+            if target_ms is None and kind.lower() == "cake":
+                target_ms = cake_rtt_ms
+
+        for cake_flag in (
+            "diffserv3", "diffserv4", "besteffort", "triple-isolate",
+            "dual-srchost", "dual-dsthost", "hostpair", "nat", "nonat",
+            "ack-filter", "no-ack-filter", "split-gso", "no-split-gso", "raw"
+        ):
+            if cake_flag in tokens:
+                params[cake_flag] = True
 
         m_ceil = re.search(r"\bceil\s+([\d.]+[a-zA-Z/]+)", header)
         if m_ceil:
@@ -606,6 +630,73 @@ class QueueTracker:
             if m_tokens:
                 extra_stats["tokens"] = int(m_tokens.group(1))
                 extra_stats["ctokens"] = int(m_tokens.group(2))
+
+            # CAKE drop va kechikish statistikasi
+            # unforced drops (AQM drop tracking)
+            m_unforced = re.findall(r"(?:min\s+|max\s+)?unforced dropped:?\s*(\d+)", l_str)
+            if m_unforced:
+                u_sum = sum(int(x) for x in m_unforced)
+                early_drops += u_sum
+                extra_stats["cake_unforced_drops"] = extra_stats.get("cake_unforced_drops", 0) + u_sum
+
+            # forced drops (buffer limit drop tracking)
+            m_forced = re.findall(r"(?:min\s+|max\s+)?forced dropped:?\s*(\d+)", l_str)
+            if m_forced:
+                f_sum = sum(int(x) for x in m_forced)
+                extra_stats["cake_forced_drops"] = extra_stats.get("cake_forced_drops", 0) + f_sum
+
+            # tail drops
+            m_tail = re.findall(r"(?:min\s+|max\s+)?tail dropped:?\s*(\d+)", l_str)
+            if m_tail:
+                t_sum = sum(int(x) for x in m_tail)
+                extra_stats["cake_tail_drops"] = extra_stats.get("cake_tail_drops", 0) + t_sum
+
+            # ack drops
+            m_ack_d = re.findall(r"(?:min\s+|max\s+)?ack dropped:?\s*(\d+)", l_str)
+            if m_ack_d:
+                a_sum = sum(int(x) for x in m_ack_d)
+                extra_stats["cake_ack_drops"] = extra_stats.get("cake_ack_drops", 0) + a_sum
+
+            # ecn marks
+            m_cake_ecn = re.findall(r"(?:min\s+|max\s+)?ecn marked:?\s*(\d+)", l_str)
+            if m_cake_ecn:
+                e_sum = sum(int(x) for x in m_cake_ecn)
+                ecn_marks += e_sum
+                extra_stats["cake_ecn_marks"] = extra_stats.get("cake_ecn_marks", 0) + e_sum
+
+            # av_delay / peak_delay
+            m_av = re.search(r"av_delay\s+([\d.]+[a-zA-Z]*)", l_str)
+            if m_av:
+                av_d = parse_time_ms(m_av.group(1))
+                extra_stats["av_delay_ms"] = av_d
+                if ldelay_ms is None:
+                    ldelay_ms = av_d
+
+            m_peak = re.search(r"peak_delay\s+([\d.]+[a-zA-Z]*)", l_str)
+            if m_peak:
+                pk_d = parse_time_ms(m_peak.group(1))
+                extra_stats["peak_delay_ms"] = pk_d
+                if ldelay_ms is None:
+                    ldelay_ms = pk_d
+
+            # capacity estimate
+            m_cap = re.search(r"capacity estimate:\s*([\d.]+[a-zA-Z/]+)", l_str)
+            if m_cap:
+                cap_rate = parse_rate_bps(m_cap.group(1))
+                extra_stats["capacity_estimate_bps"] = cap_rate
+                if rate_bps is None:
+                    rate_bps = cap_rate
+
+            # memory used
+            m_cake_mem = re.search(r"memory used:\s*([\d.]+[a-zA-Z]*)\s+of\s+([\d.]+[a-zA-Z]*)", l_str)
+            if m_cake_mem:
+                extra_stats["cake_memory_used"] = m_cake_mem.group(1)
+                extra_stats["cake_memory_limit"] = m_cake_mem.group(2)
+
+        # Agar CAKE unforced drops yoki faol AQM tashlash bo'lsa dropping = True
+        if extra_stats.get("cake_unforced_drops", 0) > 0:
+            dropping = True
+            extra_stats["dropping"] = True
 
         # Bufferbloat metrikalarini hisoblash
         occ_pct, est_delay, bloat_det, severity, score, rec = self._evaluate_bufferbloat(

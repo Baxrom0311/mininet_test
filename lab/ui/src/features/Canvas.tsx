@@ -353,6 +353,11 @@ export function Canvas() {
             const d0 = R + 20
             const peak = st ? Math.max(st.ab_bps || 0, st.ba_bps || 0) : 0
             const lbl = { paintOrder: 'stroke' as const, stroke: 'hsl(var(--background))', strokeWidth: 3 }
+            const pLabels = !running && !est && !down && l.params ? [
+              l.params.delay && l.params.delay !== '0ms' ? l.params.delay : '',
+              l.params.loss ? `${l.params.loss}%` : '',
+              l.params.bw && l.params.bw !== 1000 && l.params.bw !== 100 ? `${l.params.bw}M` : '',
+            ].filter(Boolean).join(' · ') : ''
             return (
               <g key={lid} data-link={lid} className="cursor-pointer">
                 <line x1={g.x1} y1={g.y1} x2={g.x2} y2={g.y2} stroke={stroke} strokeWidth={sw} strokeLinecap="round"
@@ -361,6 +366,7 @@ export function Canvas() {
                 <text x={g.x1 + g.ux * d0 + g.nx * 9} y={g.y1 + g.uy * d0 + g.ny * 9 + 3} textAnchor="middle" className="pointer-events-none fill-muted-foreground font-mono text-[9.5px]" style={lbl}>eth{l.a.port}</text>
                 <text x={g.x2 - g.ux * d0 + g.nx * 9} y={g.y2 - g.uy * d0 + g.ny * 9 + 3} textAnchor="middle" className="pointer-events-none fill-muted-foreground font-mono text-[9.5px]" style={lbl}>eth{l.b.port}</text>
                 {running && peak > 0 && !down && <text x={(g.x1 + g.x2) / 2 - g.nx * 10} y={(g.y1 + g.y2) / 2 - g.ny * 10 + 3} textAnchor="middle" className="pointer-events-none fill-foreground font-mono text-[9.5px]" style={lbl}>{fmtBps(peak)}</text>}
+                {pLabels && <text x={(g.x1 + g.x2) / 2 - g.nx * 10} y={(g.y1 + g.y2) / 2 - g.ny * 10 + 3} textAnchor="middle" className="pointer-events-none fill-muted-foreground font-mono text-[9px]" style={lbl}>{pLabels}</text>}
                 {est && <text x={(g.x1 + g.x2) / 2 + g.nx * 12} y={(g.y1 + g.y2) / 2 + g.ny * 12 + 3} textAnchor="middle"
                   className={cn('pointer-events-none font-mono text-[9.5px]', est.ok ? 'fill-muted-foreground' : 'fill-destructive')} style={lbl}>
                   {est.ok ? `MCS${est.mcs} · ~${Math.round(est.thr_mbps)} Mb/s · ${Math.round(est.distance_m)} m` : `signal yo'q · ${Math.round(est.distance_m)} m`}</text>}
