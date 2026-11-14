@@ -107,6 +107,25 @@ Brauzer (UI) ──WebSocket/REST──► lab/server.py (FastAPI) ──► dri
 
 ## Ishga tushirish
 
+### Ryu / os-ken kontrollerini tekshirish
+
+Lokal Ryu/os-ken kontrolleri portni ocholmasa NetLab xato qaytaradi va
+kontroller jarayonini tozalaydi. Ochiq TCP port hali switch ulanganini yoki
+forwarding ishlayotganini isbotlamaydi.
+
+Mininet va root huquqisiz haqiqiy OpenFlow 1.3 handshake tekshiruvi:
+
+```bash
+python3 -m venv /workspace/venvs/ryu
+/workspace/venvs/ryu/bin/python -m pip install os-ken==3.0.0
+NETLAB_RYU_PYTHON=/workspace/venvs/ryu/bin/python \
+  /workspace/venvs/ryu/bin/python -m unittest lab.tests.test_controller_startup -v
+```
+
+Test kontrollerga switch kabi ulanadi, Features almashinuvini va table-miss
+qoidasining kontrollerga yuborish action’ini tekshiradi. Bu OVS forwarding,
+hostlar orasidagi trafik yoki FRR sinovining o‘rnini bosmaydi.
+
 ### Linux / WSL2 (haqiqiy tarmoq)
 
 ```bash

@@ -362,19 +362,30 @@ def _drain_proc(proc, port, name="Controller", ip="127.0.0.1"):
     drain_thread = threading.Thread(target=_drain_stdout, daemon=True)
     drain_thread.start()
 
-    deadline = time.time() + 30
-    while time.time() < deadline:
-        if check_controller_health(ip, port, timeout=1.0):
-            print(f"[{name}] Tayyor ({ip}:{port})!")
-            return proc
-        time.sleep(1)
-        if proc.poll() is not None:
-            out = b"".join(tail).decode(errors="replace")
-            print(f"XATO: {name} o'chdi!\n{out[-500:]}")
-            sys.exit(1)
-    print(f"XATO: {name} 30s ichida tayyor bo'lmadi")
-    proc.terminate()
-    sys.exit(1)
+    deadline = time.monotonic() + 30
+    try:
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                drain_thread.join(timeout=1)
+                out = b"".join(tail).decode(errors="replace")
+                raise RuntimeError(f"{name} o'chdi (exit={proc.returncode})!\n{out[-500:]}")
+            if check_controller_health(ip, port, timeout=1.0) and proc.poll() is None:
+                print(f"[{name}] Tayyor ({ip}:{port})!")
+                return proc
+            time.sleep(1)
+        raise RuntimeError(f"{name} 30s ichida tayyor bo'lmadi")
+    except BaseException:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+        drain_thread.join(timeout=1)
+        if not drain_thread.is_alive():
+            proc.stdout.close()
+        raise
 
 
 def start_controller(controller_type="ryu", ip="127.0.0.1", port=None):
@@ -425,27 +436,11 @@ def start_controller(controller_type="ryu", ip="127.0.0.1", port=None):
         )
     with open("/tmp/transport_monitor.py", "w") as f:
         f.write(_render_controller_app())
-    with open("/tmp/run_controller.py", "w") as f:
-        f.write(f'''#!/usr/bin/env python3
-import sys
-sys.path.insert(0, "/tmp")
-try:
-    from os_ken import cfg
-    from os_ken.base.app_manager import AppManager
-    from os_ken.lib import hub
-except ImportError:
-    from ryu import cfg
-    from ryu.base.app_manager import AppManager
-    from ryu.lib import hub
-cfg.CONF(["--ofp-listen-host", "{ip}", "--ofp-tcp-listen-port", "{port}"])
-app_mgr = AppManager.get_instance()
-app_mgr.load_apps(["transport_monitor"])
-contexts = app_mgr.create_contexts()
-services = app_mgr.instantiate_apps(**contexts)
-hub.joinall(services)
-''')
     print(f"[Controller] Ryu/os-ken ishga tushirilmoqda (port={port})...")
-    proc = subprocess.Popen(["python3", "/tmp/run_controller.py"],
+    # Use the manager/interpreter that discovery actually verified. The manager
+    # also performs the framework's normal hub initialization.
+    proc = subprocess.Popen([*ryu_cmd, "--ofp-listen-host", ip,
+                             "--ofp-tcp-listen-port", str(port), "/tmp/transport_monitor.py"],
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     _drain_proc(proc, port, "Ryu/os-ken", ip=ip)
     return proc

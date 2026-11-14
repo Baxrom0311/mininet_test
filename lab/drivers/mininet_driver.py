@@ -64,13 +64,13 @@ def _run(cmd, input_text=None, timeout=15):
 
 
 def _wait_port(port, timeout=10.0, host="127.0.0.1", proc=None):
-    end = time.time() + timeout
-    while time.time() < end:
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
         if proc is not None and proc.poll() is not None:
             return False
         try:
             with socket.create_connection((host, int(port)), timeout=0.5):
-                return True
+                return proc is None or proc.poll() is None
         except OSError:
             time.sleep(0.2)
     return False
@@ -1662,8 +1662,9 @@ exit 0
             logf.close()
             self._ctrl_procs[cname] = p
             if not _wait_port(cport, 15, host="127.0.0.1", proc=p):
-                self.bus.log("error", f"Kontroller '{cname}' {cport}-portda ochilmadi:\n"
-                                      f"{self.controller_log(cname)[-600:]}")
+                detail = self.controller_log(cname)[-600:]
+                self._ctrl_stop(cname)
+                raise DriverError(f"Kontroller '{cname}' {cport}-portda ochilmadi:\n{detail}")
             else:
                 self.bus.log("ok", f"Kontroller '{cname}' :{cport} ishga tushdi")
             if self.net is not None:
