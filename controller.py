@@ -23,7 +23,7 @@ _CONTROLLER_APP_HEADER = r'''
 try:
     from os_ken.base import app_manager
     from os_ken.controller import ofp_event
-    from os_ken.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, set_ev_cls
+    from os_ken.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, DEAD_DISPATCHER, set_ev_cls
     from os_ken.ofproto import ofproto_v1_3
     from os_ken.lib.packet import packet, ethernet, arp, ipv4, tcp, udp, icmp
     from os_ken.lib import hub
@@ -31,7 +31,7 @@ try:
 except ImportError:
     from ryu.base import app_manager
     from ryu.controller import ofp_event
-    from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, set_ev_cls
+    from ryu.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER, DEAD_DISPATCHER, set_ev_cls
     from ryu.ofproto import ofproto_v1_3
     from ryu.lib.packet import packet, ethernet, arp, ipv4, tcp, udp, icmp
     from ryu.lib import hub
@@ -71,10 +71,20 @@ class TransportMonitor(BaseApp):
                     pass
             hub.sleep(5)
 
+    @set_ev_cls(ofp_event.EventOFPStateChange, DEAD_DISPATCHER)
+    def datapath_disconnected(self, ev):
+        dp = ev.datapath
+        # A reconnect can reuse the DPID before the old session's DEAD event.
+        # Remove only the session that is still registered for this switch.
+        if self._datapaths.get(dp.id) is dp:
+            self._datapaths.pop(dp.id)
+            self.mac_to_port.pop(dp.id, None)
+
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
         dp = ev.msg.datapath; ofp = dp.ofproto; p = dp.ofproto_parser
         self._datapaths[dp.id] = dp
+        self.mac_to_port[dp.id] = {}
         match = p.OFPMatch()
         actions = [p.OFPActionOutput(ofp.OFPP_CONTROLLER, ofp.OFPCML_NO_BUFFER)]
         inst = [p.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)]

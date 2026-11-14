@@ -32,6 +32,7 @@ class ForwardingTests(unittest.TestCase):
     def app(self, cls):
         app = cls.__new__(cls)
         app.mac_to_port = {}
+        app._datapaths = {}
         app.logger = Mock()
         app.dev = lambda dpid: None  # L2 branch of the router template
         return app
@@ -130,6 +131,27 @@ class ForwardingTests(unittest.TestCase):
                 dp = self.datapath(2)
                 self.dispatch(app, method, self.event(dp, src='00:00:00:00:00:02', dst='00:00:00:00:00:01'))
                 self.assertEqual(dp.sent[-1].actions[0].port, ofp.OFPP_FLOOD)
+
+    def test_monitor_disconnect_removes_stats_target_and_learned_addresses(self):
+        app, dp = self.app(self.apps[0][1]), self.datapath()
+        app._datapaths[1] = dp
+        app.mac_to_port[1] = {'00:00:00:00:00:01': 1}
+        app.datapath_disconnected(SimpleNamespace(datapath=dp))
+        self.assertEqual(app._datapaths, {})
+        self.assertEqual(app.mac_to_port, {})
+        app.datapath_disconnected(SimpleNamespace(datapath=dp))  # idempotent
+
+    def test_old_disconnect_cannot_remove_reconnected_switch(self):
+        app = self.app(self.apps[0][1])
+        old, new = self.datapath(), self.datapath()
+        app._datapaths[1] = old
+        app.mac_to_port[1] = {'00:00:00:00:00:01': 3}
+        app.switch_features_handler(SimpleNamespace(msg=SimpleNamespace(datapath=new)))
+        self.assertEqual(app.mac_to_port[1], {})
+        app.mac_to_port[1]['00:00:00:00:00:02'] = 4
+        app.datapath_disconnected(SimpleNamespace(datapath=old))
+        self.assertIs(app._datapaths[1], new)
+        self.assertEqual(app.mac_to_port[1], {'00:00:00:00:00:02': 4})
 
 
 if __name__ == '__main__':
