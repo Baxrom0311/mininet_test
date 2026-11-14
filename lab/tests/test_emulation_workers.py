@@ -101,6 +101,49 @@ class WorkerTests(unittest.TestCase):
             self.workers.finish()
         self.assertIsNotNone(process.poll())
 
+    def test_failed_child_reports_context_and_does_not_complete_transfer(self):
+        process = self.workers.spawn([sys.executable, "-c", "raise SystemExit(7)"],
+                                     label="h1 iperf3 client")
+        done = Mock()
+        reader = self.workers.reader(process, lambda line: None, done)
+        reader.join(timeout=3)
+        self.assertFalse(reader.is_alive())
+        with self.assertRaisesRegex(RuntimeError, "h1 iperf3 client.*status 7"):
+            self.workers.finish()
+        done.assert_not_called()
+        self.assertTrue(process.stdout.closed)
+
+    def test_failure_without_reader_is_detected_during_cleanup(self):
+        process = self.workers.spawn([sys.executable, "-c", "raise SystemExit(2)"],
+                                     label="h2 iperf3 server")
+        process.wait(timeout=3)
+        with self.assertRaisesRegex(RuntimeError, "h2 iperf3 server.*status 2"):
+            self.workers.finish()
+
+    def test_expected_no_reply_exit_is_accepted(self):
+        process = self.workers.spawn([sys.executable, "-c", "raise SystemExit(1)"],
+                                     label="h1 ping", success_codes=(0, 1))
+        reader = self.workers.reader(process, lambda line: None)
+        reader.join(timeout=3)
+        self.workers.finish()
+
+    def test_unexpected_exit_is_rejected_even_for_loss_probe(self):
+        process = self.workers.spawn([sys.executable, "-c", "raise SystemExit(2)"],
+                                     label="h1 ping", success_codes=(0, 1))
+        process.wait(timeout=3)
+        with self.assertRaisesRegex(RuntimeError, "h1 ping.*status 2"):
+            self.workers.finish()
+
+    def test_cleanup_termination_is_not_a_generator_failure(self):
+        process = self.workers.spawn([sys.executable, "-u", "-c",
+                                     "import time; print('ready',flush=True); time.sleep(60)"])
+        ready = threading.Event()
+        self.workers.reader(process, lambda line: ready.set())
+        self.assertTrue(ready.wait(3))
+        self.workers.finish()
+        self.assertIsNotNone(process.returncode)
+        self.assertTrue(process.stdout.closed)
+
     @unittest.skipUnless(sys.platform == "linux", "signal semantics required")
     def test_stubborn_child_is_killed_reaped_and_pipe_closed(self):
         script = "import signal,time\nsignal.signal(signal.SIGTERM,signal.SIG_IGN)\nprint('ready',flush=True)\nwhile True: time.sleep(1)"
@@ -160,8 +203,8 @@ class EngineTests(unittest.TestCase):
                 "links": {"l1": {"a": {"dev": "h1", "port": 1}, "b": {"dev": "h2", "port": 1}, "params": {}}}},
             update_link=Mock())
 
-    def execute(self, driver, events=None):
-        sc = {"duration": 1, "apps": [], "events": events if events is not None else [{"t": 0, "action": "link_down", "link": "l1"}]}
+    def execute(self, driver, events=None, apps=None):
+        sc = {"duration": 1, "apps": apps or [], "events": events if events is not None else [{"t": 0, "action": "link_down", "link": "l1"}]}
         with patch.object(emulation, "_SERVER_STARTUP_S", 0), patch.object(emulation, "_OUTPUT_DRAIN_S", 0), \
                 patch("lab.drivers.mininet_driver._read_net_dev", return_value={}), \
                 patch("lab.engines.nodestats.read_proc_routes", return_value=set()), \
@@ -174,6 +217,31 @@ class EngineTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "event t=0 link_down l1.*synthetic tc rejected update"):
             self.execute(driver)
         driver.update_link.assert_called_once_with("l1", up=False)
+
+    def test_full_engine_failed_traffic_does_not_return_zero_throughput_success(self):
+        spawn = EmulationWorkers.spawn
+
+        def local_spawn(workers, argv, **kwargs):
+            # Run real local children while replacing only the unavailable
+            # namespace and iperf binaries. Preserve the engine's exit policy.
+            code = 7 if argv[3] == "iperf3" and "-c" in argv else 0
+            return spawn(workers, [sys.executable, "-c", f"raise SystemExit({code})"], **kwargs)
+
+        with patch.object(EmulationWorkers, "spawn", local_spawn):
+            with self.assertRaisesRegex(RuntimeError, "h1 iperf3.*status 7"):
+                self.execute(self.driver(), events=[], apps=[
+                    {"id": "bulk", "type": "tcp", "src": "h1", "dst": "h2", "start": 0, "stop": 1}])
+
+    def test_full_engine_ping_without_replies_remains_a_loss_measurement(self):
+        spawn = EmulationWorkers.spawn
+
+        def local_spawn(workers, argv, **kwargs):
+            return spawn(workers, [sys.executable, "-c", "raise SystemExit(1)"], **kwargs)
+
+        with patch.object(EmulationWorkers, "spawn", local_spawn):
+            result = self.execute(self.driver(), events=[], apps=[
+                {"id": "probe", "type": "ping", "src": "h1", "dst": "h2", "start": 0, "stop": 1}])
+        self.assertEqual(result["flows"]["probe"]["summary"]["loss_pct"], 100)
 
     def test_successful_event_keeps_requested_and_actual_time(self):
         driver = self.driver()

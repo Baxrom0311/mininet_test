@@ -17,6 +17,9 @@ class EmulationWorkers:
         self._errors = []
         self._lock = threading.RLock()
         self._closed = False
+        self._exit_policies = {}
+        self._exit_checked = set()
+        self._terminated = set()
 
     def error(self, label, error):
         with self._lock:
@@ -29,7 +32,7 @@ class EmulationWorkers:
         if errors:
             raise RuntimeError("emulation workers failed: " + "; ".join(errors[:5]))
 
-    def spawn(self, argv):
+    def spawn(self, argv, *, label="subprocess", success_codes=(0,)):
         # Close cannot snapshot children between Popen and registration.
         with self._lock:
             if self._closed:
@@ -37,7 +40,20 @@ class EmulationWorkers:
             process = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                        text=True, bufsize=1)
             self.processes.append(process)
+            self._exit_policies[process] = (label, frozenset(success_codes))
             return process
+
+    def _check_exit(self, process):
+        # Share the lock with cleanup so a termination initiated by us cannot
+        # be mistaken for a naturally failed traffic generator.
+        with self._lock:
+            code = process.poll()
+            if code is None or process in self._exit_checked:
+                return
+            self._exit_checked.add(process)
+            label, success_codes = self._exit_policies[process]
+            if process not in self._terminated and code not in success_codes:
+                self.error(label, RuntimeError(f"subprocess exited with status {code}"))
 
     def worker(self, label, fn):
         def run():
@@ -69,8 +85,9 @@ class EmulationWorkers:
                     fn(line.rstrip())
                 except Exception as error:
                     self.error("parser", error)
-            if on_eof:
-                process.wait(timeout=5)
+            process.wait(timeout=5)
+            self._check_exit(process)
+            if on_eof and process.returncode in self._exit_policies[process][1] and process not in self._terminated:
                 on_eof()
         return self.worker("reader", run)
 
@@ -84,8 +101,13 @@ class EmulationWorkers:
         problems = []
         for process in processes:
             try:
-                if process.poll() is None:
-                    process.terminate()
+                with self._lock:
+                    self._check_exit(process)
+                    if process.poll() is None:
+                        self._terminated.add(process)
+                        process.terminate()
+                    else:
+                        self._check_exit(process)
             except ProcessLookupError:
                 pass
             except Exception as error:

@@ -99,7 +99,11 @@ def _run(driver, sc, progress, log, workers):
         return None
 
     def spawn(dev, argv):
-        return workers.spawn(["mnexec", "-a", str(pid[dev])] + argv)
+        # ping exit 1 means no replies, which is a valid loss measurement.
+        # Exit 2 still indicates an invocation/runtime failure.
+        success_codes = (0, 1) if argv[0] == "ping" else (0,)
+        return workers.spawn(["mnexec", "-a", str(pid[dev])] + argv,
+                             label=f"{dev} {os.path.basename(argv[0])}", success_codes=success_codes)
 
     def reader(p, fn, on_eof=None):
         return workers.reader(p, fn, on_eof)
