@@ -1,0 +1,23 @@
+name: OpenFlow forwarding regression
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  forwarding:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install supported OpenFlow packet library
+        run: python -m pip install os-ken==3.0.0
+      - name: Test packet forwarding and wire serialization without root
+        run: python -m unittest lab.tests.test_openflow_forwarding -v

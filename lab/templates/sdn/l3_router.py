@@ -148,9 +148,11 @@ class SDNRouter(BaseApp):
         table = self.mac_to_port.setdefault(dp.id, {})
         table[eth.src] = in_port
         out = table.get(eth.dst, ofp.OFPP_FLOOD)
+        if out == in_port:
+            return
         actions = [p.OFPActionOutput(out)]
         if out != ofp.OFPP_FLOOD:
-            self.add_flow(dp, 10, p.OFPMatch(in_port=in_port, eth_dst=eth.dst), actions, idle=60)
+            self.add_flow(dp, 10, p.OFPMatch(in_port=in_port, eth_src=eth.src, eth_dst=eth.dst), actions, idle=60)
         data = msg.data if msg.buffer_id == ofp.OFP_NO_BUFFER else None
         dp.send_msg(p.OFPPacketOut(datapath=dp, buffer_id=msg.buffer_id, in_port=in_port,
                                    actions=actions, data=data))

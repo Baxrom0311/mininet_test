@@ -87,7 +87,7 @@ class TransportMonitor(BaseApp):
         in_port = msg.match['in_port']; dpid = dp.id
         pkt = packet.Packet(msg.data)
         eth = pkt.get_protocol(ethernet.ethernet)
-        if not eth:
+        if not eth or eth.ethertype == 0x88cc:  # LLDP belongs to topology discovery
             return
         dst = eth.dst; src = eth.src
         self.mac_to_port.setdefault(dpid, {})
@@ -121,13 +121,21 @@ class TransportMonitor(BaseApp):
             self.logger.warning("EVENTS_LOG write failed: %s", e)
 
         out_port = self.mac_to_port[dpid].get(dst, ofp.OFPP_FLOOD)
+        if out_port == in_port:
+            return
         actions = [p.OFPActionOutput(out_port)]
         if out_port != ofp.OFPP_FLOOD and ip_pkt:
-            match = p.OFPMatch(eth_type=0x0800, ipv4_src=ip_pkt.src, ipv4_dst=ip_pkt.dst)
+            match = p.OFPMatch(in_port=in_port, eth_src=src, eth_dst=dst,
+                               eth_type=0x0800, ipv4_src=ip_pkt.src, ipv4_dst=ip_pkt.dst)
             inst = [p.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, actions)]
             dp.send_msg(p.OFPFlowMod(datapath=dp, priority=10, match=match,
                                       instructions=inst, idle_timeout=30, hard_timeout=120,
                                       buffer_id=msg.buffer_id if msg.buffer_id != ofp.OFP_NO_BUFFER else ofp.OFP_NO_BUFFER))
+            if msg.buffer_id != ofp.OFP_NO_BUFFER:
+                # FlowMod applies the actions to the buffered packet already.
+                # Reusing that buffer in PacketOut can duplicate it or trigger
+                # OFPBRC_BUFFER_UNKNOWN after the switch consumes the buffer.
+                return
         data = msg.data if msg.buffer_id == ofp.OFP_NO_BUFFER else None
         dp.send_msg(p.OFPPacketOut(datapath=dp, buffer_id=msg.buffer_id,
                                     in_port=in_port, actions=actions, data=data))
