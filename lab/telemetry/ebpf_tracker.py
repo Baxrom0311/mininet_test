@@ -52,7 +52,7 @@ class EBPFTracker:
         self._callbacks: List[Callable[[EBPFEvent], None]] = []
         self._recent_events: List[EBPFEvent] = []
         self._max_history = 500
-        self._last_netstat: Dict[str, int] = {}
+        self._last_netstat: Dict[str, Dict[str, int]] = {}
 
     def register_callback(self, cb: Callable[[EBPFEvent], None]) -> None:
         """Yangi hodisa yuz berganda chaqiriluvchi tinglovchini (listener) ro'yxatga oladi."""
@@ -124,23 +124,29 @@ class EBPFTracker:
         return False
 
     def collect_kernel_drops(self, node_obj: Any = None, node_name: str = "host") -> List[Dict[str, Any]]:
-        """Linux /proc/net/netstat va tc orqali tushishlarni yig'adi."""
+        """Collect aggregate TcpExt counter changes, with a baseline per node.
+
+        These are counter-derived indications, not per-packet eBPF events.
+        Missing counters establish a fresh baseline when they next appear.
+        """
         drops: List[Dict[str, Any]] = []
-        now = time.time()
         netstat = self._read_netstat(node_obj)
-        if self._last_netstat and netstat:
-            diff_timeouts = netstat.get("TCPTimeouts", 0) - self._last_netstat.get("TCPTimeouts", 0)
+        previous = self._last_netstat.get(node_name, {})
+        if previous and netstat:
+            diff_timeouts = (netstat["TCPTimeouts"] - previous["TCPTimeouts"]
+                             if "TCPTimeouts" in netstat and "TCPTimeouts" in previous else 0)
             if diff_timeouts > 0:
                 ev = self.record_drop("0.0.0.0", 0, "0.0.0.0", 0, reason="RTO_TIMEOUT")
                 drops.append(ev.to_dict())
 
-            diff_fast_ret = netstat.get("TCPFastRetrans", 0) - self._last_netstat.get("TCPFastRetrans", 0)
+            diff_fast_ret = (netstat["TCPFastRetrans"] - previous["TCPFastRetrans"]
+                            if "TCPFastRetrans" in netstat and "TCPFastRetrans" in previous else 0)
             if diff_fast_ret > 0:
                 ev = self.record_retransmit("0.0.0.0", 0, "0.0.0.0", 0)
                 drops.append(ev.to_dict())
 
         if netstat:
-            self._last_netstat = netstat
+            self._last_netstat[node_name] = dict(netstat)
         return drops
 
     @staticmethod
