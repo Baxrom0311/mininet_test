@@ -4,11 +4,11 @@ export const APPLICATIONS = [
   {value:'udp',label:'UDP (CBR)',hint:'Belgilangan tezlikdagi doimiy trafik.'},
   {value:'tcp',label:'TCP (bulk)',hint:'Mavjud sig‘imdan foydalanadigan TCP oqimi.'},
   {value:'ping',label:'Ping',hint:'ICMP orqali RTT va yo‘qotishni o‘lchash.'},
-  {value:'voip',label:'VoIP',hint:'Ikki tomonlama ovoz; natijada MOS va ovoz sifati.'},
-  {value:'video',label:'Video (ABR)',hint:'DASH/HLS moslashuvchan video oqimi; rezolyutsiya va bufer nishonlari.'},
-  {value:'http3',label:'HTTP/3 (QUIC)',hint:'QUIC/UDP asosidagi multiplekslangan veb-trafik (0-RTT).'},
-  {value:'http',label:'HTTP',hint:'Mijoz serverdan sahifalar yuklaydi; javob vaqti hisoblanadi.'},
-  {value:'ftp',label:'FTP',hint:'Belgilangan hajmdagi fayl; uzatish vaqti hisoblanadi.'},
+  {value:'voip',label:'VoIP (model)',hint:'Kodek hajmi va tezligidagi ikki UDP oqim; haqiqiy RTP va jitter buferi bajarilmaydi.'},
+  {value:'video',label:'Video (ABR model)',hint:'TCP oqimi; sifat va bufer keyin hisoblanadi, haqiqiy HLS/DASH segmentlari yuklanmaydi.'},
+  {value:'http3',label:'HTTP/3 (UDP model)',hint:'Mustaqil UDP oqimlar; haqiqiy QUIC, TLS va 0-RTT bajarilmaydi.'},
+  {value:'http',label:'HTTP (model)',hint:'Davriy TCP uzatish; HTTP so‘rovi va TLS bajarilmaydi, ulanishni server boshlaydi.'},
+  {value:'ftp',label:'FTP (model)',hint:'Cheklangan TCP fayl uzatish; FTP protokoli bajarilmaydi.'},
   {value:'mcast',label:'Multicast',hint:'IPv4 guruhiga bitta manbadan bir nechta qabul qiluvchi. Routerlarda PIM kerak.'},
 ] as const
 export const receiversOf = (app:ScenarioApp):string[] => Array.isArray(app.dst) ? app.dst :

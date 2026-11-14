@@ -7,6 +7,28 @@ from lab.addressing import interface_address
 from lab.model import parse_ifname
 
 
+def application_issues(scenario):
+    """Describe workloads before expansion loses their application types."""
+    messages = {
+        "http": "HTTP is modeled as scheduled TCP byte transfers; no HTTP requests or TLS handshake are executed. The server initiates the transfer to the client, unlike a normal HTTP download.",
+        "ftp": "FTP is modeled as a TCP byte transfer; FTP control and data sessions are not executed.",
+        "voip": "VoIP is modeled as two UDP flows with codec-based sizes and rates; RTP headers and a receiver jitter buffer are not implemented. MOS is an estimate.",
+        "video": "Video uses a TCP flow; quality, buffer and stalls are estimated after the run. No HLS/DASH segments are requested and ABR does not change transmitted traffic.",
+        "http3": "HTTP/3 is modeled as independent UDP flows; QUIC, TLS, multiplexing, recovery and 0-RTT handshakes are not executed.",
+    }
+    groups = {}
+    for index, app in enumerate(scenario.get("apps") or []):
+        kind = app.get("type")
+        if kind not in messages:
+            continue
+        item = groups.setdefault(kind, {"code": f"application.{kind}_model", "severity": "warning",
+                                        "message": messages[kind], "count": 0, "paths": []})
+        item["count"] += 1
+        if len(item["paths"]) < 10:
+            item["paths"].append(f"scenario.apps.{index}")
+    return list(groups.values())
+
+
 def ns3_options(project, scenario):
     requested = scenario.get("ns3_fast", False)
     forced = os.environ.get("NETLAB_NS3_FAST") == "1"
@@ -20,7 +42,7 @@ def ns3_options(project, scenario):
 
 def issues(project, scenario, engine):
     """Inspect validated execution inputs; group paths to bound response size."""
-    groups = {}
+    groups = {item["code"]: item for item in application_issues(scenario)}
 
     def add(code, severity, message, path):
         item = groups.setdefault(code, {"code": code, "severity": severity, "message": message,

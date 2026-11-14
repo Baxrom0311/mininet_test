@@ -154,6 +154,26 @@ Demo rejim UI'ni o'rganish va topologiya chizish uchun. Unda L2/L3 forwarding
 soddalashtirilgan (ping/traceroute, routing jadvallari, paket animatsiyasi), lekin
 haqiqiy FRR/P4/SDN kodi bajarilmaydi.
 
+### Ilova profillari: model va haqiqiy protokol farqi
+
+Quyidagi cheklovlar **real Mininet dvigatelida ham** amal qiladi. Haqiqiy Linux
+TCP/UDP paketlari yuborilishi yuqori darajadagi ilova protokoli bajarilganini
+anglatmaydi. Preflight cheklovlarni ogohlantirish sifatida ko‘rsatadi; ular
+natijada `application_warnings` va `notes` ichida ham saqlanadi.
+
+| Profil | Amaldagi bajarilish |
+|---|---|
+| HTTP | Davriy TCP bayt uzatish; HTTP so‘rovi yoki TLS handshake yo‘q. Ulanishni server mijozga qarab boshlaydi, shu sabab NAT/firewall natijalari odatiy HTTP download’dan farq qilishi mumkin. |
+| FTP | Cheklangan TCP uzatish; FTP control/data protokoli bajarilmaydi. |
+| VoIP | Kodek hajmi/tezligidagi ikki UDP oqimi; haqiqiy RTP header va receiver jitter buferi yo‘q. MOS taxminiy. |
+| Video | TCP oqimi; sifat, bufer va qotish keyin hisoblanadi. HLS/DASH segmentlari yuklanmaydi, ABR yuborilayotgan trafikni o‘zgartirmaydi. |
+| HTTP/3 | Mustaqil UDP oqimlari; haqiqiy QUIC/TLS, stream multiplexing, recovery va 0-RTT handshake yo‘q. |
+
+Ogohlantirishlar mavjud ssenariylarni ishga tushirishga to‘sqinlik qilmaydi.
+Analitik dvigatelda TCP/UDP ham oqim modeli, ns-3’da esa simulyatsiya qilingan
+paketlardir; real Mininet bilan bu farq saqlanadi. Haqiqiy protokol talab
+qilinadigan tajribada tegishli client/server va paket darajasidagi tekshiruv kerak.
+
 Alohida oynada ochish uchun (pywebview kerak): `python3 -m lab.netlab --window`.
 
 ## Interfeys (React + shadcn/ui)

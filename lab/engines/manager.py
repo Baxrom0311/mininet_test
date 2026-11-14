@@ -366,6 +366,11 @@ class RunManager:
         res.update(run_id=run_id, project=pname, scenario_name=sc_name, scenario=sc_user, created=t0,
                    topology={"devices": len(project["devices"]), "links": len(project["links"])})
         res.setdefault("wall_s", round(time.time() - t0, 2))
+        from lab.engines.preflight import application_issues
+        application_warnings = application_issues(sc_user)
+        if application_warnings:
+            res["application_warnings"] = application_warnings
+            res.setdefault("notes", []).extend(item["message"] for item in application_warnings)
         res["reproducibility"] = provenance
         if extra:
             res.update(extra)
